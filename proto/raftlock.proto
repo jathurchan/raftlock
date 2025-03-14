@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package raftlock;
+
+option go_package = "./proto";
+
+service RaftLock {
+    // Acquire a lock
+    rpc Lock (LockRequest) returns (LockResponse);
+
+    // Release a lock
+    rpc Unlock (UnlockRequest) returns (UnlockResponse);
+}
+
+message LockRequest {
+    string resource_id = 1; // Identifier of the resource to be locked
+    string client_id = 2;   // Unique identifier for the requesting client
+    int64 ttl_seconds = 3;  // (Optional) Time-to-live for the lock in seconds
+}
+
+message LockResponse {
+    bool success = 1;       // Indicates whether the lock was successfully acquired
+    string message = 2;     // Provides additional details or failure reason, if applicable
+}
+
+message UnlockRequest {
+    string resource_id = 1;
+    string client_id = 2;
+}
+
+message UnlockResponse {
+    bool success = 1;
+    string message = 2;
+}

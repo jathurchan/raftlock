@@ -1,0 +1,27 @@
+services:
+  node1:
+    build: .
+    container_name: raftlock_node1
+    ports:
+      - "5001:50051"
+    environment:
+      - NODE_ID=1
+      - CLUSTER_NODES=node1:50051,node2:50051,node3:50051
+  
+  node2:
+    build: .
+    container_name: raftlock_node2
+    ports:
+      - "5002:50051"
+    environment:
+      - NODE_ID=2
+      - CLUSTER_NODES=node1:50051,node2:50051,node3:50051
+  
+  node3:
+    build: .
+    container_name: raftlock_node3
+    ports:
+      - "5003:50051"
+    environment:
+      - NODE_ID=3
+      - CLUSTER_NODES=node1:50051,node2:50051,node3:50051
