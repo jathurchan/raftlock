@@ -7,13 +7,13 @@ import (
 func TestStateString(t *testing.T) {
 	tests := []struct {
 		name     string
-		state    State
+		state    RaftState
 		expected string
 	}{
 		{"follower", Follower, "Follower"},
 		{"candidate", Candidate, "Candidate"},
 		{"leader", Leader, "Leader"},
-		{"invalid_state", State(3), "Unknown"},
+		{"invalid_state", RaftState(3), "Unknown"},
 	}
 
 	for _, tt := range tests {
@@ -28,13 +28,13 @@ func TestStateString(t *testing.T) {
 func TestStateIsValid(t *testing.T) {
 	tests := []struct {
 		name     string
-		state    State
+		state    RaftState
 		expected bool
 	}{
 		{"follower is valid", Follower, true},
 		{"candidate is valid", Candidate, true},
 		{"leader is valid", Leader, true},
-		{"out of range state is invalid", State(3), false},
+		{"out of range state is invalid", RaftState(3), false},
 	}
 
 	for _, tt := range tests {
@@ -49,8 +49,8 @@ func TestStateIsValid(t *testing.T) {
 func TestStateCanTransitionTo(t *testing.T) {
 	tests := []struct {
 		name         string
-		currentState State
-		targetState  State
+		currentState RaftState
+		targetState  RaftState
 		expected     bool
 	}{
 		// Valid transitions
@@ -64,8 +64,8 @@ func TestStateCanTransitionTo(t *testing.T) {
 		{"follower to leader", Follower, Leader, false},
 		{"follower to follower", Follower, Follower, false},
 		{"leader to candidate", Leader, Candidate, false},
-		{"invalid state to any", State(3), Follower, false},
-		{"any to invalid state", Follower, State(3), false},
+		{"invalid state to any", RaftState(3), Follower, false},
+		{"any to invalid state", Follower, RaftState(3), false},
 	}
 
 	for _, tt := range tests {

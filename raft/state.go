@@ -2,16 +2,16 @@ package raft
 
 import "slices"
 
-// State represents the role a server plays in the Raft consensus algorithm.
+// RaftState represents the role a server plays in the Raft consensus algorithm.
 // At any given time, each server in the Raft cluster is in one of three states.
-type State int
+type RaftState int
 
 const (
 	// Follower is the default state of a Raft server when it starts up.
 	// - Followers do not initiate actions on their own and only respond to requests from other servers.
 	// - If a Follower receives a heartbeat (`AppendEntries` RPC) from a valid Leader, it resets its election timeout.
 	// - Else, it transitions to Candidate and starts a new election.
-	Follower State = iota
+	Follower RaftState = iota
 
 	// Candidate is the state a server enters when it times out without hearing from a Leader.
 	// - A Candidate starts a new election by incrementing its term and sending `RequestVote` RPCs to other servers.
@@ -29,7 +29,7 @@ const (
 )
 
 // String helps with making state values more readable in logs and debug output.
-func (s State) String() string {
+func (s RaftState) String() string {
 	switch s {
 	case Follower:
 		return "Follower"
@@ -43,19 +43,19 @@ func (s State) String() string {
 }
 
 // IsValid checks if the state is one of the valid Raft states.
-func (s State) IsValid() bool {
+func (s RaftState) IsValid() bool {
 	return s == Follower || s == Candidate || s == Leader
 }
 
 // transitions maps the valid state transitions in the Raft algorithm.
-var transitions = map[State][]State{
+var transitions = map[RaftState][]RaftState{
 	Follower:  {Candidate},
 	Candidate: {Follower, Candidate, Leader},
 	Leader:    {Leader},
 }
 
 // CanTransitionTo checks if a transition from the current state to the target state is valid.
-func (s State) CanTransitionTo(target State) bool {
+func (s RaftState) CanTransitionTo(target RaftState) bool {
 	validTargets, exists := transitions[s]
 	if !exists {
 		return false
