@@ -35,20 +35,20 @@ type Storage interface {
 	// Core functionality for Raft's log replication.
 	// The operation must be atomic: either all entries are appended, or none are.
 	// Returns an error if the append operation fails.
-	AppendEntries(entries []pb.LogEntry) error
+	AppendEntries(entries []*pb.LogEntry) error
 
 	// Retrieves a slice of log entries within the specified index range [low, high).
 	// The 'low' index is inclusive, and the 'high' index is exclusive.
 	// Used for log replication, snapshotting, and leader election.
 	// Returns the slice of log entries and an error, or ErrIndexOutOfRange if low > high.
 	// Returns an empty slice if no entries match the range.
-	GetEntries(low, high uint64) ([]pb.LogEntry, error)
+	GetEntries(low, high uint64) ([]*pb.LogEntry, error)
 
 	// Retrieves a single log entry at the given index.
 	// Useful for retrieving specific log entries.
 	// Returns the log entry and an error.
 	// Returns ErrNotFound if the entry does not exist at the specified index.
-	GetEntry(index uint64) (pb.LogEntry, error)
+	GetEntry(index uint64) (*pb.LogEntry, error)
 
 	// Returns the index of the last log entry in the Raft log.
 	// Crucial for log replication and other operations.
