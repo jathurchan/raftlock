@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	pb "github.com/jathurchan/raftlock/proto"
 )
@@ -13,7 +12,7 @@ var (
 	ErrNotFound        = errors.New("raft: log entry not found")
 	ErrCorruptedData   = errors.New("raft: corrupted storage data")
 	ErrIndexOutOfRange = errors.New("raft: log index out of range")
-	ErrNotImplemented  = errors.New("raft: operation not implemented")
+	ErrNotImplemented  = errors.New("raft: not implemented yet")
 )
 
 // RaftState represents the persistent state of a Raft node.
@@ -77,12 +76,8 @@ const (
 
 // StorageConfig contains configuration for storage.
 type StorageConfig struct {
-	Type               StorageType   // Type of storage to use
-	Dir                string        // Directory to store persistent data
-	SyncWrites         bool          // Whether to sync writes to disk immediately (fsync)
-	CompactionInterval time.Duration // How often TruncatePrefix is called to remove already applied entries
-	MaxLogSize         int64         // Maximum size of the log in bytes before compaction
-	MaxLogEntries      uint64        // Maximum number of log entries to keep
+	Type StorageType // Type of storage to use
+	Dir  string      // Directory to store persistent data
 
 }
 
@@ -90,7 +85,7 @@ type StorageConfig struct {
 func DefaultStorageConfig() *StorageConfig {
 	return &StorageConfig{
 		Type: FileStorageType,
-		Dir:  "data/raft",
+		Dir:  "../data/raft",
 	}
 }
 
