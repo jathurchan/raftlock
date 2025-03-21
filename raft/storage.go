@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	pb "github.com/jathurchan/raftlock/proto"
@@ -103,10 +102,6 @@ func DefaultStorageConfig() *StorageConfig {
 func NewStorage(config *StorageConfig) (Storage, error) {
 	if config == nil {
 		config = DefaultStorageConfig()
-	}
-	// Ensure directory exits
-	if err := os.MkdirAll(config.Dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 	switch config.Type {
 	case MemoryStorageType:
