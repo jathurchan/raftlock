@@ -85,16 +85,48 @@ func (fs *FileStorage) loadMetadata() error {
 	return json.Unmarshal(data, fs.metadata)
 }
 
-// Persists the Raft node's current term and votedFor information.
-// Ensures thread safety and crash resilience by writing to a temporary file
-// first, then renaming it to the target file path.
+// Persists the Raft node's current term and votedFor information to disk.
+// Ensures thread safety via locking and crash resilience by writing to a temporary file
+// and atomically renaming it to the final state file path.
 func (fs *FileStorage) SaveState(ctx context.Context, state RaftState) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fs.stateMu.Lock()
+	defer fs.stateMu.Unlock()
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	tmpFile := fs.stateFile() + ".tmp"
+	if err := os.WriteFile(tmpFile, data, OwnRWOthR); err != nil {
+		return err
+	}
+	return os.Rename(tmpFile, fs.stateFile())
 }
 
-// Retrieves the Raft node's persisted term and votedFor information.
+// Retrieves the persisted Raft state from disk, including the current term
+// and the candidate the node voted for in that term. If the state file does not exist,
+// it returns the default initial state. Returns an error if the file is unreadable
+// or contains corrupted data.
 func (fs *FileStorage) LoadState(ctx context.Context) (RaftState, error) {
-	return RaftState{}, ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return RaftState{}, err
+	}
+	fs.stateMu.RLock()
+	defer fs.stateMu.RUnlock()
+	var state RaftState
+	data, err := os.ReadFile(fs.stateFile())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return RaftState{CurrentTerm: 0, VotedFor: -1}, nil
+		}
+		return state, err
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, ErrCorruptedData
+	}
+	return state, nil
 }
 
 // Persists metadata about the log structure.

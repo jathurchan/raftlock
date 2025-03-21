@@ -26,13 +26,24 @@ func NewMemoryStorage() (Storage, error) {
 // Persists the Raft node's current term and votedFor information.
 // Always returns nil (no error) as this is an in-memory operation.
 func (ms *MemoryStorage) SaveState(ctx context.Context, state RaftState) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.state = state
+	return nil
 }
 
 // Retrieves the Raft node's persisted term and votedFor information.
 // Always returns nil (no error) for error as this is an in-memory operation.
 func (ms *MemoryStorage) LoadState(ctx context.Context) (RaftState, error) {
-	return RaftState{}, ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return RaftState{}, err
+	}
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	return ms.state, nil
 }
 
 // Appends one or more log entries to the Raft log.
