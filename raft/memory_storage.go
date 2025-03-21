@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"context"
 	"sync"
 
 	pb "github.com/jathurchan/raftlock/proto"
@@ -15,16 +16,16 @@ type MemoryStorage struct {
 }
 
 // Creates a new MemoryStorage instance.
-func NewMemoryStorage() *MemoryStorage {
+func NewMemoryStorage() (Storage, error) {
 	return &MemoryStorage{
 		state: RaftState{CurrentTerm: 0, VotedFor: -1},
 		log:   []*pb.LogEntry{},
-	}
+	}, nil
 }
 
 // Persists the Raft node's current term and votedFor information.
 // Always returns nil (no error) as this is an in-memory operation.
-func (ms *MemoryStorage) SaveState(state RaftState) error {
+func (ms *MemoryStorage) SaveState(ctx context.Context, state RaftState) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.state = state
@@ -33,7 +34,7 @@ func (ms *MemoryStorage) SaveState(state RaftState) error {
 
 // Retrieves the Raft node's persisted term and votedFor information.
 // Always returns nil (no error) for error as this is an in-memory operation.
-func (ms *MemoryStorage) LoadState() (RaftState, error) {
+func (ms *MemoryStorage) LoadState(ctx context.Context) (RaftState, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	return ms.state, nil
@@ -41,7 +42,7 @@ func (ms *MemoryStorage) LoadState() (RaftState, error) {
 
 // Appends one or more log entries to the Raft log.
 // Always returns nil (no error) as this is an in-memory operation.
-func (ms *MemoryStorage) AppendEntries(entries []*pb.LogEntry) error {
+func (ms *MemoryStorage) AppendEntries(ctx context.Context, entries []*pb.LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -52,9 +53,10 @@ func (ms *MemoryStorage) AppendEntries(entries []*pb.LogEntry) error {
 }
 
 // GetEntries returns log entries in range [low, high).
+// The 'low' index is inclusive, and the 'high' index is exclusive.
 // Adjusts range to available entries. Returns empty slice if no entries in range.
 // Returns ErrIndexOutOfRange if low > high.
-func (ms *MemoryStorage) GetEntries(low, high uint64) ([]*pb.LogEntry, error) {
+func (ms *MemoryStorage) GetEntries(ctx context.Context, low, high uint64) ([]*pb.LogEntry, error) {
 	if low > high {
 		return nil, ErrIndexOutOfRange
 	}
@@ -83,7 +85,7 @@ func (ms *MemoryStorage) GetEntries(low, high uint64) ([]*pb.LogEntry, error) {
 
 // Retrieves the log entry at the specified index.
 // Returns ErrNotFound if not available.
-func (ms *MemoryStorage) GetEntry(index uint64) (*pb.LogEntry, error) {
+func (ms *MemoryStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	if len(ms.log) == 0 {
@@ -99,61 +101,69 @@ func (ms *MemoryStorage) GetEntry(index uint64) (*pb.LogEntry, error) {
 }
 
 // Returns the index of the last log entry.
-func (ms *MemoryStorage) LastIndex() (uint64, error) {
+func (ms *MemoryStorage) LastIndex() uint64 {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	if len(ms.log) == 0 {
-		return 0, nil
+		return 0
 	}
-	return ms.log[len(ms.log)-1].Index, nil
+	return ms.log[len(ms.log)-1].Index
 }
 
 // Returns the index of the first log entry.
-func (ms *MemoryStorage) FirstIndex() (uint64, error) {
+func (ms *MemoryStorage) FirstIndex() uint64 {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	if len(ms.log) == 0 {
-		return 0, nil
+		return 0
 	}
-	return ms.log[0].Index, nil
+	return ms.log[0].Index
 }
 
-// Helper method to handle both prefix and suffix truncating.
-func (ms *MemoryStorage) truncateLog(index uint64, isPrefix bool) {
+// Helper method to rewrite the Raft log file to only include entries in the range [low, high).
+// It's used by both TruncatePrefix and TruncateSuffix to discard unwanted log entries.
+func (ms *MemoryStorage) truncateLog(ctx context.Context, low, high uint64) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	if len(ms.log) == 0 {
-		return
+		return nil
 	}
 	firstIndex := ms.log[0].Index
 	lastIndex := ms.log[len(ms.log)-1].Index
 
-	if (isPrefix && index >= lastIndex) || (!isPrefix && index <= firstIndex) {
-		// truncate all entries
-		ms.log = []*pb.LogEntry{}
-		return
+	if low > lastIndex || high <= firstIndex {
+		return nil
 	}
-	if (isPrefix && index < firstIndex) || (!isPrefix && index > lastIndex) {
-		// No entries to truncate
-		return
+
+	if low < firstIndex {
+		low = firstIndex
 	}
-	offset := index - firstIndex
-	if isPrefix {
-		offset++
-		ms.log = ms.log[offset:]
-	} else {
-		ms.log = ms.log[:offset]
+	if high > lastIndex+1 {
+		high = lastIndex + 1
 	}
+
+	lowOffset := low - firstIndex
+	highOffset := high - firstIndex
+
+	// Create new log with entries in range [low, high)
+	ms.log = ms.log[lowOffset:highOffset]
+
+	return nil
 }
 
 // Removes all log entries with indices greater than or equal to the given index.
-func (ms *MemoryStorage) TruncateSuffix(index uint64) error {
-	ms.truncateLog(index, false)
+func (ms *MemoryStorage) TruncateSuffix(ctx context.Context, index uint64) error {
+	ms.truncateLog(ctx, ms.FirstIndex(), index)
 	return nil
 }
 
 // Removes all log entries with indices less than or equal to the given index.
-func (ms *MemoryStorage) TruncatePrefix(index uint64) error {
-	ms.truncateLog(index, true)
+func (ms *MemoryStorage) TruncatePrefix(ctx context.Context, index uint64) error {
+	ms.truncateLog(ctx, index, ms.LastIndex()+1)
+	return nil
+}
+
+// Releases resources (no-op for MemoryStorage).
+func (ms *MemoryStorage) Close() error {
 	return nil
 }

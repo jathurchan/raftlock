@@ -47,11 +47,11 @@ type Storage interface {
 
 	// Returns the index of the last log entry in the Raft log.
 	// Returns 0 if the log is empty.
-	LastIndex() (uint64, error)
+	LastIndex() uint64
 
 	// Returns the index of the first log entry in the Raft log.
 	// Returns 0 if the log is empty.
-	FirstIndex() (uint64, error)
+	FirstIndex() uint64
 
 	// Removes all log entries with indices >= the given index.
 	// Used when conflicting entries are found during log replication.
@@ -89,12 +89,8 @@ type StorageConfig struct {
 // Returns a default configuration for storage.
 func DefaultStorageConfig() *StorageConfig {
 	return &StorageConfig{
-		Type:               FileStorageType,
-		Dir:                "data/raft",
-		SyncWrites:         true,
-		CompactionInterval: 1 * time.Hour,
-		MaxLogSize:         1024 * 1024 * 100, // 100 MB
-		MaxLogEntries:      50000,             // 50 000 entries
+		Type: FileStorageType,
+		Dir:  "data/raft",
 	}
 }
 
@@ -106,6 +102,8 @@ func NewStorage(config *StorageConfig) (Storage, error) {
 	switch config.Type {
 	case MemoryStorageType:
 		return NewMemoryStorage()
+	case FileStorageType:
+		return NewFileStorage(config)
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", config.Type)
 	}
