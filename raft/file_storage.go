@@ -2,13 +2,17 @@ package raft
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
 
 	pb "github.com/jathurchan/raftlock/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -129,38 +133,248 @@ func (fs *FileStorage) LoadState(ctx context.Context) (RaftState, error) {
 	return state, nil
 }
 
-// Persists metadata about the log structure.
+// Helper method to write the current log metadata to disk atomically.
+// It first marshals the metadata to JSON, writes it to a temporary file,
+// and then renames it to the actual metadata file name.
 func (fs *FileStorage) saveMetadata() error {
-	return ErrNotImplemented
+	data, err := json.Marshal(fs.metadata)
+	if err != nil {
+		return err
+	}
+
+	tmpFile := fs.metadataFile() + ".tmp"
+	if err := os.WriteFile(tmpFile, data, OwnRWOthR); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpFile, fs.metadataFile())
 }
 
 // Appends one or more log entries to the Raft log.
+// It handles locking, updates metadata, writes entries, and persists metadata.
 func (fs *FileStorage) AppendEntries(ctx context.Context, entries []*pb.LogEntry) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	fs.logMu.Lock()
+	defer fs.logMu.Unlock()
+
+	file, endPos, err := fs.openLogFile()
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if fs.isFirstEntry() {
+		fs.metadata.FirstIndex = entries[0].Index
+	}
+	fs.metadata.LastIndex = entries[len(entries)-1].Index
+
+	if err := fs.writeEntries(file, entries, endPos); err != nil {
+		return err
+	}
+
+	return fs.saveMetadata()
 }
 
-// Retrieves a slice of log entries within the specified index range [low, high).
-// The 'low' index is inclusive, and the 'high' index is exclusive.
-// Adjusts range to available entries. Returns empty slice if no entries in range.
+// Helper method to open the log file in append mode and seeks to the end.
+// Returns the file handle and the position to rollback to in case of error.
+func (fs *FileStorage) openLogFile() (*os.File, int64, error) {
+	file, err := os.OpenFile(fs.logFile(), os.O_WRONLY|os.O_CREATE|os.O_APPEND, OwnRWOthR)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	endPos, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		file.Close()
+		return nil, 0, err
+	}
+
+	return file, endPos, nil
+}
+
+// Helper method to encode and write a batch of log entries to the file.
+// If any entry fails to write, the file is truncated to its original position.
+func (fs *FileStorage) writeEntries(file *os.File, entries []*pb.LogEntry, rollbackPos int64) error {
+	for _, entry := range entries {
+		record, err := fs.encodeEntry(entry)
+		if err != nil {
+			return ErrCorruptedData
+		}
+		if _, err := file.Write(record); err != nil {
+			_ = file.Truncate(rollbackPos) // rollback on failure
+			return err
+		}
+	}
+	return nil
+}
+
+// Helper method to serialize a log entry and prefix it with its length.
+func (fs *FileStorage) encodeEntry(entry *pb.LogEntry) ([]byte, error) {
+	data, err := proto.Marshal(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	lenPrefix := make([]byte, 4)
+	binary.BigEndian.PutUint32(lenPrefix, uint32(len(data)))
+	return append(lenPrefix, data...), nil
+}
+
+// Helper method to return true if there are no log entries stored yet.
+func (fs *FileStorage) isFirstEntry() bool {
+	return fs.metadata.FirstIndex == 0 && fs.metadata.LastIndex == 0
+}
+
+// Returns log entries in the range [low, high).
+// Log indices start at 1. 'low' is inclusive, 'high' is exclusive.
+// The range is automatically adjusted to the available entries.
+// Returns an empty slice if adjusted range is invalid.
 // Returns ErrIndexOutOfRange if low > high.
-// Assumes log entries are stored in sequential order by index.
 func (fs *FileStorage) GetEntries(ctx context.Context, low, high uint64) ([]*pb.LogEntry, error) {
-	return nil, ErrNotImplemented
+	if low > high {
+		return nil, ErrIndexOutOfRange
+	}
+	fs.logMu.RLock()
+	defer fs.logMu.RUnlock()
+	first := fs.metadata.FirstIndex
+	last := fs.metadata.LastIndex
+	if first == 0 || low > last || high <= first {
+		return []*pb.LogEntry{}, nil
+	}
+	low = max(low, first)
+	high = min(high, last+1)
+	if low >= high {
+		return []*pb.LogEntry{}, nil
+	}
+	file, err := os.Open(fs.logFile())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*pb.LogEntry{}, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	return fs.readEntriesInRange(ctx, file, low, high)
+}
+
+// Helper method to read log entries within the [low, high) range from the provided file.
+// Assumes entries are length-prefixed and encoded using protobuf.
+func (fs *FileStorage) readEntriesInRange(ctx context.Context, file *os.File, low, high uint64) ([]*pb.LogEntry, error) {
+	var entries []*pb.LogEntry
+	lenBuf := make([]byte, 4)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Read 4-byte length prefix
+		if _, err := io.ReadFull(file, lenBuf); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		length := binary.BigEndian.Uint32(lenBuf)
+		if length == 0 {
+			continue
+		}
+		data := make([]byte, length)
+		if _, err := io.ReadFull(file, data); err != nil {
+			return nil, ErrCorruptedData
+		}
+		entry := &pb.LogEntry{}
+		if err := proto.Unmarshal(data, entry); err != nil {
+			return nil, ErrCorruptedData
+		}
+		// Skip until we reach `low`, stop after reaching `high`
+		if entry.Index >= high {
+			break
+		}
+		if entry.Index >= low {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
 }
 
 // Retrieves a single log entry at the given index.
+// Returns ErrIndexOutOfRange if the index is outside the known range.
+// Returns nil, nil if the entry is not found (e.g., truncated or corrupted).
 func (fs *FileStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry, error) {
-	return nil, ErrNotImplemented
+	fs.logMu.RLock()
+	defer fs.logMu.RUnlock()
+	first := fs.metadata.FirstIndex
+	last := fs.metadata.LastIndex
+	if index < first || index > last {
+		return nil, ErrIndexOutOfRange
+	}
+	file, err := os.Open(fs.logFile())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+	return fs.readSingleEntry(ctx, file, index)
+}
+
+// Helper method to scan the file and returns the entry with the exact index.
+// Returns nil, nil if not found.
+func (fs *FileStorage) readSingleEntry(ctx context.Context, file *os.File, index uint64) (*pb.LogEntry, error) {
+	lenBuf := make([]byte, 4)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Read 4-byte length prefix
+		if _, err := io.ReadFull(file, lenBuf); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		length := binary.BigEndian.Uint32(lenBuf)
+		if length == 0 {
+			continue
+		}
+		data := make([]byte, length)
+		if _, err := io.ReadFull(file, data); err != nil {
+			return nil, ErrCorruptedData
+		}
+		entry := &pb.LogEntry{}
+		if err := proto.Unmarshal(data, entry); err != nil {
+			return nil, ErrCorruptedData
+		}
+		if entry.Index == index {
+			return entry, nil
+		}
+		if entry.Index > index {
+			break // We've passed the desired index
+		}
+	}
+	return nil, ErrNotFound
 }
 
 // Returns the index of the last log entry.
 func (fs *FileStorage) LastIndex() uint64 {
-	return 0
+	fs.logMu.RLock()
+	defer fs.logMu.RUnlock()
+	return fs.metadata.LastIndex
 }
 
 // FirstIndex returns the index of the first log entry.
 func (fs *FileStorage) FirstIndex() uint64 {
-	return 0
+	fs.logMu.RLock()
+	defer fs.logMu.RUnlock()
+	return fs.metadata.FirstIndex
 }
 
 // Removes all log entries with indices greater than or equal to the given index.

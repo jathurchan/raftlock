@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -66,7 +67,6 @@ func testSaveAndLoadState(t *testing.T, s Storage) {
 // append log entries and retrieve them with various range queries.
 func testAppendAndGetEntries(t *testing.T, s Storage) {
 	ctx := context.Background()
-
 	// Initially the log should be empty
 	assertEqual(t, uint64(0), s.FirstIndex())
 	assertEqual(t, uint64(0), s.LastIndex())
@@ -91,7 +91,7 @@ func testAppendAndGetEntries(t *testing.T, s Storage) {
 	assertNoError(t, err)
 	assertEqual(t, uint64(1), entry.Term)
 	assertEqual(t, uint64(3), entry.Index)
-	assertEqual(t, []byte("command3"), entry.Command)
+	assertBytesEqual(t, []byte("command3"), entry.Command)
 
 	// Get entries in a range
 	rangeEntries, err := s.GetEntries(ctx, 2, 5)
@@ -108,7 +108,7 @@ func testAppendAndGetEntries(t *testing.T, s Storage) {
 
 	// Get out of range - index too high
 	nonExistentEntry, err := s.GetEntry(ctx, 10)
-	assertErrorIs(t, err, ErrNotFound)
+	assertErrorIs(t, err, ErrIndexOutOfRange)
 	if nonExistentEntry != nil {
 		t.Errorf("Expected nil entry, got: %v", nonExistentEntry)
 	}
@@ -315,10 +315,10 @@ func testAppendOverwrite(t *testing.T, s Storage) {
 	entries, err := s.GetEntries(ctx, 1, 5)
 	assertNoError(t, err)
 	assertEqual(t, 4, len(entries))
-	assertEqual(t, []byte("cmd1"), entries[0].Command)
-	assertEqual(t, []byte("new2"), entries[1].Command)
-	assertEqual(t, []byte("new3"), entries[2].Command)
-	assertEqual(t, []byte("new4"), entries[3].Command)
+	assertBytesEqual(t, []byte("cmd1"), entries[0].Command)
+	assertBytesEqual(t, []byte("new2"), entries[1].Command)
+	assertBytesEqual(t, []byte("new3"), entries[2].Command)
+	assertBytesEqual(t, []byte("new4"), entries[3].Command)
 }
 
 // Verifies that appending entries with non-contiguous
@@ -565,8 +565,8 @@ func TestFilePersistence(t *testing.T) {
 	assertEqual(t, 2, len(loadedEntries))
 	assertEqual(t, uint64(1), loadedEntries[0].Index)
 	assertEqual(t, uint64(2), loadedEntries[1].Index)
-	assertEqual(t, []byte("command1"), loadedEntries[0].Command)
-	assertEqual(t, []byte("command2"), loadedEntries[1].Command)
+	assertBytesEqual(t, []byte("command1"), loadedEntries[0].Command)
+	assertBytesEqual(t, []byte("command2"), loadedEntries[1].Command)
 }
 
 // Tests FileStorage's handling of corrupted state data.
@@ -658,6 +658,12 @@ func TestDefaultStorageConfig(t *testing.T) {
 func assertEqual(t *testing.T, expected, actual any) {
 	t.Helper()
 	if expected != actual {
+		t.Errorf("Expected %v, got %v", expected, actual)
+	}
+}
+
+func assertBytesEqual(t *testing.T, expected, actual []byte) {
+	if !bytes.Equal(expected, actual) {
 		t.Errorf("Expected %v, got %v", expected, actual)
 	}
 }
