@@ -1,4 +1,4 @@
-# RaftLock
+# RaftLock [![Go Test and Coverage](https://github.com/jathurchan/raftlock/actions/workflows/go-test.yml/badge.svg)](https://github.com/jathurchan/raftlock/actions/workflows/go-test.yml)
 
 RaftLock is a **distributed lock service** built using Raft consensus. It provides **mutual exclusion** for distributed applications.
 

@@ -1402,14 +1402,12 @@ func TestEntryValidationLogic(t *testing.T) {
 	storage, err := NewFileStorage(config)
 	tu.RequireNoError(t, err)
 	ctx := context.Background()
-
 	// Test case 1: First entry must have index 1
 	invalidFirstEntries := []*pb.LogEntry{
 		{Index: 0, Term: 1, Command: []byte("invalid-zero-index")},
 	}
 	err = storage.AppendEntries(ctx, invalidFirstEntries)
 	tu.AssertError(t, err)
-
 	// Test case 2: Entries must be in order
 	outOfOrderEntries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},
@@ -1418,28 +1416,24 @@ func TestEntryValidationLogic(t *testing.T) {
 	}
 	err = storage.AppendEntries(ctx, outOfOrderEntries)
 	tu.AssertError(t, err)
-
 	// Test case 3: Add a valid entry
 	validEntries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},
 	}
 	err = storage.AppendEntries(ctx, validEntries)
 	tu.RequireNoError(t, err)
-
 	// Now try adding non-contiguous entries
 	nonContiguousEntries := []*pb.LogEntry{
 		{Index: 3, Term: 1, Command: []byte("third")},
 	}
 	err = storage.AppendEntries(ctx, nonContiguousEntries)
 	tu.AssertError(t, err)
-
 	// Test adding the next contiguous entry
 	nextEntry := []*pb.LogEntry{
 		{Index: 2, Term: 1, Command: []byte("second")},
 	}
 	err = storage.AppendEntries(ctx, nextEntry)
 	tu.RequireNoError(t, err)
-
 	// Test case 4: Entries must have sequential indices
 	// First add entry with index 3
 	entry3 := []*pb.LogEntry{
@@ -1447,7 +1441,6 @@ func TestEntryValidationLogic(t *testing.T) {
 	}
 	err = storage.AppendEntries(ctx, entry3)
 	tu.RequireNoError(t, err)
-
 	// Now try adding gapped entries - should fail
 	gappedEntries := []*pb.LogEntry{
 		{Index: 5, Term: 1, Command: []byte("fifth")},
@@ -1464,37 +1457,30 @@ func TestReadEntriesInRangeErrorCases(t *testing.T) {
 	tu.RequireNoError(t, err)
 	fs := storage.(*FileStorage)
 	ctx := context.Background()
-
 	// Create a log file with corrupted data
 	logFile := fs.logFile()
 	file, err := os.Create(logFile)
 	tu.RequireNoError(t, err)
-
 	// Write a valid length prefix followed by invalid data
 	_, err = file.Write([]byte{0, 0, 0, 10}) // Length prefix indicating 10 bytes
 	tu.RequireNoError(t, err)
 	_, err = file.Write([]byte{1, 2, 3}) // Only 3 bytes (less than the 10 indicated)
 	tu.RequireNoError(t, err)
 	file.Close()
-
 	// Set metadata as if we have one entry
 	fs.metadata.FirstIndex = 1
 	fs.metadata.LastIndex = 1
 	err = fs.saveMetadata()
 	tu.RequireNoError(t, err)
-
 	// Try to read entries - should fail with corrupted data
 	file, err = os.Open(logFile)
 	tu.RequireNoError(t, err)
 	defer file.Close()
-
 	_, err = fs.readEntriesInRange(ctx, file, 1, 2)
 	tu.AssertError(t, err)
-
 	// Test with context cancellation
 	canceledCtx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel the context immediately
-
+	cancel()        // Cancel the context immediately
 	file.Seek(0, 0) // Reset file position
 	_, err = fs.readEntriesInRange(canceledCtx, file, 1, 2)
 	tu.AssertError(t, err)
@@ -1507,10 +1493,8 @@ func TestLastEntryProperties(t *testing.T) {
 	storage, err := NewFileStorage(config)
 	tu.RequireNoError(t, err)
 	ctx := context.Background()
-
 	// Initial state should have LastIndex = 0
 	tu.AssertEqual(t, uint64(0), storage.LastIndex())
-
 	// Add entries
 	entries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},
@@ -1519,23 +1503,18 @@ func TestLastEntryProperties(t *testing.T) {
 	}
 	err = storage.AppendEntries(ctx, entries)
 	tu.RequireNoError(t, err)
-
 	// Check LastIndex
 	tu.AssertEqual(t, uint64(3), storage.LastIndex())
-
 	// Get the last entry
 	lastEntry, err := storage.GetEntry(ctx, storage.LastIndex())
 	tu.RequireNoError(t, err)
 	tu.AssertEqual(t, uint64(3), lastEntry.Index)
 	tu.AssertEqual(t, uint64(2), lastEntry.Term)
-
 	// Truncate suffix
 	err = storage.TruncateSuffix(ctx, 2)
 	tu.RequireNoError(t, err)
-
 	// Check LastIndex after truncation
 	tu.AssertEqual(t, uint64(1), storage.LastIndex())
-
 	// Get the new last entry
 	newLastEntry, err := storage.GetEntry(ctx, storage.LastIndex())
 	tu.RequireNoError(t, err)
@@ -1551,7 +1530,6 @@ func TestTemporaryFileCleanup(t *testing.T) {
 	tu.RequireNoError(t, err)
 	fs := storage.(*FileStorage)
 	ctx := context.Background()
-
 	// Add some entries
 	entries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},
@@ -1559,32 +1537,26 @@ func TestTemporaryFileCleanup(t *testing.T) {
 	}
 	err = storage.AppendEntries(ctx, entries)
 	tu.RequireNoError(t, err)
-
 	// Save state to generate temporary files
 	state := RaftState{CurrentTerm: 10, VotedFor: 2}
 	err = storage.SaveState(ctx, state)
 	tu.RequireNoError(t, err)
-
 	// Check that no temporary files exist
 	tmpStateFile := fs.stateFile() + ".tmp"
 	_, err = os.Stat(tmpStateFile)
 	tu.AssertError(t, err)
 	tu.AssertTrue(t, os.IsNotExist(err))
-
 	// Create a temp file manually to simulate an interrupted operation
 	tmpFile := filepath.Join(tempDir, "metadata.json.tmp")
 	f, err := os.Create(tmpFile)
 	tu.RequireNoError(t, err)
 	f.Close()
-
 	// Verify the temp file exists
 	_, err = os.Stat(tmpFile)
 	tu.AssertNoError(t, err)
-
 	// Create a new storage instance, which should clean up the temp file
 	_, err = NewFileStorage(config)
 	tu.RequireNoError(t, err)
-
 	// Verify temp file was removed
 	_, err = os.Stat(tmpFile)
 	tu.AssertError(t, err)
@@ -1598,7 +1570,6 @@ func TestGetEntriesBoundsChecking(t *testing.T) {
 	storage, err := NewFileStorage(config)
 	tu.RequireNoError(t, err)
 	ctx := context.Background()
-
 	// Add entries
 	entries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},
@@ -1607,41 +1578,33 @@ func TestGetEntriesBoundsChecking(t *testing.T) {
 	}
 	err = storage.AppendEntries(ctx, entries)
 	tu.RequireNoError(t, err)
-
 	// Test case 1: low < first index, high > last index
 	boundaryEntries, err := storage.GetEntries(ctx, 0, 5)
 	tu.RequireNoError(t, err)
 	tu.AssertLen(t, boundaryEntries, 3)
-
 	// Test case 2: low < first index, high = last index + 1
 	boundaryEntries, err = storage.GetEntries(ctx, 0, 4)
 	tu.RequireNoError(t, err)
 	tu.AssertLen(t, boundaryEntries, 3)
-
 	// Test case 3: low = first index, high > last index
 	boundaryEntries, err = storage.GetEntries(ctx, 1, 5)
 	tu.RequireNoError(t, err)
 	tu.AssertLen(t, boundaryEntries, 3)
-
 	// Test case 4: low > last index
 	boundaryEntries, err = storage.GetEntries(ctx, 4, 5)
 	tu.RequireNoError(t, err)
 	tu.AssertEmpty(t, boundaryEntries)
-
 	// Test case 5: high <= low
 	boundaryEntries, err = storage.GetEntries(ctx, 2, 2)
 	tu.RequireNoError(t, err)
 	tu.AssertEmpty(t, boundaryEntries)
-
 	// Test case 6: low < 0 (unsigned, so it becomes very large)
 	_, err = storage.GetEntries(ctx, ^uint64(0), 5)
 	tu.AssertError(t, err)
-
 	// Test case 7: low = first index, high = first index + 1
 	boundaryEntries, err = storage.GetEntries(ctx, 1, 2)
 	tu.RequireNoError(t, err)
 	tu.AssertLen(t, boundaryEntries, 1)
-
 	// Test case 8: low = last index, high = last index + 1
 	boundaryEntries, err = storage.GetEntries(ctx, 3, 4)
 	tu.RequireNoError(t, err)
@@ -1653,22 +1616,18 @@ func TestEmptyDirectoryCreation(t *testing.T) {
 	// Create a path to a non-existent directory
 	tempDir := createTempDir(t)
 	nonExistentDir := filepath.Join(tempDir, "non-existent-dir")
-
 	// Verify the directory doesn't exist
 	_, err := os.Stat(nonExistentDir)
 	tu.AssertError(t, err)
 	tu.AssertTrue(t, os.IsNotExist(err))
-
 	// Create storage with the non-existent directory
 	config := &StorageConfig{Dir: nonExistentDir}
 	storage, err := NewFileStorage(config)
 	tu.RequireNoError(t, err)
 	tu.RequireNotNil(t, storage)
-
 	// Verify the directory now exists
 	_, err = os.Stat(nonExistentDir)
 	tu.AssertNoError(t, err)
-
 	// Verify we can add entries
 	ctx := context.Background()
 	entries := []*pb.LogEntry{
@@ -1685,7 +1644,6 @@ func TestGetEntriesRangeValidation(t *testing.T) {
 	storage, err := NewFileStorage(config)
 	tu.RequireNoError(t, err)
 	ctx := context.Background()
-
 	// Add entries
 	entries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},
@@ -1694,28 +1652,23 @@ func TestGetEntriesRangeValidation(t *testing.T) {
 	}
 	err = storage.AppendEntries(ctx, entries)
 	tu.RequireNoError(t, err)
-
 	// Test negative range (low > high)
 	_, err = storage.GetEntries(ctx, 3, 2)
 	tu.AssertError(t, err)
 	tu.AssertErrorIs(t, err, ErrIndexOutOfRange)
-
 	// Test exact range match
 	exactEntries, err := storage.GetEntries(ctx, 1, 4)
 	tu.RequireNoError(t, err)
 	tu.AssertLen(t, exactEntries, 3)
-
 	// Test partial range
 	partialEntries, err := storage.GetEntries(ctx, 2, 3)
 	tu.RequireNoError(t, err)
 	tu.AssertLen(t, partialEntries, 1)
 	tu.AssertEqual(t, uint64(2), partialEntries[0].Index)
-
 	// Test empty range (high = low)
 	emptyEntries, err := storage.GetEntries(ctx, 2, 2)
 	tu.RequireNoError(t, err)
 	tu.AssertEmpty(t, emptyEntries)
-
 	// Test range beyond the end
 	beyondEntries, err := storage.GetEntries(ctx, 4, 10)
 	tu.RequireNoError(t, err)
@@ -1728,14 +1681,11 @@ func TestAppendEntriesTimeout(t *testing.T) {
 	config := &StorageConfig{Dir: tempDir}
 	storage, err := NewFileStorage(config)
 	tu.RequireNoError(t, err)
-
 	// Create a context with a short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
-
 	// Sleep to ensure timeout occurs
 	time.Sleep(10 * time.Millisecond)
-
 	// Try to append entries with expired context
 	entries := []*pb.LogEntry{
 		{Index: 1, Term: 1, Command: []byte("first")},

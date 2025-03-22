@@ -2,4 +2,4 @@
 .DS_Store
 
 *.pb.go
-*.out
+*.outg
