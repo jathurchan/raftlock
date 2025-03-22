@@ -15,8 +15,8 @@ service Raft {
 // LogEntry represents an entry in the replicated log.
 message LogEntry {
     uint64 term = 1;    // Term when entry was received by leader.
-    int64 index = 2;    // Index in the log.
-    bytes data = 3;     // Command to be applied to the state machine.
+    uint64 index = 2;    // Index in the log.
+    bytes command = 3;     // Command to be applied to the state machine.
 }
 
 message RequestVoteRequest {
