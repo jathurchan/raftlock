@@ -5,700 +5,751 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
 	pb "github.com/jathurchan/raftlock/proto"
 )
 
-// Storage Tests Overview:
-// - testSaveAndLoadState: Tests saving and loading Raft state (currentTerm, votedFor)
-// - testAppendAndGetEntries: Tests adding log entries and retrieving them
-// - testTruncateSuffix: Tests removing log entries from the end
-// - testTruncatePrefix: Tests removing log entries from the beginning
-// - testEmptyLog: Tests operations on an empty log
-// - testContextCancellation: Tests that operations respect context cancellation
-// - testAppendOverwrite: Tests overwriting existing entries
-// - testNonContiguousAppend: Tests error handling for non-contiguous appends
-// - testLargeAppend: Tests appending many entries at once
-// - testConcurrentAccess: Tests thread safety with concurrent operations
-// - testPersistence: Tests that data persists across storage restarts (FileStorage only)
-// - testCorruptedState: Tests handling of corrupted state data (FileStorage only)
+// Common test setup and teardown utilities
+type storageTestSuite struct {
+	t       *testing.T
+	ctx     context.Context
+	storage Storage
+	tempDir string
+}
 
-// Verifies that a storage implementation can correctly
-// save and load Raft state (currentTerm and votedFor).
-func testSaveAndLoadState(t *testing.T, s Storage) {
-	ctx := context.Background()
+// Setup creates a new storage instance for testing
+func setupStorageTest(t *testing.T, storageType StorageType) *storageTestSuite {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
 
-	// Initial state should be term 0, votedFor -1
-	initialState, err := s.LoadState(ctx)
+	var storage Storage
+	var err error
+	var tempDir string
+
+	if storageType == FileStorageType {
+		tempDir, err = os.MkdirTemp("", "raft-test-*")
+		if err != nil {
+			t.Fatalf("Failed to create temp directory: %v", err)
+		}
+		t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+		config := &StorageConfig{
+			Type: FileStorageType,
+			Dir:  tempDir,
+		}
+		storage, err = NewStorage(config)
+	} else {
+		storage, err = NewStorage(&StorageConfig{Type: MemoryStorageType})
+	}
 	if err != nil {
-		t.Fatalf("Failed to load initial state: %v", err)
+		t.Fatalf("Failed to create storage: %v", err)
 	}
-	assertEqual(t, uint64(0), initialState.CurrentTerm)
-	assertEqual(t, -1, initialState.VotedFor)
-
-	// Save a new state
-	newState := RaftState{CurrentTerm: 5, VotedFor: 2}
-	err = s.SaveState(ctx, newState)
-	assertNoError(t, err)
-
-	// Load it back and verify
-	loadedState, err := s.LoadState(ctx)
-	assertNoError(t, err)
-	assertEqual(t, newState.CurrentTerm, loadedState.CurrentTerm)
-	assertEqual(t, newState.VotedFor, loadedState.VotedFor)
-
-	// Update the state
-	updatedState := RaftState{CurrentTerm: 6, VotedFor: 3}
-	err = s.SaveState(ctx, updatedState)
-	assertNoError(t, err)
-
-	// Load it again and verify
-	loadedState, err = s.LoadState(ctx)
-	assertNoError(t, err)
-	assertEqual(t, updatedState.CurrentTerm, loadedState.CurrentTerm)
-	assertEqual(t, updatedState.VotedFor, loadedState.VotedFor)
-}
-
-// Verifies that a storage implementation can correctly
-// append log entries and retrieve them with various range queries.
-func testAppendAndGetEntries(t *testing.T, s Storage) {
-	ctx := context.Background()
-	// Initially the log should be empty
-	assertEqual(t, uint64(0), s.FirstIndex())
-	assertEqual(t, uint64(0), s.LastIndex())
-
-	// Append entries
-	entries := []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("command1")},
-		{Term: 1, Index: 2, Command: []byte("command2")},
-		{Term: 1, Index: 3, Command: []byte("command3")},
-		{Term: 2, Index: 4, Command: []byte("command4")},
-		{Term: 2, Index: 5, Command: []byte("command5")},
-	}
-	err := s.AppendEntries(ctx, entries)
-	assertNoError(t, err)
-
-	// Verify first and last indices
-	assertEqual(t, uint64(1), s.FirstIndex())
-	assertEqual(t, uint64(5), s.LastIndex())
-
-	// Get a single entry
-	entry, err := s.GetEntry(ctx, 3)
-	assertNoError(t, err)
-	assertEqual(t, uint64(1), entry.Term)
-	assertEqual(t, uint64(3), entry.Index)
-	assertBytesEqual(t, []byte("command3"), entry.Command)
-
-	// Get entries in a range
-	rangeEntries, err := s.GetEntries(ctx, 2, 5)
-	assertNoError(t, err)
-	assertEqual(t, 3, len(rangeEntries))
-	assertEqual(t, uint64(2), rangeEntries[0].Index)
-	assertEqual(t, uint64(3), rangeEntries[1].Index)
-	assertEqual(t, uint64(4), rangeEntries[2].Index)
-
-	// Get all entries
-	allEntries, err := s.GetEntries(ctx, 1, 6)
-	assertNoError(t, err)
-	assertEqual(t, 5, len(allEntries))
-
-	// Get out of range - index too high
-	nonExistentEntry, err := s.GetEntry(ctx, 10)
-	assertErrorIs(t, err, ErrIndexOutOfRange)
-	if nonExistentEntry != nil {
-		t.Errorf("Expected nil entry, got: %v", nonExistentEntry)
+	if storage == nil {
+		t.Fatal("Storage is nil")
 	}
 
-	// Get out of range entries - should return empty slice
-	emptyEntries, err := s.GetEntries(ctx, 6, 10)
-	assertNoError(t, err)
-	assertEqual(t, 0, len(emptyEntries))
-
-	// Try invalid range
-	_, err = s.GetEntries(ctx, 5, 3)
-	assertErrorIs(t, err, ErrIndexOutOfRange)
-
-	// Append more entries
-	moreEntries := []*pb.LogEntry{
-		{Term: 2, Index: 6, Command: []byte("command6")},
-		{Term: 3, Index: 7, Command: []byte("command7")},
+	return &storageTestSuite{
+		t:       t,
+		ctx:     ctx,
+		storage: storage,
+		tempDir: tempDir,
 	}
-	err = s.AppendEntries(ctx, moreEntries)
-	assertNoError(t, err)
-
-	// Verify updated indices
-	assertEqual(t, uint64(1), s.FirstIndex())
-	assertEqual(t, uint64(7), s.LastIndex())
-
-	// Get entries across the original and new appendages
-	crossEntries, err := s.GetEntries(ctx, 5, 8)
-	assertNoError(t, err)
-	assertEqual(t, 3, len(crossEntries))
-	assertEqual(t, uint64(5), crossEntries[0].Index)
-	assertEqual(t, uint64(6), crossEntries[1].Index)
-	assertEqual(t, uint64(7), crossEntries[2].Index)
 }
 
-// Verifies that a storage implementation can correctly
-// remove all log entries with index >= given index.
-func testTruncateSuffix(t *testing.T, s Storage) {
-	ctx := context.Background()
-
-	// Append entries
-	entries := []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("command1")},
-		{Term: 1, Index: 2, Command: []byte("command2")},
-		{Term: 1, Index: 3, Command: []byte("command3")},
-		{Term: 2, Index: 4, Command: []byte("command4")},
-		{Term: 2, Index: 5, Command: []byte("command5")},
-	}
-	err := s.AppendEntries(ctx, entries)
-	assertNoError(t, err)
-
-	// Truncate from index 3
-	err = s.TruncateSuffix(ctx, 3)
-	assertNoError(t, err)
-
-	// Verify indices
-	assertEqual(t, uint64(1), s.FirstIndex())
-	assertEqual(t, uint64(2), s.LastIndex())
-
-	// Verify that entries 3, 4, 5 are gone
-	entry, err := s.GetEntry(ctx, 2)
-	assertNoError(t, err)
-	assertEqual(t, uint64(2), entry.Index)
-
-	_, err = s.GetEntry(ctx, 3)
-	assertErrorIs(t, err, ErrNotFound)
-
-	// Get all remaining entries
-	remainingEntries, err := s.GetEntries(ctx, 1, 10)
-	assertNoError(t, err)
-	assertEqual(t, 2, len(remainingEntries))
-	assertEqual(t, uint64(1), remainingEntries[0].Index)
-	assertEqual(t, uint64(2), remainingEntries[1].Index)
-
-	// Truncate at a higher index than exists
-	err = s.TruncateSuffix(ctx, 10)
-	assertNoError(t, err)
-	assertEqual(t, uint64(1), s.FirstIndex())
-	assertEqual(t, uint64(2), s.LastIndex()) // Should not change
-}
-
-// Verifies that a storage implementation can correctly
-// remove all log entries with index <= given index.
-func testTruncatePrefix(t *testing.T, s Storage) {
-	ctx := context.Background()
-
-	// Append entries
-	entries := []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("command1")},
-		{Term: 1, Index: 2, Command: []byte("command2")},
-		{Term: 1, Index: 3, Command: []byte("command3")},
-		{Term: 2, Index: 4, Command: []byte("command4")},
-		{Term: 2, Index: 5, Command: []byte("command5")},
-	}
-	err := s.AppendEntries(ctx, entries)
-	assertNoError(t, err)
-
-	// Truncate prefix up to index 2
-	err = s.TruncatePrefix(ctx, 2)
-	assertNoError(t, err)
-
-	// Verify indices
-	assertEqual(t, uint64(3), s.FirstIndex())
-	assertEqual(t, uint64(5), s.LastIndex())
-
-	// Verify that entries 1 and 2 are gone
-	_, err = s.GetEntry(ctx, 1)
-	assertErrorIs(t, err, ErrNotFound)
-
-	_, err = s.GetEntry(ctx, 2)
-	assertErrorIs(t, err, ErrNotFound)
-
-	// Get all remaining entries
-	remainingEntries, err := s.GetEntries(ctx, 1, 10)
-	assertNoError(t, err)
-	assertEqual(t, 3, len(remainingEntries))
-	assertEqual(t, uint64(3), remainingEntries[0].Index)
-	assertEqual(t, uint64(4), remainingEntries[1].Index)
-	assertEqual(t, uint64(5), remainingEntries[2].Index)
-
-	// Truncate at a lower index than exists
-	err = s.TruncatePrefix(ctx, 1)
-	assertNoError(t, err)
-	assertEqual(t, uint64(3), s.FirstIndex()) // Should not change
-	assertEqual(t, uint64(5), s.LastIndex())
-}
-
-// Verifies that a storage implementation correctly handles
-// operations on an empty log.
-func testEmptyLog(t *testing.T, s Storage) {
-	ctx := context.Background()
-
-	// Initial state with empty log
-	assertEqual(t, uint64(0), s.FirstIndex())
-	assertEqual(t, uint64(0), s.LastIndex())
-
-	// Get entries from empty log
-	entries, err := s.GetEntries(ctx, 1, 5)
-	assertNoError(t, err)
-	assertEqual(t, 0, len(entries))
-
-	// Get single entry from empty log
-	_, err = s.GetEntry(ctx, 1)
-	assertErrorIs(t, err, ErrNotFound)
-
-	// Truncate operations on empty log
-	err = s.TruncatePrefix(ctx, 1)
-	assertNoError(t, err)
-
-	err = s.TruncateSuffix(ctx, 1)
-	assertNoError(t, err)
-
-	// Indices should still be 0
-	assertEqual(t, uint64(0), s.FirstIndex())
-	assertEqual(t, uint64(0), s.LastIndex())
-}
-
-// Verifies that operations respect context cancellation.
-func testContextCancellation(t *testing.T, s Storage) {
-	// Create a context that we can cancel
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Cancel the context
-	cancel()
-
-	// All operations should return context.Canceled
-	_, err := s.LoadState(ctx)
-	assertErrorIs(t, err, context.Canceled)
-
-	err = s.SaveState(ctx, RaftState{})
-	assertErrorIs(t, err, context.Canceled)
-
-	err = s.AppendEntries(ctx, []*pb.LogEntry{{Term: 1, Index: 1}})
-	assertErrorIs(t, err, context.Canceled)
-
-	_, err = s.GetEntries(ctx, 1, 2)
-	assertErrorIs(t, err, context.Canceled)
-
-	_, err = s.GetEntry(ctx, 1)
-	assertErrorIs(t, err, context.Canceled)
-}
-
-// Verifies that when entries are appended with indices that
-// already exist, the new entries replace the old ones.
-func testAppendOverwrite(t *testing.T, s Storage) {
-	ctx := context.Background()
-
-	initialEntries := []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("cmd1")},
-		{Term: 1, Index: 2, Command: []byte("cmd2")},
-		{Term: 1, Index: 3, Command: []byte("cmd3")},
-	}
-	err := s.AppendEntries(ctx, initialEntries)
-	assertNoError(t, err)
-
-	conflictingEntries := []*pb.LogEntry{
-		{Term: 2, Index: 2, Command: []byte("new2")},
-		{Term: 2, Index: 3, Command: []byte("new3")},
-		{Term: 2, Index: 4, Command: []byte("new4")},
-	}
-	err = s.AppendEntries(ctx, conflictingEntries)
-	assertNoError(t, err)
-
-	entries, err := s.GetEntries(ctx, 1, 5)
-	assertNoError(t, err)
-	assertEqual(t, 4, len(entries))
-	assertBytesEqual(t, []byte("cmd1"), entries[0].Command)
-	assertBytesEqual(t, []byte("new2"), entries[1].Command)
-	assertBytesEqual(t, []byte("new3"), entries[2].Command)
-	assertBytesEqual(t, []byte("new4"), entries[3].Command)
-}
-
-// Verifies that appending entries with non-contiguous
-// indices returns an error.
-func testNonContiguousAppend(t *testing.T, s Storage) {
-	ctx := context.Background()
-
-	err := s.AppendEntries(ctx, []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("cmd1")},
-	})
-	assertNoError(t, err)
-
-	err = s.AppendEntries(ctx, []*pb.LogEntry{
-		{Term: 1, Index: 3, Command: []byte("cmd3")},
-	})
-
-	assertError(t, err)
-}
-
-// Verifies that the storage can handle a large number of entries.
-func testLargeAppend(t *testing.T, s Storage) {
-	ctx := context.Background()
-	const count = 1000 // Reduced from 10000 to make tests faster
-
+// Helper to create log entries for testing
+func createTestLogEntries(startIndex uint64, count int) []*pb.LogEntry {
 	entries := make([]*pb.LogEntry, count)
 	for i := 0; i < count; i++ {
 		entries[i] = &pb.LogEntry{
-			Term:    1,
-			Index:   uint64(i + 1),
-			Command: []byte("bulk"),
+			Index:   startIndex + uint64(i),
+			Term:    uint64(i) + 1,
+			Command: []byte("test data " + string(rune('A'+i))),
+		}
+	}
+	return entries
+}
+
+// Helper to verify log entries match expected values
+func verifyLogEntries(t *testing.T, actual, expected []*pb.LogEntry) {
+	t.Helper()
+	if len(actual) != len(expected) {
+		t.Fatalf("Entry count mismatch: got %d, want %d", len(actual), len(expected))
+	}
+	for i, expectedEntry := range expected {
+		if actual[i].Index != expectedEntry.Index {
+			t.Errorf("Entry %d index mismatch: got %d, want %d", i, actual[i].Index, expectedEntry.Index)
+		}
+		if actual[i].Term != expectedEntry.Term {
+			t.Errorf("Entry %d term mismatch: got %d, want %d", i, actual[i].Term, expectedEntry.Term)
+		}
+		if !bytes.Equal(actual[i].Command, expectedEntry.Command) {
+			t.Errorf("Entry %d data mismatch: got %s, want %s", i, actual[i].Command, expectedEntry.Command)
+		}
+	}
+}
+
+// Test state persistence and retrieval
+func testRaftStatePersistence(t *testing.T, suite *storageTestSuite) {
+	// Test default initial state
+	initialState, err := suite.storage.LoadState(suite.ctx)
+	if err != nil {
+		t.Fatalf("Failed to load initial state: %v", err)
+	}
+	if initialState.CurrentTerm != 0 {
+		t.Errorf("Unexpected initial CurrentTerm: got %d, want 0", initialState.CurrentTerm)
+	}
+	if initialState.VotedFor != -1 {
+		t.Errorf("Unexpected initial VotedFor: got %d, want -1", initialState.VotedFor)
+	}
+
+	// Test saving and loading updated state
+	updatedState := RaftState{
+		CurrentTerm: 42,
+		VotedFor:    3,
+	}
+	err = suite.storage.SaveState(suite.ctx, updatedState)
+	if err != nil {
+		t.Fatalf("Failed to save state: %v", err)
+	}
+
+	loadedState, err := suite.storage.LoadState(suite.ctx)
+	if err != nil {
+		t.Fatalf("Failed to load updated state: %v", err)
+	}
+	if loadedState.CurrentTerm != updatedState.CurrentTerm {
+		t.Errorf("Unexpected loaded CurrentTerm: got %d, want %d", loadedState.CurrentTerm, updatedState.CurrentTerm)
+	}
+	if loadedState.VotedFor != updatedState.VotedFor {
+		t.Errorf("Unexpected loaded VotedFor: got %d, want %d", loadedState.VotedFor, updatedState.VotedFor)
+	}
+
+	// Test overwriting existing state
+	finalState := RaftState{
+		CurrentTerm: 99,
+		VotedFor:    5,
+	}
+	err = suite.storage.SaveState(suite.ctx, finalState)
+	if err != nil {
+		t.Fatalf("Failed to save final state: %v", err)
+	}
+
+	loadedState, err = suite.storage.LoadState(suite.ctx)
+	if err != nil {
+		t.Fatalf("Failed to load final state: %v", err)
+	}
+	if loadedState.CurrentTerm != finalState.CurrentTerm {
+		t.Errorf("Unexpected final CurrentTerm: got %d, want %d", loadedState.CurrentTerm, finalState.CurrentTerm)
+	}
+	if loadedState.VotedFor != finalState.VotedFor {
+		t.Errorf("Unexpected final VotedFor: got %d, want %d", loadedState.VotedFor, finalState.VotedFor)
+	}
+}
+
+// Test appending and retrieving log entries
+func testLogEntryOperations(t *testing.T, suite *storageTestSuite) {
+	// Test empty log
+	entries, err := suite.storage.GetEntries(suite.ctx, 1, 10)
+	if err != nil {
+		t.Fatalf("Failed to get entries from empty log: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Expected empty entries, got %d entries", len(entries))
+	}
+
+	if suite.storage.FirstIndex() != 0 {
+		t.Errorf("Unexpected FirstIndex: got %d, want 0", suite.storage.FirstIndex())
+	}
+	if suite.storage.LastIndex() != 0 {
+		t.Errorf("Unexpected LastIndex: got %d, want 0", suite.storage.LastIndex())
+	}
+
+	// Append first set of entries
+	testEntries := createTestLogEntries(1, 5)
+	err = suite.storage.AppendEntries(suite.ctx, testEntries)
+	if err != nil {
+		t.Fatalf("Failed to append entries: %v", err)
+	}
+
+	// Verify indices updated correctly
+	if suite.storage.FirstIndex() != 1 {
+		t.Errorf("Unexpected FirstIndex after append: got %d, want 1", suite.storage.FirstIndex())
+	}
+	if suite.storage.LastIndex() != 5 {
+		t.Errorf("Unexpected LastIndex after append: got %d, want 5", suite.storage.LastIndex())
+	}
+
+	// Test retrieving all entries
+	retrievedEntries, err := suite.storage.GetEntries(suite.ctx, 1, 6)
+	if err != nil {
+		t.Fatalf("Failed to retrieve all entries: %v", err)
+	}
+	verifyLogEntries(t, retrievedEntries, testEntries)
+
+	// Test getting a subset of entries
+	subsetEntries, err := suite.storage.GetEntries(suite.ctx, 2, 4)
+	if err != nil {
+		t.Fatalf("Failed to retrieve subset of entries: %v", err)
+	}
+	verifyLogEntries(t, subsetEntries, testEntries[1:3])
+
+	// Test getting a single entry
+	singleEntry, err := suite.storage.GetEntry(suite.ctx, 3)
+	if err != nil {
+		t.Fatalf("Failed to retrieve single entry: %v", err)
+	}
+	if singleEntry.Index != testEntries[2].Index {
+		t.Errorf("Single entry index mismatch: got %d, want %d", singleEntry.Index, testEntries[2].Index)
+	}
+	if singleEntry.Term != testEntries[2].Term {
+		t.Errorf("Single entry term mismatch: got %d, want %d", singleEntry.Term, testEntries[2].Term)
+	}
+	if !bytes.Equal(singleEntry.Command, testEntries[2].Command) {
+		t.Errorf("Single entry data mismatch: got %s, want %s", singleEntry.Command, testEntries[2].Command)
+	}
+
+	// Append more entries
+	moreEntries := createTestLogEntries(6, 3)
+	err = suite.storage.AppendEntries(suite.ctx, moreEntries)
+	if err != nil {
+		t.Fatalf("Failed to append more entries: %v", err)
+	}
+
+	// Verify updated indices
+	if suite.storage.FirstIndex() != 1 {
+		t.Errorf("Unexpected FirstIndex after second append: got %d, want 1", suite.storage.FirstIndex())
+	}
+	if suite.storage.LastIndex() != 8 {
+		t.Errorf("Unexpected LastIndex after second append: got %d, want 8", suite.storage.LastIndex())
+	}
+
+	// Verify all entries
+	allEntries, err := suite.storage.GetEntries(suite.ctx, 1, 9)
+	if err != nil {
+		t.Fatalf("Failed to retrieve all entries after second append: %v", err)
+	}
+
+	combined := append([]*pb.LogEntry{}, testEntries...)
+	combined = append(combined, moreEntries...)
+	verifyLogEntries(t, allEntries, combined)
+}
+
+// Test entry not found cases
+func testEntryNotFound(t *testing.T, suite *storageTestSuite) {
+	// Prepare some entries
+	entries := createTestLogEntries(1, 5)
+	err := suite.storage.AppendEntries(suite.ctx, entries)
+	if err != nil {
+		t.Fatalf("Failed to append entries: %v", err)
+	}
+
+	// Test getting entry before the first index
+	_, err = suite.storage.GetEntry(suite.ctx, 0)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound for index before first, got: %v", err)
+	}
+
+	// Test getting entry after the last index
+	_, err = suite.storage.GetEntry(suite.ctx, 10)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound for index after last, got: %v", err)
+	}
+
+	// Test invalid range
+	_, err = suite.storage.GetEntries(suite.ctx, 10, 5)
+	if !errors.Is(err, ErrIndexOutOfRange) {
+		t.Errorf("Expected ErrIndexOutOfRange for invalid range, got: %v", err)
+	}
+
+	// Test empty range due to constraints
+	result, err := suite.storage.GetEntries(suite.ctx, 10, 11)
+	if err != nil {
+		t.Fatalf("GetEntries failed: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("Expected empty result for out-of-range bounds, got %d entries", len(result))
+	}
+}
+
+// Test truncating entries from the start of the log
+func testTruncatePrefix(t *testing.T, suite *storageTestSuite) {
+	// Prepare entries
+	entries := createTestLogEntries(1, 10)
+	err := suite.storage.AppendEntries(suite.ctx, entries)
+	if err != nil {
+		t.Fatalf("Failed to append entries: %v", err)
+	}
+
+	// Truncate first half
+	err = suite.storage.TruncatePrefix(suite.ctx, 6)
+	if err != nil {
+		t.Fatalf("Failed to truncate prefix: %v", err)
+	}
+
+	// Verify first index updated
+	if suite.storage.FirstIndex() != 6 {
+		t.Errorf("Unexpected FirstIndex after truncate prefix: got %d, want 6", suite.storage.FirstIndex())
+	}
+	if suite.storage.LastIndex() != 10 {
+		t.Errorf("Unexpected LastIndex after truncate prefix: got %d, want 10", suite.storage.LastIndex())
+	}
+
+	// Verify remaining entries
+	remainingEntries, err := suite.storage.GetEntries(suite.ctx, 6, 11)
+	if err != nil {
+		t.Fatalf("Failed to get remaining entries: %v", err)
+	}
+	verifyLogEntries(t, remainingEntries, entries[5:])
+
+	// Verify truncated entries are gone
+	for i := uint64(1); i < 6; i++ {
+		_, err = suite.storage.GetEntry(suite.ctx, i)
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("Expected ErrNotFound for truncated entry %d, got: %v", i, err)
+		}
+	}
+}
+
+// Test truncating entries from the end of the log
+func testTruncateSuffix(t *testing.T, suite *storageTestSuite) {
+	// Prepare entries
+	entries := createTestLogEntries(1, 10)
+	err := suite.storage.AppendEntries(suite.ctx, entries)
+	if err != nil {
+		t.Fatalf("Failed to append entries: %v", err)
+	}
+
+	// Truncate second half
+	err = suite.storage.TruncateSuffix(suite.ctx, 6)
+	if err != nil {
+		t.Fatalf("Failed to truncate suffix: %v", err)
+	}
+
+	// Verify last index updated
+	if suite.storage.FirstIndex() != 1 {
+		t.Errorf("Unexpected FirstIndex after truncate suffix: got %d, want 1", suite.storage.FirstIndex())
+	}
+	if suite.storage.LastIndex() != 5 {
+		t.Errorf("Unexpected LastIndex after truncate suffix: got %d, want 5", suite.storage.LastIndex())
+	}
+
+	// Verify remaining entries
+	remainingEntries, err := suite.storage.GetEntries(suite.ctx, 1, 6)
+	if err != nil {
+		t.Fatalf("Failed to get remaining entries: %v", err)
+	}
+	verifyLogEntries(t, remainingEntries, entries[:5])
+
+	// Verify truncated entries are gone
+	for i := uint64(6); i <= 10; i++ {
+		_, err = suite.storage.GetEntry(suite.ctx, i)
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("Expected ErrNotFound for truncated entry %d, got: %v", i, err)
+		}
+	}
+}
+
+// Test contiguity check
+func testEntriesContiguity(t *testing.T, suite *storageTestSuite) {
+	// Valid contiguous entries starting from empty log
+	entries1 := createTestLogEntries(1, 3)
+	err := suite.storage.AppendEntries(suite.ctx, entries1)
+	if err != nil {
+		t.Fatalf("Failed to append first contiguous entries: %v", err)
+	}
+
+	// Valid contiguous entries continuing from existing log
+	entries2 := createTestLogEntries(4, 3)
+	err = suite.storage.AppendEntries(suite.ctx, entries2)
+	if err != nil {
+		t.Fatalf("Failed to append second contiguous entries: %v", err)
+	}
+
+	// Invalid non-contiguous entries (gap)
+	entries3 := createTestLogEntries(8, 2)
+	err = suite.storage.AppendEntries(suite.ctx, entries3)
+	if err == nil {
+		t.Error("Expected error for non-contiguous entries with gap, got nil")
+	}
+
+	// Invalid non-contiguous entries (overlap)
+	entries4 := createTestLogEntries(5, 3)
+	err = suite.storage.AppendEntries(suite.ctx, entries4)
+	if err == nil {
+		t.Error("Expected error for non-contiguous entries with overlap, got nil")
+	}
+}
+
+// Test cancelled context
+func testCancelledContext(t *testing.T, suite *storageTestSuite) {
+	// Create a cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Test all operations with cancelled context
+	_, err := suite.storage.LoadState(ctx)
+	if err == nil {
+		t.Error("Expected error for LoadState with cancelled context, got nil")
+	}
+
+	err = suite.storage.SaveState(ctx, RaftState{CurrentTerm: 5, VotedFor: 1})
+	if err == nil {
+		t.Error("Expected error for SaveState with cancelled context, got nil")
+	}
+
+	entries := createTestLogEntries(1, 3)
+	err = suite.storage.AppendEntries(ctx, entries)
+	if err == nil {
+		t.Error("Expected error for AppendEntries with cancelled context, got nil")
+	}
+
+	_, err = suite.storage.GetEntries(ctx, 1, 3)
+	if err == nil {
+		t.Error("Expected error for GetEntries with cancelled context, got nil")
+	}
+
+	_, err = suite.storage.GetEntry(ctx, 1)
+	if err == nil {
+		t.Error("Expected error for GetEntry with cancelled context, got nil")
+	}
+
+	err = suite.storage.TruncatePrefix(ctx, 2)
+	if err == nil {
+		t.Error("Expected error for TruncatePrefix with cancelled context, got nil")
+	}
+
+	err = suite.storage.TruncateSuffix(ctx, 2)
+	if err == nil {
+		t.Error("Expected error for TruncateSuffix with cancelled context, got nil")
+	}
+}
+
+// Test edge cases for memory storage
+func testMemoryStorageEdgeCases(t *testing.T) {
+	suite := setupStorageTest(t, MemoryStorageType)
+
+	// Test handling empty AppendEntries
+	err := suite.storage.AppendEntries(suite.ctx, []*pb.LogEntry{})
+	if err != nil {
+		t.Errorf("AppendEntries with empty slice failed: %v", err)
+	}
+
+	// Test truncate on empty log
+	err = suite.storage.TruncatePrefix(suite.ctx, 5)
+	if err != nil {
+		t.Errorf("TruncatePrefix on empty log failed: %v", err)
+	}
+
+	err = suite.storage.TruncateSuffix(suite.ctx, 5)
+	if err != nil {
+		t.Errorf("TruncateSuffix on empty log failed: %v", err)
+	}
+
+	// Test Close method
+	err = suite.storage.Close()
+	if err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
+}
+
+// Test file storage specific features
+func testFileStorageSpecific(t *testing.T) {
+	suite := setupStorageTest(t, FileStorageType)
+
+	// Append some entries for testing
+	entries := createTestLogEntries(1, 5)
+	err := suite.storage.AppendEntries(suite.ctx, entries)
+	if err != nil {
+		t.Fatalf("Failed to append entries: %v", err)
+	}
+
+	// Test persistence across restarts
+	state := RaftState{CurrentTerm: 99, VotedFor: 3}
+	err = suite.storage.SaveState(suite.ctx, state)
+	if err != nil {
+		t.Fatalf("Failed to save state: %v", err)
+	}
+
+	// Verify files were created
+	fileStorage, ok := suite.storage.(*FileStorage)
+	if !ok {
+		t.Fatal("Failed to cast to FileStorage")
+	}
+
+	files := []string{
+		fileStorage.stateFile(),
+		fileStorage.metadataFile(),
+		fileStorage.logFile(),
+	}
+
+	for _, file := range files {
+		_, err := os.Stat(file)
+		if err != nil {
+			t.Errorf("File %s should exist, got error: %v", file, err)
 		}
 	}
 
-	err := s.AppendEntries(ctx, entries)
-	assertNoError(t, err)
+	// Create a new storage instance pointing to the same directory
+	newStorage, err := NewStorage(&StorageConfig{
+		Type: FileStorageType,
+		Dir:  suite.tempDir,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create new storage instance: %v", err)
+	}
 
-	assertEqual(t, uint64(1), s.FirstIndex())
-	assertEqual(t, uint64(count), s.LastIndex())
+	// Verify state was persisted
+	loadedState, err := newStorage.LoadState(suite.ctx)
+	if err != nil {
+		t.Fatalf("Failed to load state from new instance: %v", err)
+	}
+	if loadedState.CurrentTerm != state.CurrentTerm {
+		t.Errorf("CurrentTerm not persisted: got %d, want %d", loadedState.CurrentTerm, state.CurrentTerm)
+	}
+	if loadedState.VotedFor != state.VotedFor {
+		t.Errorf("VotedFor not persisted: got %d, want %d", loadedState.VotedFor, state.VotedFor)
+	}
+
+	// Verify entries were persisted
+	if newStorage.FirstIndex() != 1 {
+		t.Errorf("FirstIndex not persisted: got %d, want 1", newStorage.FirstIndex())
+	}
+	if newStorage.LastIndex() != 5 {
+		t.Errorf("LastIndex not persisted: got %d, want 5", newStorage.LastIndex())
+	}
+
+	retrievedEntries, err := newStorage.GetEntries(suite.ctx, 1, 6)
+	if err != nil {
+		t.Fatalf("Failed to retrieve entries from new instance: %v", err)
+	}
+	verifyLogEntries(t, retrievedEntries, entries)
 }
 
-// Verifies that the storage can be safely accessed concurrently.
-func testConcurrentAccess(t *testing.T, s Storage) {
-	ctx := context.Background()
+// Test file corruption scenarios
+func testFileCorruption(t *testing.T) {
+	suite := setupStorageTest(t, FileStorageType)
 
-	// Add some initial entries
-	entries := []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("command1")},
-		{Term: 1, Index: 2, Command: []byte("command2")},
-	}
-	err := s.AppendEntries(ctx, entries)
-	assertNoError(t, err)
-
-	// Concurrently append and read
-	const goroutines = 5  // Reduced from 10
-	const operations = 10 // Reduced from 20
-
-	var wg sync.WaitGroup
-	wg.Add(goroutines * 2) // for both readers and writers
-
-	// Writers
-	for i := 0; i < goroutines; i++ {
-		go func(id int) {
-			defer wg.Done()
-
-			for j := 0; j < operations; j++ {
-				index := uint64(3 + id*operations + j)
-				entry := &pb.LogEntry{
-					Term:    1,
-					Index:   index,
-					Command: []byte("cmd"),
-				}
-				err := s.AppendEntries(ctx, []*pb.LogEntry{entry})
-				if err != nil {
-					t.Errorf("Concurrent append failed: %v", err)
-				}
-
-				// Small delay to increase chance of race conditions
-				time.Sleep(time.Millisecond)
-			}
-		}(i)
+	// Append some entries
+	entries := createTestLogEntries(1, 3)
+	err := suite.storage.AppendEntries(suite.ctx, entries)
+	if err != nil {
+		t.Fatalf("Failed to append entries: %v", err)
 	}
 
-	// Readers
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			defer wg.Done()
-
-			for j := 0; j < operations; j++ {
-				_, err := s.LoadState(ctx)
-				if err != nil {
-					t.Errorf("Concurrent load state failed: %v", err)
-				}
-
-				_, err = s.GetEntries(ctx, 1, s.LastIndex()+1)
-				// Error is acceptable here as LastIndex might change during concurrent operations
-				// But we should still check for unexpected errors
-				if err != nil && !errors.Is(err, ErrIndexOutOfRange) {
-					t.Errorf("Concurrent get entries failed with unexpected error: %v", err)
-				}
-
-				// Small delay to increase chance of race conditions
-				time.Sleep(time.Millisecond)
-			}
-		}()
+	fileStorage, ok := suite.storage.(*FileStorage)
+	if !ok {
+		t.Fatal("Failed to cast to FileStorage")
 	}
 
-	wg.Wait()
+	// Corrupt the state file
+	err = os.WriteFile(fileStorage.stateFile(), []byte("not valid json"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to corrupt state file: %v", err)
+	}
+
+	// Attempt to load corrupted state
+	_, err = suite.storage.LoadState(suite.ctx)
+	if err == nil {
+		t.Error("Expected error loading corrupted state, got nil")
+	}
+
+	// Corrupt the log file
+	logFile, err := os.OpenFile(fileStorage.logFile(), os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		t.Fatalf("Failed to open log file: %v", err)
+	}
+	_, err = logFile.WriteString("corrupted data")
+	if err != nil {
+		t.Fatalf("Failed to write corrupted data: %v", err)
+	}
+	logFile.Close()
+
+	// Attempts to read corrupted log should fail gracefully
+	_, err = suite.storage.GetEntries(suite.ctx, 1, 4)
+	if err == nil {
+		t.Error("Expected error reading corrupted log, got nil")
+	}
 }
 
-// Runs a complete suite of tests against any Storage implementation.
-func testStorage(t *testing.T, s Storage) {
-	t.Run("SaveAndLoadState", func(t *testing.T) {
-		testSaveAndLoadState(t, s)
+// Memory Storage Tests
+func TestMemoryStorage(t *testing.T) {
+	t.Run("StatePersistence", func(t *testing.T) {
+		testRaftStatePersistence(t, setupStorageTest(t, MemoryStorageType))
 	})
 
-	t.Run("AppendAndGetEntries", func(t *testing.T) {
-		testAppendAndGetEntries(t, s)
+	t.Run("LogEntryOperations", func(t *testing.T) {
+		testLogEntryOperations(t, setupStorageTest(t, MemoryStorageType))
 	})
 
-	t.Run("TruncateSuffix", func(t *testing.T) {
-		testTruncateSuffix(t, s)
+	t.Run("EntryNotFound", func(t *testing.T) {
+		testEntryNotFound(t, setupStorageTest(t, MemoryStorageType))
 	})
 
 	t.Run("TruncatePrefix", func(t *testing.T) {
-		testTruncatePrefix(t, s)
+		testTruncatePrefix(t, setupStorageTest(t, MemoryStorageType))
 	})
 
-	t.Run("EmptyLog", func(t *testing.T) {
-		testEmptyLog(t, s)
+	t.Run("TruncateSuffix", func(t *testing.T) {
+		testTruncateSuffix(t, setupStorageTest(t, MemoryStorageType))
 	})
 
-	t.Run("ContextCancellation", func(t *testing.T) {
-		testContextCancellation(t, s)
+	t.Run("EntriesContiguity", func(t *testing.T) {
+		testEntriesContiguity(t, setupStorageTest(t, MemoryStorageType))
 	})
 
-	t.Run("AppendOverwrite", func(t *testing.T) {
-		testAppendOverwrite(t, s)
+	t.Run("CancelledContext", func(t *testing.T) {
+		testCancelledContext(t, setupStorageTest(t, MemoryStorageType))
 	})
 
-	t.Run("NonContiguousAppend", func(t *testing.T) {
-		testNonContiguousAppend(t, s)
-	})
-
-	t.Run("LargeAppend", func(t *testing.T) {
-		testLargeAppend(t, s)
-	})
-
-	t.Run("ConcurrentAccess", func(t *testing.T) {
-		testConcurrentAccess(t, s)
+	t.Run("EdgeCases", func(t *testing.T) {
+		testMemoryStorageEdgeCases(t)
 	})
 }
 
-// Verifies that MemoryStorage correctly implements the Storage interface.
-func TestMemoryStorage(t *testing.T) {
-	s, err := NewMemoryStorage()
-	if err != nil {
-		t.Fatalf("Failed to create memory storage: %v", err)
-	}
-	defer s.Close()
-
-	testStorage(t, s)
-}
-
-// Verifies that FileStorage correctly implements the Storage interface.
+// File Storage Tests
 func TestFileStorage(t *testing.T) {
-	// Create a temporary directory for the test
-	tempDir, err := os.MkdirTemp("", "raft-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	t.Run("StatePersistence", func(t *testing.T) {
+		testRaftStatePersistence(t, setupStorageTest(t, FileStorageType))
+	})
 
-	config := &StorageConfig{
-		Type: FileStorageType,
-		Dir:  tempDir,
-	}
+	t.Run("LogEntryOperations", func(t *testing.T) {
+		testLogEntryOperations(t, setupStorageTest(t, FileStorageType))
+	})
 
-	s, err := NewFileStorage(config)
-	if err != nil {
-		t.Fatalf("Failed to create file storage: %v", err)
-	}
-	defer s.Close()
+	t.Run("EntryNotFound", func(t *testing.T) {
+		testEntryNotFound(t, setupStorageTest(t, FileStorageType))
+	})
 
-	testStorage(t, s)
+	t.Run("TruncatePrefix", func(t *testing.T) {
+		testTruncatePrefix(t, setupStorageTest(t, FileStorageType))
+	})
+
+	t.Run("TruncateSuffix", func(t *testing.T) {
+		testTruncateSuffix(t, setupStorageTest(t, FileStorageType))
+	})
+
+	t.Run("EntriesContiguity", func(t *testing.T) {
+		testEntriesContiguity(t, setupStorageTest(t, FileStorageType))
+	})
+
+	t.Run("CancelledContext", func(t *testing.T) {
+		testCancelledContext(t, setupStorageTest(t, FileStorageType))
+	})
+
+	t.Run("FileSpecific", func(t *testing.T) {
+		testFileStorageSpecific(t)
+	})
+
+	t.Run("FileCorruption", func(t *testing.T) {
+		testFileCorruption(t)
+	})
 }
 
-// Verifies that FileStorage persists data across restarts.
-func TestFilePersistence(t *testing.T) {
-	// Create a temporary directory for the test
-	tempDir, err := os.MkdirTemp("", "raft-persistence-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	ctx := context.Background()
-
-	// Create a new storage instance
-	config := &StorageConfig{
-		Type: FileStorageType,
-		Dir:  tempDir,
-	}
-
-	s1, err := NewFileStorage(config)
-	if err != nil {
-		t.Fatalf("Failed to create file storage: %v", err)
-	}
-
-	// Save state and append entries
-	state := RaftState{CurrentTerm: 42, VotedFor: 3}
-	err = s1.SaveState(ctx, state)
-	assertNoError(t, err)
-
-	entries := []*pb.LogEntry{
-		{Term: 1, Index: 1, Command: []byte("command1")},
-		{Term: 1, Index: 2, Command: []byte("command2")},
-	}
-	err = s1.AppendEntries(ctx, entries)
-	assertNoError(t, err)
-
-	// Close the storage
-	err = s1.Close()
-	assertNoError(t, err)
-
-	// Create a new storage instance with the same directory
-	s2, err := NewFileStorage(config)
-	if err != nil {
-		t.Fatalf("Failed to create second file storage: %v", err)
-	}
-	defer s2.Close()
-
-	// Verify loaded state
-	loadedState, err := s2.LoadState(ctx)
-	assertNoError(t, err)
-	assertEqual(t, state.CurrentTerm, loadedState.CurrentTerm)
-	assertEqual(t, state.VotedFor, loadedState.VotedFor)
-
-	// Verify loaded entries
-	assertEqual(t, uint64(1), s2.FirstIndex())
-	assertEqual(t, uint64(2), s2.LastIndex())
-
-	loadedEntries, err := s2.GetEntries(ctx, 1, 3)
-	assertNoError(t, err)
-	assertEqual(t, 2, len(loadedEntries))
-	assertEqual(t, uint64(1), loadedEntries[0].Index)
-	assertEqual(t, uint64(2), loadedEntries[1].Index)
-	assertBytesEqual(t, []byte("command1"), loadedEntries[0].Command)
-	assertBytesEqual(t, []byte("command2"), loadedEntries[1].Command)
-}
-
-// Tests FileStorage's handling of corrupted state data.
-func TestFileStorageCorruptedState(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "raft-test-corrupted")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Create invalid state file
-	stateFile := filepath.Join(tempDir, "state.json")
-	err = os.WriteFile(stateFile, []byte("invalid json"), 0644)
-	assertNoError(t, err)
-
-	config := &StorageConfig{
-		Type: FileStorageType,
-		Dir:  tempDir,
-	}
-
-	s, err := NewFileStorage(config)
-	if err != nil {
-		t.Fatalf("Failed to create file storage: %v", err)
-	}
-	defer s.Close()
-
-	ctx := context.Background()
-
-	// Loading corrupted state should return ErrCorruptedData
-	_, err = s.LoadState(ctx)
-	assertErrorIs(t, err, ErrCorruptedData)
-}
-
-// Tests the creation of different storage types.
+// Test NewStorage factory function
 func TestNewStorage(t *testing.T) {
-	// Test memory storage
-	config := &StorageConfig{
-		Type: MemoryStorageType,
-	}
-	s, err := NewStorage(config)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	_, ok := s.(*MemoryStorage)
-	assertTrue(t, ok)
-	s.Close()
+	t.Run("MemoryStorage", func(t *testing.T) {
+		storage, err := NewStorage(&StorageConfig{Type: MemoryStorageType})
+		if err != nil {
+			t.Fatalf("Failed to create memory storage: %v", err)
+		}
+		_, ok := storage.(*MemoryStorage)
+		if !ok {
+			t.Error("Storage is not *MemoryStorage")
+		}
+	})
 
-	// Test file storage
-	tempDir, err := os.MkdirTemp("", "raft-test-factory")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	t.Run("FileStorage", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "raft-test-*")
+		if err != nil {
+			t.Fatalf("Failed to create temp directory: %v", err)
+		}
+		defer os.RemoveAll(tempDir)
 
-	config = &StorageConfig{
-		Type: FileStorageType,
-		Dir:  tempDir,
-	}
-	s, err = NewStorage(config)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	_, ok = s.(*FileStorage)
-	assertTrue(t, ok)
-	s.Close()
+		storage, err := NewStorage(&StorageConfig{
+			Type: FileStorageType,
+			Dir:  tempDir,
+		})
+		if err != nil {
+			t.Fatalf("Failed to create file storage: %v", err)
+		}
+		_, ok := storage.(*FileStorage)
+		if !ok {
+			t.Error("Storage is not *FileStorage")
+		}
+	})
 
-	// Test unsupported type
-	config = &StorageConfig{
-		Type: "unsupported",
-	}
-	_, err = NewStorage(config)
-	assertError(t, err)
+	t.Run("DefaultConfig", func(t *testing.T) {
+		storage, err := NewStorage(nil)
+		if err != nil {
+			t.Fatalf("Failed to create storage with nil config: %v", err)
+		}
+		_, ok := storage.(*FileStorage)
+		if !ok {
+			t.Error("Default storage is not *FileStorage")
+		}
+	})
 
-	// Test nil config
-	s, err = NewStorage(nil)
-	assertNoError(t, err)
-	assertNotNil(t, s)
-	s.Close()
+	t.Run("UnsupportedType", func(t *testing.T) {
+		_, err := NewStorage(&StorageConfig{Type: "unsupported"})
+		if err == nil {
+			t.Error("Expected error for unsupported storage type, got nil")
+		}
+	})
+
+	t.Run("InvalidDir", func(t *testing.T) {
+		// Use a file as directory to trigger an error
+		tmpFile, err := os.CreateTemp("", "raft-test-*")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		_, err = NewStorage(&StorageConfig{
+			Type: FileStorageType,
+			Dir:  tmpFile.Name(), // This is a file, not a directory
+		})
+		if err == nil {
+			t.Error("Expected error for invalid directory, got nil")
+		}
+	})
 }
 
-// Tests the DefaultStorageConfig function.
-func TestDefaultStorageConfig(t *testing.T) {
-	config := DefaultStorageConfig()
-	assertEqual(t, FileStorageType, config.Type)
-	assertEqual(t, "../data/raft", config.Dir)
-}
+// Test CheckEntriesContiguity helper function
+func TestCheckEntriesContiguity(t *testing.T) {
+	t.Run("ValidContiguity", func(t *testing.T) {
+		entries := createTestLogEntries(6, 3)
+		err := CheckEntriesContiguity(entries, 5)
+		if err != nil {
+			t.Errorf("Valid contiguity check failed: %v", err)
+		}
+	})
 
-// Helper functions for assertions
-func assertEqual(t *testing.T, expected, actual any) {
-	t.Helper()
-	if expected != actual {
-		t.Errorf("Expected %v, got %v", expected, actual)
-	}
-}
+	t.Run("EmptyEntries", func(t *testing.T) {
+		err := CheckEntriesContiguity([]*pb.LogEntry{}, 5)
+		if err != nil {
+			t.Errorf("Empty entries contiguity check failed: %v", err)
+		}
+	})
 
-func assertBytesEqual(t *testing.T, expected, actual []byte) {
-	if !bytes.Equal(expected, actual) {
-		t.Errorf("Expected %v, got %v", expected, actual)
-	}
-}
+	t.Run("NonContiguousWithPrevious", func(t *testing.T) {
+		entries := createTestLogEntries(7, 3)
+		err := CheckEntriesContiguity(entries, 5)
+		if err == nil {
+			t.Error("Expected error for non-contiguous with previous, got nil")
+		}
+	})
 
-func assertNoError(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-}
-
-func assertError(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Error("Expected error, got nil")
-	}
-}
-
-func assertErrorIs(t *testing.T, err, target error) {
-	t.Helper()
-	if !errors.Is(err, target) {
-		t.Errorf("Expected error to be %v, got %v", target, err)
-	}
-}
-
-func assertTrue(t *testing.T, condition bool) {
-	t.Helper()
-	if !condition {
-		t.Error("Expected condition to be true")
-	}
-}
-
-func assertNotNil(t *testing.T, obj any) {
-	t.Helper()
-	if obj == nil {
-		t.Error("Expected non-nil value")
-	}
+	t.Run("NonContiguousWithinEntries", func(t *testing.T) {
+		entries := []*pb.LogEntry{
+			{Index: 6, Term: 1},
+			{Index: 8, Term: 1}, // Gap here
+			{Index: 9, Term: 1},
+		}
+		err := CheckEntriesContiguity(entries, 5)
+		if err == nil {
+			t.Error("Expected error for non-contiguous within entries, got nil")
+		}
+	})
 }

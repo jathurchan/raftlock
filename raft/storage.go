@@ -13,6 +13,7 @@ var (
 	ErrCorruptedData   = errors.New("raft: corrupted storage data")
 	ErrIndexOutOfRange = errors.New("raft: log index out of range")
 	ErrNotImplemented  = errors.New("raft: not implemented yet")
+	ErrStorageIO       = errors.New("raft: storage I/O error")
 )
 
 // RaftState represents the persistent state of a Raft node.
@@ -22,6 +23,7 @@ type RaftState struct {
 }
 
 // Storage defines the interface for persisting Raft node state and log entries.
+// Implementations of this interface must be thread safe.
 type Storage interface {
 	// Persists the Raft node's current term and votedFor information.
 	// The operation must be atomic: either the entire state is saved, or nothing.
@@ -32,6 +34,8 @@ type Storage interface {
 	LoadState(ctx context.Context) (RaftState, error)
 
 	// Appends one or more log entries to the Raft log.
+	// All entries must have contiguous indices starting from lastIndex+1.
+	// The append operation must be atomic: either all entries are persisted, or none.
 	// Returns ErrStorageIO if the append operation fails.
 	AppendEntries(ctx context.Context, entries []*pb.LogEntry) error
 
@@ -56,7 +60,7 @@ type Storage interface {
 	// Used when conflicting entries are found during log replication.
 	TruncateSuffix(ctx context.Context, index uint64) error
 
-	// Removes all log entries with indices <= the given index.
+	// Removes all log entries with indices < the given index.
 	TruncatePrefix(ctx context.Context, index uint64) error
 
 	// Closes the storage, releasing any resources.
@@ -102,4 +106,23 @@ func NewStorage(config *StorageConfig) (Storage, error) {
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", config.Type)
 	}
+}
+
+// Helper method to validate that the entries have contiguous indices
+// and that they continue from the last index in the log.
+func CheckEntriesContiguity(entries []*pb.LogEntry, lastIndex uint64) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if entries[0].Index != lastIndex+1 {
+		return fmt.Errorf("non-contiguous entry: expected index %d, got %d",
+			lastIndex+1, entries[0].Index)
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Index != entries[i-1].Index+1 {
+			return fmt.Errorf("non-contiguous entries: %d followed by %d",
+				entries[i-1].Index, entries[i].Index)
+		}
+	}
+	return nil
 }

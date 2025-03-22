@@ -159,9 +159,15 @@ func (fs *FileStorage) AppendEntries(ctx context.Context, entries []*pb.LogEntry
 	if len(entries) == 0 {
 		return nil
 	}
-
 	fs.logMu.Lock()
 	defer fs.logMu.Unlock()
+	if !fs.isFirstEntry() {
+		if err := CheckEntriesContiguity(entries, fs.metadata.LastIndex); err != nil {
+			return err
+		}
+	} else if entries[0].Index != 1 {
+		return fmt.Errorf("first log entry must have index 1, got %d", entries[0].Index)
+	}
 
 	file, endPos, err := fs.openLogFile()
 	if err != nil {
@@ -237,6 +243,10 @@ func (fs *FileStorage) isFirstEntry() bool {
 // Returns an empty slice if adjusted range is invalid.
 // Returns ErrIndexOutOfRange if low > high.
 func (fs *FileStorage) GetEntries(ctx context.Context, low, high uint64) ([]*pb.LogEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if low > high {
 		return nil, ErrIndexOutOfRange
 	}
@@ -305,7 +315,7 @@ func (fs *FileStorage) readEntriesInRange(ctx context.Context, file *os.File, lo
 }
 
 // Retrieves a single log entry at the given index.
-// Returns ErrIndexOutOfRange if the index is outside the known range.
+// Returns ErrNotFound if the index is outside the known range.
 // Returns nil, nil if the entry is not found (e.g., truncated or corrupted).
 func (fs *FileStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry, error) {
 	fs.logMu.RLock()
@@ -313,7 +323,7 @@ func (fs *FileStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry
 	first := fs.metadata.FirstIndex
 	last := fs.metadata.LastIndex
 	if index < first || index > last {
-		return nil, ErrIndexOutOfRange
+		return nil, ErrNotFound
 	}
 	file, err := os.Open(fs.logFile())
 	if err != nil {
@@ -380,12 +390,142 @@ func (fs *FileStorage) FirstIndex() uint64 {
 // Removes all log entries with indices greater than or equal to the given index.
 // Used when conflicting entries are found during log replication.
 func (fs *FileStorage) TruncateSuffix(ctx context.Context, index uint64) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	fs.logMu.Lock()
+	defer fs.logMu.Unlock()
+
+	if index > fs.metadata.LastIndex {
+		return nil // No need to truncate
+	}
+
+	if index <= fs.metadata.FirstIndex {
+		// Remove all log entries
+		fs.metadata.FirstIndex = 0
+		fs.metadata.LastIndex = 0
+		if err := os.Truncate(fs.logFile(), 0); err != nil {
+			return err
+		}
+		return fs.saveMetadata()
+	}
+
+	// Truncate the file up to the index
+	file, err := os.Open(fs.logFile())
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var offset int64
+	lenBuf := make([]byte, 4)
+	for {
+		if _, err := io.ReadFull(file, lenBuf); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		length := binary.BigEndian.Uint32(lenBuf)
+		data := make([]byte, length)
+		if _, err := io.ReadFull(file, data); err != nil {
+			return err
+		}
+		entry := &pb.LogEntry{}
+		if err := proto.Unmarshal(data, entry); err != nil {
+			return err
+		}
+		if entry.Index >= index {
+			break
+		}
+		offset += int64(4 + length)
+	}
+
+	if err := os.Truncate(fs.logFile(), offset); err != nil {
+		return err
+	}
+
+	fs.metadata.LastIndex = index - 1
+	return fs.saveMetadata()
 }
 
 // TruncatePrefix removes all log entries with indices less than the given index.
 func (fs *FileStorage) TruncatePrefix(ctx context.Context, index uint64) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	fs.logMu.Lock()
+	defer fs.logMu.Unlock()
+
+	if index <= fs.metadata.FirstIndex {
+		return nil // No need to truncate
+	}
+
+	file, err := os.Open(fs.logFile())
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var newEntries []*pb.LogEntry
+	lenBuf := make([]byte, 4)
+	for {
+		if _, err := io.ReadFull(file, lenBuf); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		length := binary.BigEndian.Uint32(lenBuf)
+		data := make([]byte, length)
+		if _, err := io.ReadFull(file, data); err != nil {
+			return err
+		}
+		entry := &pb.LogEntry{}
+		if err := proto.Unmarshal(data, entry); err != nil {
+			return err
+		}
+		if entry.Index >= index {
+			newEntries = append(newEntries, entry)
+		}
+	}
+
+	if len(newEntries) == 0 {
+		// Remove all log entries
+		fs.metadata.FirstIndex = 0
+		fs.metadata.LastIndex = 0
+		if err := os.Truncate(fs.logFile(), 0); err != nil {
+			return err
+		}
+		return fs.saveMetadata()
+	}
+
+	// Write the remaining entries to a new file and replace the old one
+	tmpFile := fs.logFile() + ".tmp"
+	tmp, err := os.OpenFile(tmpFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, OwnRWOthR)
+	if err != nil {
+		return err
+	}
+	defer tmp.Close()
+
+	for _, entry := range newEntries {
+		record, err := fs.encodeEntry(entry)
+		if err != nil {
+			return err
+		}
+		if _, err := tmp.Write(record); err != nil {
+			return err
+		}
+	}
+
+	if err := os.Rename(tmpFile, fs.logFile()); err != nil {
+		return err
+	}
+
+	fs.metadata.FirstIndex = newEntries[0].Index
+	return fs.saveMetadata()
 }
 
 // Releases resources (no-op for FileStorage).

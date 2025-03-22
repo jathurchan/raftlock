@@ -46,8 +46,8 @@ func (ms *MemoryStorage) LoadState(ctx context.Context) (RaftState, error) {
 	return ms.state, nil
 }
 
-// Appends one or more log entries to the Raft log.
-// Always returns nil (no error) as this is an in-memory operation.
+// AppendEntries appends entries to the end of the log.
+// All entries must have contiguous indices starting from lastIndex+1.
 func (ms *MemoryStorage) AppendEntries(ctx context.Context, entries []*pb.LogEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -57,6 +57,13 @@ func (ms *MemoryStorage) AppendEntries(ctx context.Context, entries []*pb.LogEnt
 	}
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	lastIndex := uint64(0)
+	if len(ms.log) > 0 {
+		lastIndex = ms.log[len(ms.log)-1].Index
+	}
+	if err := CheckEntriesContiguity(entries, lastIndex); err != nil {
+		return err
+	}
 	ms.log = append(ms.log, entries...)
 	return nil
 }
@@ -92,17 +99,17 @@ func (ms *MemoryStorage) GetEntries(ctx context.Context, low, high uint64) ([]*p
 
 // Returns the log entry at the specified index.
 // If the index is out of bounds (i.e., before the first or after the last entry),
-// ErrIndexOutOfRange is returned.
+// ErrNotFound is returned.
 func (ms *MemoryStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	if len(ms.log) == 0 {
-		return nil, ErrIndexOutOfRange
+		return nil, ErrNotFound
 	}
 	firstIndex := ms.log[0].Index
 	lastIndex := ms.log[len(ms.log)-1].Index
 	if index < firstIndex || index > lastIndex {
-		return nil, ErrIndexOutOfRange
+		return nil, ErrNotFound
 	}
 	return ms.log[index-firstIndex], nil
 }
@@ -129,12 +136,54 @@ func (ms *MemoryStorage) FirstIndex() uint64 {
 
 // Removes all log entries with indices greater than or equal to the given index.
 func (ms *MemoryStorage) TruncateSuffix(ctx context.Context, index uint64) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if len(ms.log) == 0 {
+		return nil
+	}
+	firstIndex := ms.log[0].Index
+	lastIndex := ms.log[len(ms.log)-1].Index
+	if index > lastIndex {
+		return nil // no need to truncate
+	}
+	if index <= firstIndex {
+		ms.log = []*pb.LogEntry{} // clear all logs
+		return nil
+	}
+	truncateIdx := int(index - firstIndex)
+	ms.log = ms.log[:truncateIdx]
+	return nil
 }
 
 // Removes all log entries with indices less than the given index.
+// If the given index is greater than all existing indices, it preserves only the
+// last entry to maintain the log's state. If the index is less than or equal to
+// the first entry's index, no truncation occurs.
 func (ms *MemoryStorage) TruncatePrefix(ctx context.Context, index uint64) error {
-	return ErrNotImplemented
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if len(ms.log) == 0 {
+		return nil
+	}
+	firstIndex := ms.log[0].Index
+	lastIndex := ms.log[len(ms.log)-1].Index
+	if index > lastIndex {
+		lastEntry := ms.log[len(ms.log)-1]
+		ms.log = []*pb.LogEntry{lastEntry}
+		return nil
+	}
+	if index <= firstIndex {
+		return nil
+	}
+	truncateIdx := int(index - firstIndex)
+	ms.log = ms.log[truncateIdx:]
+	return nil
 }
 
 // Releases resources (no-op for MemoryStorage).
