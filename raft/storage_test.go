@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"slices"
+
 	pb "github.com/jathurchan/raftlock/proto"
 )
 
-// Common test setup and teardown utilities
 type storageTestSuite struct {
 	t       *testing.T
 	ctx     context.Context
@@ -19,7 +20,6 @@ type storageTestSuite struct {
 	tempDir string
 }
 
-// Setup creates a new storage instance for testing
 func setupStorageTest(t *testing.T, storageType StorageType) *storageTestSuite {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -59,10 +59,10 @@ func setupStorageTest(t *testing.T, storageType StorageType) *storageTestSuite {
 	}
 }
 
-// Helper to create log entries for testing
+// Helper method to create log entries for testing
 func createTestLogEntries(startIndex uint64, count int) []*pb.LogEntry {
 	entries := make([]*pb.LogEntry, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		entries[i] = &pb.LogEntry{
 			Index:   startIndex + uint64(i),
 			Term:    uint64(i) + 1,
@@ -72,7 +72,7 @@ func createTestLogEntries(startIndex uint64, count int) []*pb.LogEntry {
 	return entries
 }
 
-// Helper to verify log entries match expected values
+// Helper method to verify log entries match expected values
 func verifyLogEntries(t *testing.T, actual, expected []*pb.LogEntry) {
 	t.Helper()
 	if len(actual) != len(expected) {
@@ -231,7 +231,7 @@ func testLogEntryOperations(t *testing.T, suite *storageTestSuite) {
 		t.Fatalf("Failed to retrieve all entries after second append: %v", err)
 	}
 
-	combined := append([]*pb.LogEntry{}, testEntries...)
+	combined := slices.Clone(testEntries)
 	combined = append(combined, moreEntries...)
 	verifyLogEntries(t, allEntries, combined)
 }

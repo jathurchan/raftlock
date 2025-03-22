@@ -315,8 +315,9 @@ func (fs *FileStorage) readEntriesInRange(ctx context.Context, file *os.File, lo
 }
 
 // Retrieves a single log entry at the given index.
+// Log indices start at 1.
 // Returns ErrNotFound if the index is outside the known range.
-// Returns nil, nil if the entry is not found (e.g., truncated or corrupted).
+// Returns ErrCorruptedData if the entry cannot be read (e.g., file missing, corrupted, or truncated).
 func (fs *FileStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry, error) {
 	fs.logMu.RLock()
 	defer fs.logMu.RUnlock()
@@ -328,7 +329,7 @@ func (fs *FileStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry
 	file, err := os.Open(fs.logFile())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, ErrCorruptedData
 		}
 		return nil, err
 	}
@@ -337,7 +338,8 @@ func (fs *FileStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry
 }
 
 // Helper method to scan the file and returns the entry with the exact index.
-// Returns nil, nil if not found.
+// Returns ErrCorruptedData if an entry cannot be read or parsed correctly.
+// Returns ErrNotFound if the entry does not exist in the file.
 func (fs *FileStorage) readSingleEntry(ctx context.Context, file *os.File, index uint64) (*pb.LogEntry, error) {
 	lenBuf := make([]byte, 4)
 	for {
@@ -451,6 +453,9 @@ func (fs *FileStorage) TruncateSuffix(ctx context.Context, index uint64) error {
 }
 
 // TruncatePrefix removes all log entries with indices less than the given index.
+// If the given index is greater than all existing indices, it preserves only the
+// last entry to maintain the log's state. If the index is less than or equal to
+// the first entry's index, no truncation occurs.
 func (fs *FileStorage) TruncatePrefix(ctx context.Context, index uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err

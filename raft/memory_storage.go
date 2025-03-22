@@ -69,7 +69,7 @@ func (ms *MemoryStorage) AppendEntries(ctx context.Context, entries []*pb.LogEnt
 }
 
 // Returns log entries in the range [low, high).
-// Log indices start at 1. 'low' is inclusive, 'high' is exclusive.
+// Log indices start at 1. `low` is inclusive, `high` is exclusive.
 // The range is automatically adjusted to the available entries.
 // Returns an empty slice if adjusted range is invalid.
 // Returns ErrIndexOutOfRange if low > high.
@@ -98,6 +98,7 @@ func (ms *MemoryStorage) GetEntries(ctx context.Context, low, high uint64) ([]*p
 }
 
 // Returns the log entry at the specified index.
+// Log indices start at 1.
 // If the index is out of bounds (i.e., before the first or after the last entry),
 // ErrNotFound is returned.
 func (ms *MemoryStorage) GetEntry(ctx context.Context, index uint64) (*pb.LogEntry, error) {
