@@ -6,7 +6,6 @@ on:
   pull_request:
   workflow_dispatch:  # Allow manual workflow runs
 
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -53,11 +52,21 @@ jobs:
       
       - name: Run tests with coverage (excluding testutil)
         run: |
-          go test ./raft -race -coverprofile=coverage.out -covermode=atomic
+          go test -v ./raft -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
         
+      - name: ✅ Show test results and coverage %
+        run: |
+          echo "### ✅ Test Results:"
+          grep -E '^(=== RUN|--- (PASS|FAIL))' test-output.txt \
+            | sed -E 's/=== RUN +/Running: /; s/--- PASS: /✅ Passed: /; s/--- FAIL: /❌ Failed: /'
+
+          echo ""
+          echo "### 📊 Total Coverage:"
+          go tool cover -func=coverage.out | grep total
+
       - name: Generate coverage report
         run: go tool cover -html=coverage.out -o coverage.html
-      
+
       - name: Upload coverage report as artifact
         uses: actions/upload-artifact@v4
         with:
@@ -71,5 +80,5 @@ jobs:
           flags: unittests
           name: codecov-${{ matrix.go-version }}
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true  # Fail workflow if Codecov upload fails
+          fail_ci_if_error: true
           verbose: true
