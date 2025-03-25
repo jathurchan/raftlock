@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package raft;
+
+option go_package = "./proto";
+
+service Raft {
+    // RequestVote RPC is invoked by candidates to gather votes.
+    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+
+    // AppendEntries RPC is invoked by leader to replicate log entries log entries and also used as heartbeat.
+    rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+}
+
+// LogEntry represents an entry in the replicated log.
+message LogEntry {
+    uint64 term = 1;    // Term when entry was received by leader.
+    uint64 index = 2;    // Index in the log.
+    bytes command = 3;     // Command to be applied to the state machine.
+}
+
+message RequestVoteRequest {
+    uint64 term = 1;            // Candidate's term.
+    uint64 candidate_id = 2;    // Candidate requesting vote.
+    uint64 last_log_index = 3;  // Index of candidate's last log entry.
+    uint64 last_log_term = 4;   // Term of candidate's last log entry.
+}
+
+message RequestVoteResponse {
+    uint64 term = 1;        // Current term, for candidate to update itself.
+    bool vote_granted = 2;  // True means candidate received vote.
+}
+
+message AppendEntriesRequest {
+    uint64 term = 1;                // Leader's term.
+    uint64 leader_id = 2;           // So follower can redirect clients.
+    uint64 prev_log_index = 3;      // Index of log entry immediately preceding new ones.
+    uint64 prev_log_term = 4;       // Term of prevLogIndex entry.
+    repeated LogEntry entries = 5;  // Log entries to store (empty for heartbeat; may send more than one for efficiency).
+    uint64 leader_commit = 6;       // Leader's commitIndex.
+}
+
+message AppendEntriesResponse {
+    uint64 term = 1;    // Current term, for leader to update itself.
+    bool success = 2;   // True if follower contained entry matching prevLogIndex and prevLogTerm.
+}
