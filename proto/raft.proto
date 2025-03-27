@@ -10,6 +10,9 @@ service Raft {
 
     // AppendEntries RPC is invoked by leader to replicate log entries log entries and also used as heartbeat.
     rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+
+    // InstallSnapshot is invoked by leader to send chunks of a snapshot to a follower. Leaders always send chunks in order.
+    rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
 }
 
 // LogEntry represents an entry in the replicated log.
@@ -21,7 +24,7 @@ message LogEntry {
 
 message RequestVoteRequest {
     uint64 term = 1;            // Candidate's term.
-    uint64 candidate_id = 2;    // Candidate requesting vote.
+    int64 candidate_id = 2;     // Candidate requesting vote (-1 if none).
     uint64 last_log_index = 3;  // Index of candidate's last log entry.
     uint64 last_log_term = 4;   // Term of candidate's last log entry.
 }
@@ -43,4 +46,18 @@ message AppendEntriesRequest {
 message AppendEntriesResponse {
     uint64 term = 1;    // Current term, for leader to update itself.
     bool success = 2;   // True if follower contained entry matching prevLogIndex and prevLogTerm.
+}
+
+message InstallSnapshotRequest {
+    uint64 term = 1;                // Leader's term.
+    int64 leader_id = 2;           // So follower can redirect clients (-1 if none).
+    uint64 last_included_index = 3; // The snapshot replaces all entries up through and including this index.
+    uint64 last_included_term = 4;  // Term of lastIncludedIndex.
+    uint64 offset = 5;              // byte offset where chunk is positioned in the snapshot file.
+    bytes data = 6;                 // raw bytes of the snapshot chunk, starting at offset.
+    bool done = 7;                  // true if this is the last chunk.
+}
+
+message InstallSnapshotResponse {
+    uint64 term = 1;    // Current term, for leader to update itself.
 }
