@@ -4,6 +4,186 @@ import (
 	"testing"
 )
 
+func TestNewRaftConfig(t *testing.T) {
+	// Test with default options - should succeed
+	t.Run("default options", func(t *testing.T) {
+		options := DefaultRaftOptions()
+		config, err := NewRaftConfig(options)
+
+		if err != nil {
+			t.Errorf("Expected no error with default options, got: %v", err)
+		}
+
+		if config.options != options {
+			t.Errorf("Expected config.options to be the same as input options")
+		}
+	})
+
+	// Test with valid custom options - should succeed
+	t.Run("valid custom options", func(t *testing.T) {
+		options := DefaultRaftOptions().
+			WithElectionTicks(20).
+			WithHeartbeatTicks(2).
+			WithRandomizationFactor(0.5).
+			WithMaxEntriesPerRequest(200).
+			WithSnapshotThreshold(20000).
+			WithStorageSyncDelay(10).
+			WithLogCompactionMinEntries(6000).
+			WithApplyTickCount(2)
+
+		config, err := NewRaftConfig(options)
+
+		if err != nil {
+			t.Errorf("Expected no error with valid custom options, got: %v", err)
+		}
+
+		if config.options != options {
+			t.Errorf("Expected config.options to be the same as input options")
+		}
+	})
+
+	// Test with invalid options - should fail
+	t.Run("invalid options", func(t *testing.T) {
+		// Test cases based on validation rules from TestValidate
+		invalidOptionsCases := []struct {
+			name          string
+			modifyOptions func(RaftOptions) RaftOptions
+		}{
+			{
+				name: "negative HeartbeatTickCount",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.HeartbeatTickCount = -1
+					return o
+				},
+			},
+			{
+				name: "zero HeartbeatTickCount",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.HeartbeatTickCount = 0
+					return o
+				},
+			},
+			{
+				name: "ElectionTickCount < 3 * HeartbeatTickCount",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.HeartbeatTickCount = 4
+					o.ElectionTickCount = 11
+					return o
+				},
+			},
+			{
+				name: "negative ElectionRandomizationFactor",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.ElectionRandomizationFactor = -0.1
+					return o
+				},
+			},
+			{
+				name: "ElectionRandomizationFactor > 1.0",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.ElectionRandomizationFactor = 1.1
+					return o
+				},
+			},
+			{
+				name: "zero MaxLogEntriesPerRequest",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.MaxLogEntriesPerRequest = 0
+					return o
+				},
+			},
+			{
+				name: "SnapshotThreshold < 1000",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.SnapshotThreshold = 999
+					return o
+				},
+			},
+			{
+				name: "zero StorageSyncDelay",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.StorageSyncDelay = 0
+					return o
+				},
+			},
+			{
+				name: "StorageSyncDelay > 100",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.StorageSyncDelay = 101
+					return o
+				},
+			},
+			{
+				name: "zero LogCompactionMinEntries",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.LogCompactionMinEntries = 0
+					return o
+				},
+			},
+			{
+				name: "zero ApplyTickCount",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.ApplyTickCount = 0
+					return o
+				},
+			},
+			{
+				name: "HeartbeatTickCount >= ElectionTickCount",
+				modifyOptions: func(o RaftOptions) RaftOptions {
+					o.HeartbeatTickCount = 15
+					o.ElectionTickCount = 15
+					return o
+				},
+			},
+		}
+
+		for _, tc := range invalidOptionsCases {
+			t.Run(tc.name, func(t *testing.T) {
+				options := tc.modifyOptions(DefaultRaftOptions())
+				_, err := NewRaftConfig(options)
+
+				if err == nil {
+					t.Errorf("Expected error with invalid options (%s), got nil", tc.name)
+				}
+			})
+		}
+	})
+
+	// Edge case: test that the returned config contains a copy of options, not a reference
+	t.Run("config contains copy of options", func(t *testing.T) {
+		options := DefaultRaftOptions()
+		config, err := NewRaftConfig(options)
+
+		if err != nil {
+			t.Errorf("Expected no error with default options, got: %v", err)
+		}
+
+		// Modify original options
+		originalElectionTicks := options.ElectionTickCount
+		options.ElectionTickCount = 20
+
+		// Config's options should remain unchanged
+		if config.options.ElectionTickCount != originalElectionTicks {
+			t.Errorf("Expected config.options to not be affected by changes to original options")
+		}
+	})
+}
+
+// Test that NewRaftConfig properly propagates errors from Validate()
+func TestNewRaftConfigErrorPropagation(t *testing.T) {
+	// Create invalid options that will fail validation
+	options := DefaultRaftOptions()
+	options.HeartbeatTickCount = 0 // This will cause Validate() to return an error
+
+	// Call NewRaftConfig
+	_, err := NewRaftConfig(options)
+
+	// Check that we got an error
+	if err == nil {
+		t.Errorf("Expected error from NewRaftConfig with invalid options, got nil")
+	}
+}
+
 func TestDefaultRaftOptions(t *testing.T) {
 	options := DefaultRaftOptions()
 

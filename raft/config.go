@@ -2,6 +2,17 @@ package raft
 
 import "fmt"
 
+type RaftConfig struct {
+	options RaftOptions
+}
+
+func NewRaftConfig(options RaftOptions) (RaftConfig, error) {
+	if err := options.Validate(); err != nil {
+		return RaftConfig{}, err
+	}
+	return RaftConfig{options: options}, nil
+}
+
 // RaftOptions defines configuration options for a Raft instance.
 // These options control timing, storage, and behavior parameters.
 type RaftOptions struct {
