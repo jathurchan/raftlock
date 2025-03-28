@@ -289,9 +289,14 @@ func TestValidate(t *testing.T) {
 			wantError:     true,
 		},
 		{
-			name:          "HeartbeatTickCount >= ElectionTickCount",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.HeartbeatTickCount = 10; o.ElectionTickCount = 10; return o },
-			wantError:     true,
+			name: "HeartbeatTickCount >= ElectionTickCount",
+			modifyOptions: func(o RaftOptions) RaftOptions {
+				o.HeartbeatTickCount = 10
+				o.ElectionTickCount = 15
+				o.HeartbeatTickCount = 15
+				return o
+			},
+			wantError: true,
 		},
 		{
 			name: "valid custom options",

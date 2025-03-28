@@ -140,6 +140,10 @@ func (o RaftOptions) Validate() error {
 	if o.HeartbeatTickCount <= 0 {
 		return fmt.Errorf("HeartbeatTickCount must be positive, got %d", o.HeartbeatTickCount)
 	}
+	if o.HeartbeatTickCount >= o.ElectionTickCount {
+		return fmt.Errorf("HeartbeatTickCount (%d) must be less than ElectionTickCount (%d)",
+			o.HeartbeatTickCount, o.ElectionTickCount)
+	}
 	minElectionTicks := o.HeartbeatTickCount * 3
 	if o.ElectionTickCount < minElectionTicks {
 		return fmt.Errorf("ElectionTickCount (%d) should be at least 3x HeartbeatTickCount (%d)",
@@ -165,12 +169,6 @@ func (o RaftOptions) Validate() error {
 	}
 	if o.ApplyTickCount <= 0 {
 		return fmt.Errorf("ApplyTickCount must be positive, got %d", o.ApplyTickCount)
-	}
-
-	// Ensure heartbeat interval is less than election timeout
-	if o.HeartbeatTickCount >= o.ElectionTickCount {
-		return fmt.Errorf("HeartbeatTickCount (%d) must be less than ElectionTickCount (%d)",
-			o.HeartbeatTickCount, o.ElectionTickCount)
 	}
 
 	return nil
