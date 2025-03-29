@@ -34,7 +34,12 @@ func (l *StdLogger) log(level string, msg string, kvs ...any) {
 	}
 
 	// Add message-specific key-value pairs
-	for i := 0; i < len(kvs)-1; i += 2 {
+	for i := 0; i < len(kvs); i += 2 {
+		// Check if we have both key and value
+		if i+1 >= len(kvs) {
+			break // Odd number of arguments, stop processing
+		}
+
 		key, ok := kvs[i].(string)
 		if !ok {
 			continue // skip malformed key
@@ -84,7 +89,12 @@ func (l *StdLogger) cloneWithContext(extra map[string]any) *StdLogger {
 // Malformed pairs (non-string keys or unmatched values) are ignored.
 func (l *StdLogger) With(kvs ...any) Logger {
 	ctx := make(map[string]any)
-	for i := 0; i < len(kvs)-1; i += 2 {
+	for i := 0; i < len(kvs); i += 2 {
+		// Check if we have both key and value
+		if i+1 >= len(kvs) {
+			break // Odd number of arguments, stop processing
+		}
+
 		key, ok := kvs[i].(string)
 		if !ok {
 			continue // skip invalid key
