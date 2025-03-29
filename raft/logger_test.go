@@ -18,7 +18,8 @@ func TestNoOpLogger(t *testing.T) {
 	logger.Warnw("warn message", "key", "value")
 	logger.Errorw("error message", "key", "value")
 
-	// We don't test Fatalw directly since it would terminate the test process
+	// NoOpLogger.Fatalw should not terminate the process
+	logger.Fatalw("fatal message", "key", "value")
 
 	// Test context enrichment methods
 	enriched := logger.With("key", "value")
