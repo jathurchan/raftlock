@@ -2,37 +2,104 @@ package raft
 
 import "fmt"
 
-type RaftConfig struct {
-	options RaftOptions
+// RaftID uniquely identifies a Raft node within the cluster.
+type RaftID string
+
+// PeerConfig represents a static configuration entry for a peer node in the Raft cluster.
+type PeerConfig struct {
+	ID      RaftID // Unique identifier of the peer node.
+	Address string // Network address for RPC communication.
 }
 
-func NewRaftConfig(options RaftOptions) (RaftConfig, error) {
-	if err := options.Validate(); err != nil {
-		return RaftConfig{}, err
+// Config contains the full configuration for a Raft node instance.
+// Includes identity, peer information, runtime parameters, and injected dependencies.
+type Config struct {
+	ID    RaftID       // Unique identifier of the current node.
+	Peers []PeerConfig // List of peer nodes in the cluster, including the current node.
+
+	Options RaftOptions // Core Raft parameters.
+
+	EnableReadIndex   bool // Feature Flag: Enables linearizable reads using the read index protocol.
+	EnableLeaderLease bool // Feature Flag: Enables serving reads using leader leases when quorum is stable.
+	PreVoteEnabled    bool // Feature Flag: Enables PreVote phase before elections to reduce unnecessary disruptions.
+
+	// MaxApplyBatchSize limits how many committed log entries are applied to the
+	// state machine in a single batch (tick). This helps balance throughput and
+	// responsiveness by applying entries in controlled bursts.
+	//
+	// A smaller value may improve responsiveness (less latency per tick),
+	// while a larger value increases throughput (fewer apply loops).
+	//
+	// Default: 10
+	MaxApplyBatchSize int
+
+	// MaxSnapshotChunkSize limits the size (in bytes) of each snapshot chunk
+	// sent during the InstallSnapshot RPC. This helps control the memory and
+	// network overhead when transmitting large snapshots.
+	//
+	// If set to 0, snapshot chunking is disabled and the full snapshot is sent
+	// in one RPC call. This is fine for small snapshots but may be problematic
+	// for large clusters or slow networks.
+	//
+	// Use chunking to reduce the risk of timeouts or dropped connections.
+	//
+	// Default: 0 (no chunking)
+	MaxSnapshotChunkSize int
+
+	Storage      Storage      // Persistent storage interface for logs and snapshots.
+	Transport    Transport    // RPC transport layer for inter-node communication.
+	StateMachine StateMachine // Application-defined state machine to apply committed commands.
+	Logger       Logger       // Logger for debugging and observability.
+	Metrics      Metrics      // Metrics collector for instrumentation.
+}
+
+// WithDefaults applies recommended default values to optional fields in the Config.
+func (c Config) WithDefaults() Config {
+	if c.MaxApplyBatchSize == 0 {
+		c.MaxApplyBatchSize = 10
 	}
-	return RaftConfig{options: options}, nil
+	if c.MaxSnapshotChunkSize < 0 {
+		c.MaxSnapshotChunkSize = 0
+	}
+	if !c.EnableReadIndex {
+		c.EnableReadIndex = true
+	}
+	if !c.EnableLeaderLease {
+		c.EnableLeaderLease = true
+	}
+	if !c.PreVoteEnabled {
+		c.PreVoteEnabled = true
+	}
+	return c
 }
 
-// RaftOptions defines configuration options for a Raft instance.
-// These options control timing, storage, and behavior parameters.
+// NewRaftConfig creates a Config using the provided RaftOptions,
+// validates them, and applies recommended default values to optional fields.
+func NewRaftConfig(options RaftOptions) (Config, error) {
+	if err := options.Validate(); err != nil {
+		return Config{}, err
+	}
+	return Config{
+		Options: options,
+	}.WithDefaults(), nil
+}
+
+// RaftOptions defines the internal control parameters that govern
+// Raft's behavior around elections, heartbeats, log replication, and storage.
 type RaftOptions struct {
-	// ElectionTickCount is the number of ticks that must elapse before
-	// triggering an election if no heartbeat is received from the leader.
-	// This is a logical time value, not wall-clock time.
-	// Default: 10 ticks
+	// Number of logical ticks that must pass without a heartbeat before triggering a new election.
+	// A higher value increases failover latency but improves stability.
+	// Default: 10
 	ElectionTickCount int
 
-	// HeartbeatTickCount is the number of ticks that must elapse before
-	// a leader sends heartbeats to followers.
-	// This is a logical time value, not wall-clock time.
-	// Default: 1 tick
+	// Number of ticks between heartbeat messages sent by the leader.
+	// Must be significantly lower than ElectionTickCount.
+	// Default: 1
 	HeartbeatTickCount int
 
-	// ElectionRandomizationFactor determines the range of randomization added to
-	// election timeouts to avoid split votes. A value of 0.2 means the actual
-	// election timeout will be between ElectionTickCount and
-	// ElectionTickCount * (1 + ElectionRandomizationFactor).
-	// Default: 0.2 (20% randomization)
+	// Randomization factor added to the election timeout to reduce the chance of split votes.
+	// A value of 0.2 results in timeouts between ElectionTickCount and ElectionTickCount * 1.2.
+	// Default: 0.2
 	ElectionRandomizationFactor float64
 
 	// MaxLogEntriesPerRequest limits the number of log entries sent in a single
@@ -40,23 +107,23 @@ type RaftOptions struct {
 	// Default: 100 entries
 	MaxLogEntriesPerRequest int
 
-	// SnapshotThreshold is the number of log entries that must exist after the
-	// last snapshot before considering creating a new snapshot.
-	// Default: 10000 entries
+	// Number of new log entries that must be applied since the last snapshot before creating a new one.
+	// Prevents log growth by periodically snapshotting state.
+	// Default: 10,000
 	SnapshotThreshold int
 
-	// StorageSyncDelay controls how often (in ticks) to force persistent storage sync.
-	// A value of 1 means sync on every tick, higher values reduce I/O pressure.
-	// Default: 5 ticks
+	// Number of ticks between storage sync operations.
+	// A value of 1 means syncing every tick; higher values reduce disk I/O at the cost of durability risk.
+	// Default: 5
 	StorageSyncDelay int
 
-	// LogCompactionMinEntries is the minimum number of entries that must exist
-	// in the log before considering log compaction.
-	// Default: 5000 entries
+	// Minimum number of log entries required before log compaction can be considered.
+	// Helps prevent aggressive or premature compactions.
+	// Default: 5,000
 	LogCompactionMinEntries int
 
-	// ApplyTickCount is how often (in ticks) to check for and apply committed entries.
-	// Default: 1 tick
+	// Number of ticks between checks to apply committed entries to the state machine.
+	// Default: 1
 	ApplyTickCount int
 }
 

@@ -4,6 +4,80 @@ import (
 	"testing"
 )
 
+func TestConfigWithDefaults(t *testing.T) {
+	// Test with empty config
+	t.Run("empty config", func(t *testing.T) {
+		config := Config{}
+		defaulted := config.WithDefaults()
+
+		if defaulted.MaxApplyBatchSize != 10 {
+			t.Errorf("Expected MaxApplyBatchSize to be 10, got %d", defaulted.MaxApplyBatchSize)
+		}
+		if defaulted.MaxSnapshotChunkSize != 0 {
+			t.Errorf("Expected MaxSnapshotChunkSize to be 0, got %d", defaulted.MaxSnapshotChunkSize)
+		}
+		if !defaulted.EnableReadIndex {
+			t.Errorf("Expected EnableReadIndex to be true")
+		}
+		if !defaulted.EnableLeaderLease {
+			t.Errorf("Expected EnableLeaderLease to be true")
+		}
+		if !defaulted.PreVoteEnabled {
+			t.Errorf("Expected PreVoteEnabled to be true")
+		}
+	})
+
+	// Test with negative MaxSnapshotChunkSize
+	t.Run("negative MaxSnapshotChunkSize", func(t *testing.T) {
+		config := Config{
+			MaxSnapshotChunkSize: -1024,
+		}
+		defaulted := config.WithDefaults()
+
+		if defaulted.MaxSnapshotChunkSize != 0 {
+			t.Errorf("Expected negative MaxSnapshotChunkSize to be corrected to 0, got %d", defaulted.MaxSnapshotChunkSize)
+		}
+	})
+
+	// Test that non-default values are preserved
+	t.Run("preserve custom values", func(t *testing.T) {
+		config := Config{
+			MaxApplyBatchSize:    20,
+			MaxSnapshotChunkSize: 1024,
+		}
+		defaulted := config.WithDefaults()
+
+		if defaulted.MaxApplyBatchSize != 20 {
+			t.Errorf("Expected MaxApplyBatchSize to be preserved as 20, got %d", defaulted.MaxApplyBatchSize)
+		}
+		if defaulted.MaxSnapshotChunkSize != 1024 {
+			t.Errorf("Expected MaxSnapshotChunkSize to be preserved as 1024, got %d", defaulted.MaxSnapshotChunkSize)
+		}
+	})
+}
+
+func TestConfigFeatureFlags(t *testing.T) {
+	// Test that feature flags are enabled by default
+	t.Run("feature flags enabled by default", func(t *testing.T) {
+		config := Config{
+			EnableReadIndex:   false,
+			EnableLeaderLease: false,
+			PreVoteEnabled:    false,
+		}
+		defaulted := config.WithDefaults()
+
+		if !defaulted.EnableReadIndex {
+			t.Errorf("Expected EnableReadIndex to be true after WithDefaults")
+		}
+		if !defaulted.EnableLeaderLease {
+			t.Errorf("Expected EnableLeaderLease to be true after WithDefaults")
+		}
+		if !defaulted.PreVoteEnabled {
+			t.Errorf("Expected PreVoteEnabled to be true after WithDefaults")
+		}
+	})
+}
+
 func TestNewRaftConfig(t *testing.T) {
 	// Test with default options - should succeed
 	t.Run("default options", func(t *testing.T) {
@@ -14,7 +88,7 @@ func TestNewRaftConfig(t *testing.T) {
 			t.Errorf("Expected no error with default options, got: %v", err)
 		}
 
-		if config.options != options {
+		if config.Options != options {
 			t.Errorf("Expected config.options to be the same as input options")
 		}
 	})
@@ -37,7 +111,7 @@ func TestNewRaftConfig(t *testing.T) {
 			t.Errorf("Expected no error with valid custom options, got: %v", err)
 		}
 
-		if config.options != options {
+		if config.Options != options {
 			t.Errorf("Expected config.options to be the same as input options")
 		}
 	})
@@ -163,7 +237,7 @@ func TestNewRaftConfig(t *testing.T) {
 		options.ElectionTickCount = 20
 
 		// Config's options should remain unchanged
-		if config.options.ElectionTickCount != originalElectionTicks {
+		if config.Options.ElectionTickCount != originalElectionTicks {
 			t.Errorf("Expected config.options to not be affected by changes to original options")
 		}
 	})
