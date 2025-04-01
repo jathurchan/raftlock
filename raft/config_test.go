@@ -4,263 +4,10 @@ import (
 	"testing"
 )
 
-func TestConfigWithDefaults(t *testing.T) {
-	// Test with empty config
-	t.Run("empty config", func(t *testing.T) {
-		config := Config{}
-		defaulted := config.WithDefaults()
+func TestDefaultOptions(t *testing.T) {
+	options := DefaultOptions()
 
-		if defaulted.MaxApplyBatchSize != 10 {
-			t.Errorf("Expected MaxApplyBatchSize to be 10, got %d", defaulted.MaxApplyBatchSize)
-		}
-		if defaulted.MaxSnapshotChunkSize != 0 {
-			t.Errorf("Expected MaxSnapshotChunkSize to be 0, got %d", defaulted.MaxSnapshotChunkSize)
-		}
-		if !defaulted.EnableReadIndex {
-			t.Errorf("Expected EnableReadIndex to be true")
-		}
-		if !defaulted.EnableLeaderLease {
-			t.Errorf("Expected EnableLeaderLease to be true")
-		}
-		if !defaulted.PreVoteEnabled {
-			t.Errorf("Expected PreVoteEnabled to be true")
-		}
-	})
-
-	// Test with negative MaxSnapshotChunkSize
-	t.Run("negative MaxSnapshotChunkSize", func(t *testing.T) {
-		config := Config{
-			MaxSnapshotChunkSize: -1024,
-		}
-		defaulted := config.WithDefaults()
-
-		if defaulted.MaxSnapshotChunkSize != 0 {
-			t.Errorf("Expected negative MaxSnapshotChunkSize to be corrected to 0, got %d", defaulted.MaxSnapshotChunkSize)
-		}
-	})
-
-	// Test that non-default values are preserved
-	t.Run("preserve custom values", func(t *testing.T) {
-		config := Config{
-			MaxApplyBatchSize:    20,
-			MaxSnapshotChunkSize: 1024,
-		}
-		defaulted := config.WithDefaults()
-
-		if defaulted.MaxApplyBatchSize != 20 {
-			t.Errorf("Expected MaxApplyBatchSize to be preserved as 20, got %d", defaulted.MaxApplyBatchSize)
-		}
-		if defaulted.MaxSnapshotChunkSize != 1024 {
-			t.Errorf("Expected MaxSnapshotChunkSize to be preserved as 1024, got %d", defaulted.MaxSnapshotChunkSize)
-		}
-	})
-}
-
-func TestConfigFeatureFlags(t *testing.T) {
-	// Test that feature flags are enabled by default
-	t.Run("feature flags enabled by default", func(t *testing.T) {
-		config := Config{
-			EnableReadIndex:   false,
-			EnableLeaderLease: false,
-			PreVoteEnabled:    false,
-		}
-		defaulted := config.WithDefaults()
-
-		if !defaulted.EnableReadIndex {
-			t.Errorf("Expected EnableReadIndex to be true after WithDefaults")
-		}
-		if !defaulted.EnableLeaderLease {
-			t.Errorf("Expected EnableLeaderLease to be true after WithDefaults")
-		}
-		if !defaulted.PreVoteEnabled {
-			t.Errorf("Expected PreVoteEnabled to be true after WithDefaults")
-		}
-	})
-}
-
-func TestNewRaftConfig(t *testing.T) {
-	// Test with default options - should succeed
-	t.Run("default options", func(t *testing.T) {
-		options := DefaultRaftOptions()
-		config, err := NewRaftConfig(options)
-
-		if err != nil {
-			t.Errorf("Expected no error with default options, got: %v", err)
-		}
-
-		if config.Options != options {
-			t.Errorf("Expected config.options to be the same as input options")
-		}
-	})
-
-	// Test with valid custom options - should succeed
-	t.Run("valid custom options", func(t *testing.T) {
-		options := DefaultRaftOptions().
-			WithElectionTicks(20).
-			WithHeartbeatTicks(2).
-			WithRandomizationFactor(0.5).
-			WithMaxEntriesPerRequest(200).
-			WithSnapshotThreshold(20000).
-			WithStorageSyncDelay(10).
-			WithLogCompactionMinEntries(6000).
-			WithApplyTickCount(2)
-
-		config, err := NewRaftConfig(options)
-
-		if err != nil {
-			t.Errorf("Expected no error with valid custom options, got: %v", err)
-		}
-
-		if config.Options != options {
-			t.Errorf("Expected config.options to be the same as input options")
-		}
-	})
-
-	// Test with invalid options - should fail
-	t.Run("invalid options", func(t *testing.T) {
-		// Test cases based on validation rules from TestValidate
-		invalidOptionsCases := []struct {
-			name          string
-			modifyOptions func(RaftOptions) RaftOptions
-		}{
-			{
-				name: "negative HeartbeatTickCount",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.HeartbeatTickCount = -1
-					return o
-				},
-			},
-			{
-				name: "zero HeartbeatTickCount",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.HeartbeatTickCount = 0
-					return o
-				},
-			},
-			{
-				name: "ElectionTickCount < 3 * HeartbeatTickCount",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.HeartbeatTickCount = 4
-					o.ElectionTickCount = 11
-					return o
-				},
-			},
-			{
-				name: "negative ElectionRandomizationFactor",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.ElectionRandomizationFactor = -0.1
-					return o
-				},
-			},
-			{
-				name: "ElectionRandomizationFactor > 1.0",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.ElectionRandomizationFactor = 1.1
-					return o
-				},
-			},
-			{
-				name: "zero MaxLogEntriesPerRequest",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.MaxLogEntriesPerRequest = 0
-					return o
-				},
-			},
-			{
-				name: "SnapshotThreshold < 1000",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.SnapshotThreshold = 999
-					return o
-				},
-			},
-			{
-				name: "zero StorageSyncDelay",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.StorageSyncDelay = 0
-					return o
-				},
-			},
-			{
-				name: "StorageSyncDelay > 100",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.StorageSyncDelay = 101
-					return o
-				},
-			},
-			{
-				name: "zero LogCompactionMinEntries",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.LogCompactionMinEntries = 0
-					return o
-				},
-			},
-			{
-				name: "zero ApplyTickCount",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.ApplyTickCount = 0
-					return o
-				},
-			},
-			{
-				name: "HeartbeatTickCount >= ElectionTickCount",
-				modifyOptions: func(o RaftOptions) RaftOptions {
-					o.HeartbeatTickCount = 15
-					o.ElectionTickCount = 15
-					return o
-				},
-			},
-		}
-
-		for _, tc := range invalidOptionsCases {
-			t.Run(tc.name, func(t *testing.T) {
-				options := tc.modifyOptions(DefaultRaftOptions())
-				_, err := NewRaftConfig(options)
-
-				if err == nil {
-					t.Errorf("Expected error with invalid options (%s), got nil", tc.name)
-				}
-			})
-		}
-	})
-
-	// Edge case: test that the returned config contains a copy of options, not a reference
-	t.Run("config contains copy of options", func(t *testing.T) {
-		options := DefaultRaftOptions()
-		config, err := NewRaftConfig(options)
-
-		if err != nil {
-			t.Errorf("Expected no error with default options, got: %v", err)
-		}
-
-		// Modify original options
-		originalElectionTicks := options.ElectionTickCount
-		options.ElectionTickCount = 20
-
-		// Config's options should remain unchanged
-		if config.Options.ElectionTickCount != originalElectionTicks {
-			t.Errorf("Expected config.options to not be affected by changes to original options")
-		}
-	})
-}
-
-// Test that NewRaftConfig properly propagates errors from Validate()
-func TestNewRaftConfigErrorPropagation(t *testing.T) {
-	// Create invalid options that will fail validation
-	options := DefaultRaftOptions()
-	options.HeartbeatTickCount = 0 // This will cause Validate() to return an error
-
-	// Call NewRaftConfig
-	_, err := NewRaftConfig(options)
-
-	// Check that we got an error
-	if err == nil {
-		t.Errorf("Expected error from NewRaftConfig with invalid options, got nil")
-	}
-}
-
-func TestDefaultRaftOptions(t *testing.T) {
-	options := DefaultRaftOptions()
-
+	// Verify default values
 	if options.ElectionTickCount != 10 {
 		t.Errorf("Expected ElectionTickCount to be 10, got %d", options.ElectionTickCount)
 	}
@@ -292,331 +39,648 @@ func TestDefaultRaftOptions(t *testing.T) {
 	}
 }
 
-func TestWithElectionTicks(t *testing.T) {
-	options := DefaultRaftOptions()
+func TestDefaultFeatureFlags(t *testing.T) {
+	flags := DefaultFeatureFlags()
 
-	// Test valid value
-	modified := options.WithElectionTicks(20)
-	if modified.ElectionTickCount != 20 {
-		t.Errorf("Expected ElectionTickCount to be 20, got %d", modified.ElectionTickCount)
+	if !flags.EnableReadIndex {
+		t.Errorf("Expected EnableReadIndex to be true by default")
+	}
+	if !flags.EnableLeaderLease {
+		t.Errorf("Expected EnableLeaderLease to be true by default")
+	}
+	if !flags.PreVoteEnabled {
+		t.Errorf("Expected PreVoteEnabled to be true by default")
 	}
 
-	// Test that original is unchanged
-	if options.ElectionTickCount != 10 {
-		t.Errorf("Original options should be unchanged, expected 10, got %d", options.ElectionTickCount)
+	// Ensure default flags are valid
+	if err := flags.Validate(); err != nil {
+		t.Errorf("Default feature flags should be valid, got error: %v", err)
 	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive ElectionTickCount")
-		}
-	}()
-	options.WithElectionTicks(0)
 }
 
-func TestWithHeartbeatTicks(t *testing.T) {
-	options := DefaultRaftOptions()
+func TestDefaultTuningParams(t *testing.T) {
+	params := DefaultTuningParams()
 
-	// Test valid value
-	modified := options.WithHeartbeatTicks(2)
-	if modified.HeartbeatTickCount != 2 {
-		t.Errorf("Expected HeartbeatTickCount to be 2, got %d", modified.HeartbeatTickCount)
+	if params.MaxApplyBatchSize != 10 {
+		t.Errorf("Expected MaxApplyBatchSize to be 10, got %d", params.MaxApplyBatchSize)
+	}
+	if params.MaxSnapshotChunkSize != 0 {
+		t.Errorf("Expected MaxSnapshotChunkSize to be 0, got %d", params.MaxSnapshotChunkSize)
 	}
 
-	// Test that original is unchanged
-	if options.HeartbeatTickCount != 1 {
-		t.Errorf("Original options should be unchanged, expected 1, got %d", options.HeartbeatTickCount)
+	// Ensure default params are valid
+	if err := params.Validate(); err != nil {
+		t.Errorf("Default tuning params should be valid, got error: %v", err)
 	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive HeartbeatTickCount")
-		}
-	}()
-	options.WithHeartbeatTicks(0)
 }
 
-func TestWithRandomizationFactor(t *testing.T) {
-	options := DefaultRaftOptions()
+func TestOptionsWithMethods(t *testing.T) {
+	baseOptions := DefaultOptions()
 
-	// Test valid value
-	modified := options.WithRandomizationFactor(0.5)
-	if modified.ElectionRandomizationFactor != 0.5 {
-		t.Errorf("Expected ElectionRandomizationFactor to be 0.5, got %f", modified.ElectionRandomizationFactor)
-	}
-
-	// Test that original is unchanged
-	if options.ElectionRandomizationFactor != 0.2 {
-		t.Errorf("Original options should be unchanged, expected 0.2, got %f", options.ElectionRandomizationFactor)
-	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with negative ElectionRandomizationFactor")
+	// Test each "With" method individually and verify result
+	t.Run("WithElectionTicks", func(t *testing.T) {
+		modified := baseOptions.WithElectionTicks(20)
+		if modified.ElectionTickCount != 20 {
+			t.Errorf("Expected ElectionTickCount to be 20, got %d", modified.ElectionTickCount)
 		}
-	}()
-	options.WithRandomizationFactor(-0.1)
+		// Original should be unchanged
+		if baseOptions.ElectionTickCount != 10 {
+			t.Errorf("Original options should be unchanged")
+		}
+	})
+
+	t.Run("WithHeartbeatTicks", func(t *testing.T) {
+		modified := baseOptions.WithHeartbeatTicks(2)
+		if modified.HeartbeatTickCount != 2 {
+			t.Errorf("Expected HeartbeatTickCount to be 2, got %d", modified.HeartbeatTickCount)
+		}
+	})
+
+	t.Run("WithRandomizationFactor", func(t *testing.T) {
+		modified := baseOptions.WithRandomizationFactor(0.5)
+		if modified.ElectionRandomizationFactor != 0.5 {
+			t.Errorf("Expected ElectionRandomizationFactor to be 0.5, got %f", modified.ElectionRandomizationFactor)
+		}
+	})
+
+	t.Run("WithMaxEntriesPerRequest", func(t *testing.T) {
+		modified := baseOptions.WithMaxEntriesPerRequest(200)
+		if modified.MaxLogEntriesPerRequest != 200 {
+			t.Errorf("Expected MaxLogEntriesPerRequest to be 200, got %d", modified.MaxLogEntriesPerRequest)
+		}
+	})
+
+	t.Run("WithSnapshotThreshold", func(t *testing.T) {
+		modified := baseOptions.WithSnapshotThreshold(20000)
+		if modified.SnapshotThreshold != 20000 {
+			t.Errorf("Expected SnapshotThreshold to be 20000, got %d", modified.SnapshotThreshold)
+		}
+	})
+
+	t.Run("WithStorageSyncDelay", func(t *testing.T) {
+		modified := baseOptions.WithStorageSyncDelay(10)
+		if modified.StorageSyncDelay != 10 {
+			t.Errorf("Expected StorageSyncDelay to be 10, got %d", modified.StorageSyncDelay)
+		}
+	})
+
+	t.Run("WithLogCompactionMinEntries", func(t *testing.T) {
+		modified := baseOptions.WithLogCompactionMinEntries(6000)
+		if modified.LogCompactionMinEntries != 6000 {
+			t.Errorf("Expected LogCompactionMinEntries to be 6000, got %d", modified.LogCompactionMinEntries)
+		}
+	})
+
+	t.Run("WithApplyTickCount", func(t *testing.T) {
+		modified := baseOptions.WithApplyTickCount(2)
+		if modified.ApplyTickCount != 2 {
+			t.Errorf("Expected ApplyTickCount to be 2, got %d", modified.ApplyTickCount)
+		}
+	})
+
+	// Test chained methods
+	t.Run("ChainedMethods", func(t *testing.T) {
+		modified := baseOptions.
+			WithElectionTicks(15).
+			WithHeartbeatTicks(2).
+			WithRandomizationFactor(0.3).
+			WithMaxEntriesPerRequest(150).
+			WithSnapshotThreshold(15000).
+			WithStorageSyncDelay(8).
+			WithLogCompactionMinEntries(7500).
+			WithApplyTickCount(2)
+
+		if modified.ElectionTickCount != 15 {
+			t.Errorf("Expected ElectionTickCount to be 15, got %d", modified.ElectionTickCount)
+		}
+		if modified.HeartbeatTickCount != 2 {
+			t.Errorf("Expected HeartbeatTickCount to be 2, got %d", modified.HeartbeatTickCount)
+		}
+		if modified.ElectionRandomizationFactor != 0.3 {
+			t.Errorf("Expected ElectionRandomizationFactor to be 0.3, got %f", modified.ElectionRandomizationFactor)
+		}
+		if err := modified.Validate(); err != nil {
+			t.Errorf("Chained method options should be valid, got error: %v", err)
+		}
+	})
 }
 
-func TestWithMaxEntriesPerRequest(t *testing.T) {
-	options := DefaultRaftOptions()
+func TestOptionsValidate(t *testing.T) {
+	baseOptions := DefaultOptions()
 
-	// Test valid value
-	modified := options.WithMaxEntriesPerRequest(200)
-	if modified.MaxLogEntriesPerRequest != 200 {
-		t.Errorf("Expected MaxLogEntriesPerRequest to be 200, got %d", modified.MaxLogEntriesPerRequest)
-	}
-
-	// Test that original is unchanged
-	if options.MaxLogEntriesPerRequest != 100 {
-		t.Errorf("Original options should be unchanged, expected 100, got %d", options.MaxLogEntriesPerRequest)
-	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive MaxLogEntriesPerRequest")
-		}
-	}()
-	options.WithMaxEntriesPerRequest(0)
-}
-
-func TestWithSnapshotThreshold(t *testing.T) {
-	options := DefaultRaftOptions()
-
-	// Test valid value
-	modified := options.WithSnapshotThreshold(20000)
-	if modified.SnapshotThreshold != 20000 {
-		t.Errorf("Expected SnapshotThreshold to be 20000, got %d", modified.SnapshotThreshold)
-	}
-
-	// Test that original is unchanged
-	if options.SnapshotThreshold != 10000 {
-		t.Errorf("Original options should be unchanged, expected 10000, got %d", options.SnapshotThreshold)
-	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive SnapshotThreshold")
-		}
-	}()
-	options.WithSnapshotThreshold(0)
-}
-
-func TestWithStorageSyncDelay(t *testing.T) {
-	options := DefaultRaftOptions()
-
-	// Test valid value
-	modified := options.WithStorageSyncDelay(10)
-	if modified.StorageSyncDelay != 10 {
-		t.Errorf("Expected StorageSyncDelay to be 10, got %d", modified.StorageSyncDelay)
-	}
-
-	// Test that original is unchanged
-	if options.StorageSyncDelay != 5 {
-		t.Errorf("Original options should be unchanged, expected 5, got %d", options.StorageSyncDelay)
-	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive StorageSyncDelay")
-		}
-	}()
-	options.WithStorageSyncDelay(0)
-}
-
-func TestWithLogCompactionMinEntries(t *testing.T) {
-	options := DefaultRaftOptions()
-
-	// Test valid value
-	modified := options.WithLogCompactionMinEntries(6000)
-	if modified.LogCompactionMinEntries != 6000 {
-		t.Errorf("Expected LogCompactionMinEntries to be 6000, got %d", modified.LogCompactionMinEntries)
-	}
-
-	// Test that original is unchanged
-	if options.LogCompactionMinEntries != 5000 {
-		t.Errorf("Original options should be unchanged, expected 5000, got %d", options.LogCompactionMinEntries)
-	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive LogCompactionMinEntries")
-		}
-	}()
-	options.WithLogCompactionMinEntries(0)
-}
-
-func TestWithApplyTickCount(t *testing.T) {
-	options := DefaultRaftOptions()
-
-	// Test valid value
-	modified := options.WithApplyTickCount(2)
-	if modified.ApplyTickCount != 2 {
-		t.Errorf("Expected ApplyTickCount to be 2, got %d", modified.ApplyTickCount)
-	}
-
-	// Test that original is unchanged
-	if options.ApplyTickCount != 1 {
-		t.Errorf("Original options should be unchanged, expected 1, got %d", options.ApplyTickCount)
-	}
-
-	// Test panic with invalid value
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic with non-positive ApplyTickCount")
-		}
-	}()
-	options.WithApplyTickCount(0)
-}
-
-func TestValidate(t *testing.T) {
-	tests := []struct {
+	testCases := []struct {
 		name          string
-		modifyOptions func(RaftOptions) RaftOptions
+		modifyOptions func(Options) Options
 		wantError     bool
 	}{
 		{
 			name:          "default options are valid",
-			modifyOptions: func(o RaftOptions) RaftOptions { return o },
+			modifyOptions: func(o Options) Options { return o },
 			wantError:     false,
 		},
 		{
 			name:          "negative HeartbeatTickCount",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.HeartbeatTickCount = -1; return o },
+			modifyOptions: func(o Options) Options { o.HeartbeatTickCount = -1; return o },
 			wantError:     true,
 		},
 		{
 			name:          "zero HeartbeatTickCount",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.HeartbeatTickCount = 0; return o },
-			wantError:     true,
-		},
-		{
-			name:          "ElectionTickCount < 3 * HeartbeatTickCount",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.HeartbeatTickCount = 4; o.ElectionTickCount = 11; return o },
-			wantError:     true,
-		},
-		{
-			name:          "negative ElectionRandomizationFactor",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.ElectionRandomizationFactor = -0.1; return o },
-			wantError:     true,
-		},
-		{
-			name:          "ElectionRandomizationFactor > 1.0",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.ElectionRandomizationFactor = 1.1; return o },
-			wantError:     true,
-		},
-		{
-			name:          "zero MaxLogEntriesPerRequest",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.MaxLogEntriesPerRequest = 0; return o },
-			wantError:     true,
-		},
-		{
-			name:          "SnapshotThreshold < 1000",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.SnapshotThreshold = 999; return o },
-			wantError:     true,
-		},
-		{
-			name:          "zero StorageSyncDelay",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.StorageSyncDelay = 0; return o },
-			wantError:     true,
-		},
-		{
-			name:          "StorageSyncDelay > 100",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.StorageSyncDelay = 101; return o },
-			wantError:     true,
-		},
-		{
-			name:          "zero LogCompactionMinEntries",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.LogCompactionMinEntries = 0; return o },
-			wantError:     true,
-		},
-		{
-			name:          "zero ApplyTickCount",
-			modifyOptions: func(o RaftOptions) RaftOptions { o.ApplyTickCount = 0; return o },
+			modifyOptions: func(o Options) Options { o.HeartbeatTickCount = 0; return o },
 			wantError:     true,
 		},
 		{
 			name: "HeartbeatTickCount >= ElectionTickCount",
-			modifyOptions: func(o RaftOptions) RaftOptions {
+			modifyOptions: func(o Options) Options {
 				o.HeartbeatTickCount = 10
-				o.ElectionTickCount = 15
-				o.HeartbeatTickCount = 15
 				return o
 			},
 			wantError: true,
 		},
 		{
-			name: "valid custom options",
-			modifyOptions: func(o RaftOptions) RaftOptions {
-				return o.WithElectionTicks(20).
-					WithHeartbeatTicks(2).
-					WithRandomizationFactor(0.5).
-					WithMaxEntriesPerRequest(200).
-					WithSnapshotThreshold(20000).
-					WithStorageSyncDelay(10).
-					WithLogCompactionMinEntries(6000).
-					WithApplyTickCount(2)
+			name: "ElectionTickCount < 3 * HeartbeatTickCount",
+			modifyOptions: func(o Options) Options {
+				o.HeartbeatTickCount = 4
+				o.ElectionTickCount = 11
+				return o
 			},
-			wantError: false,
+			wantError: true,
+		},
+		{
+			name:          "ElectionRandomizationFactor negative",
+			modifyOptions: func(o Options) Options { o.ElectionRandomizationFactor = -0.1; return o },
+			wantError:     true,
+		},
+		{
+			name:          "ElectionRandomizationFactor > 1.0",
+			modifyOptions: func(o Options) Options { o.ElectionRandomizationFactor = 1.1; return o },
+			wantError:     true,
+		},
+		{
+			name:          "non-positive MaxLogEntriesPerRequest",
+			modifyOptions: func(o Options) Options { o.MaxLogEntriesPerRequest = 0; return o },
+			wantError:     true,
+		},
+		{
+			name:          "SnapshotThreshold too low",
+			modifyOptions: func(o Options) Options { o.SnapshotThreshold = 999; return o },
+			wantError:     true,
+		},
+		{
+			name:          "non-positive StorageSyncDelay",
+			modifyOptions: func(o Options) Options { o.StorageSyncDelay = 0; return o },
+			wantError:     true,
+		},
+		{
+			name:          "StorageSyncDelay too high",
+			modifyOptions: func(o Options) Options { o.StorageSyncDelay = 101; return o },
+			wantError:     true,
+		},
+		{
+			name:          "non-positive LogCompactionMinEntries",
+			modifyOptions: func(o Options) Options { o.LogCompactionMinEntries = 0; return o },
+			wantError:     true,
+		},
+		{
+			name:          "non-positive ApplyTickCount",
+			modifyOptions: func(o Options) Options { o.ApplyTickCount = 0; return o },
+			wantError:     true,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			options := tt.modifyOptions(DefaultRaftOptions())
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			options := tc.modifyOptions(baseOptions)
 			err := options.Validate()
 
-			if (err != nil) != tt.wantError {
-				t.Errorf("Validate() error = %v, wantError %v", err, tt.wantError)
+			if (err != nil) != tc.wantError {
+				t.Errorf("Validate() error = %v, wantError %v", err, tc.wantError)
 			}
 		})
 	}
 }
 
-func TestChainedMethods(t *testing.T) {
-	options := DefaultRaftOptions().
-		WithElectionTicks(15).
-		WithHeartbeatTicks(2).
-		WithRandomizationFactor(0.3).
-		WithMaxEntriesPerRequest(150).
-		WithSnapshotThreshold(15000).
-		WithStorageSyncDelay(8).
-		WithLogCompactionMinEntries(7500).
-		WithApplyTickCount(2)
-
-	if options.ElectionTickCount != 15 {
-		t.Errorf("Expected ElectionTickCount to be 15, got %d", options.ElectionTickCount)
-	}
-	if options.HeartbeatTickCount != 2 {
-		t.Errorf("Expected HeartbeatTickCount to be 2, got %d", options.HeartbeatTickCount)
-	}
-	if options.ElectionRandomizationFactor != 0.3 {
-		t.Errorf("Expected ElectionRandomizationFactor to be 0.3, got %f", options.ElectionRandomizationFactor)
-	}
-	if options.MaxLogEntriesPerRequest != 150 {
-		t.Errorf("Expected MaxLogEntriesPerRequest to be 150, got %d", options.MaxLogEntriesPerRequest)
-	}
-	if options.SnapshotThreshold != 15000 {
-		t.Errorf("Expected SnapshotThreshold to be 15000, got %d", options.SnapshotThreshold)
-	}
-	if options.StorageSyncDelay != 8 {
-		t.Errorf("Expected StorageSyncDelay to be 8, got %d", options.StorageSyncDelay)
-	}
-	if options.LogCompactionMinEntries != 7500 {
-		t.Errorf("Expected LogCompactionMinEntries to be 7500, got %d", options.LogCompactionMinEntries)
-	}
-	if options.ApplyTickCount != 2 {
-		t.Errorf("Expected ApplyTickCount to be 2, got %d", options.ApplyTickCount)
+func TestFeatureFlagsValidate(t *testing.T) {
+	testCases := []struct {
+		name      string
+		flags     FeatureFlags
+		wantError bool
+	}{
+		{
+			name:      "default flags are valid",
+			flags:     DefaultFeatureFlags(),
+			wantError: false,
+		},
+		{
+			name: "EnableLeaderLease requires EnableReadIndex",
+			flags: FeatureFlags{
+				EnableReadIndex:   false,
+				EnableLeaderLease: true,
+				PreVoteEnabled:    true,
+			},
+			wantError: true,
+		},
+		{
+			name: "valid custom configuration",
+			flags: FeatureFlags{
+				EnableReadIndex:   true,
+				EnableLeaderLease: false,
+				PreVoteEnabled:    false,
+			},
+			wantError: false,
+		},
 	}
 
-	if err := options.Validate(); err != nil {
-		t.Errorf("Chained methods should produce valid options, got error: %v", err)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.flags.Validate()
+
+			if (err != nil) != tc.wantError {
+				t.Errorf("Validate() error = %v, wantError %v", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestTuningParamsValidate(t *testing.T) {
+	testCases := []struct {
+		name      string
+		params    TuningParams
+		wantError bool
+	}{
+		{
+			name:      "default params are valid",
+			params:    DefaultTuningParams(),
+			wantError: false,
+		},
+		{
+			name: "non-positive MaxApplyBatchSize",
+			params: TuningParams{
+				MaxApplyBatchSize:    0,
+				MaxSnapshotChunkSize: 0,
+			},
+			wantError: true,
+		},
+		{
+			name: "negative MaxSnapshotChunkSize",
+			params: TuningParams{
+				MaxApplyBatchSize:    10,
+				MaxSnapshotChunkSize: -1,
+			},
+			wantError: true,
+		},
+		{
+			name: "valid custom params",
+			params: TuningParams{
+				MaxApplyBatchSize:    20,
+				MaxSnapshotChunkSize: 1024,
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.params.Validate()
+
+			if (err != nil) != tc.wantError {
+				t.Errorf("Validate() error = %v, wantError %v", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestNewConfig(t *testing.T) {
+	validNodeID := NodeID("node1")
+	validPeers := []PeerConfig{
+		{ID: "node1", Address: "localhost:1234"},
+		{ID: "node2", Address: "localhost:1235"},
+	}
+
+	// Mocks for required components
+	type mockStorage struct{ Storage }
+	type mockTransport struct{ Transport }
+	type mockStateMachine struct{ StateMachine }
+
+	validStorage := &mockStorage{}
+	validTransport := &mockTransport{}
+	validStateMachine := &mockStateMachine{}
+
+	t.Run("valid configuration", func(t *testing.T) {
+		config, err := NewConfig(
+			validNodeID,
+			validPeers,
+			DefaultOptions(),
+			DefaultFeatureFlags(),
+			DefaultTuningParams(),
+			validStorage,
+			validTransport,
+			validStateMachine,
+			nil, // Logger is optional
+			nil, // Metrics is optional
+		)
+
+		if err != nil {
+			t.Errorf("Expected no error with valid config, got: %v", err)
+		}
+
+		// Verify config fields were set correctly
+		if config.ID != validNodeID {
+			t.Errorf("Expected ID %q, got %q", validNodeID, config.ID)
+		}
+		if len(config.Peers) != len(validPeers) {
+			t.Errorf("Expected %d peers, got %d", len(validPeers), len(config.Peers))
+		}
+		// Default logger and metrics should be provided when nil is passed
+		if config.Logger == nil {
+			t.Errorf("Expected non-nil Logger")
+		}
+		if config.Metrics == nil {
+			t.Errorf("Expected non-nil Metrics")
+		}
+	})
+
+	t.Run("invalid node ID", func(t *testing.T) {
+		_, err := NewConfig(
+			"", // Empty node ID
+			validPeers,
+			DefaultOptions(),
+			DefaultFeatureFlags(),
+			DefaultTuningParams(),
+			validStorage,
+			validTransport,
+			validStateMachine,
+			nil,
+			nil,
+		)
+
+		if err == nil {
+			t.Errorf("Expected error with empty node ID, got nil")
+		}
+	})
+
+	t.Run("invalid peer configuration", func(t *testing.T) {
+		invalidPeers := []PeerConfig{
+			{ID: "node1", Address: "localhost:1234"},
+			{ID: "node1", Address: "localhost:1235"}, // Duplicate ID
+		}
+
+		_, err := NewConfig(
+			validNodeID,
+			invalidPeers,
+			DefaultOptions(),
+			DefaultFeatureFlags(),
+			DefaultTuningParams(),
+			validStorage,
+			validTransport,
+			validStateMachine,
+			nil,
+			nil,
+		)
+
+		if err == nil {
+			t.Errorf("Expected error with duplicate peer IDs, got nil")
+		}
+	})
+
+	t.Run("invalid options", func(t *testing.T) {
+		invalidOptions := DefaultOptions()
+		invalidOptions.HeartbeatTickCount = 0 // Invalid value
+
+		_, err := NewConfig(
+			validNodeID,
+			validPeers,
+			invalidOptions,
+			DefaultFeatureFlags(),
+			DefaultTuningParams(),
+			validStorage,
+			validTransport,
+			validStateMachine,
+			nil,
+			nil,
+		)
+
+		if err == nil {
+			t.Errorf("Expected error with invalid options, got nil")
+		}
+	})
+
+	t.Run("invalid feature flags", func(t *testing.T) {
+		invalidFlags := FeatureFlags{
+			EnableReadIndex:   false,
+			EnableLeaderLease: true, // Invalid: EnableLeaderLease requires EnableReadIndex
+			PreVoteEnabled:    true,
+		}
+
+		_, err := NewConfig(
+			validNodeID,
+			validPeers,
+			DefaultOptions(),
+			invalidFlags,
+			DefaultTuningParams(),
+			validStorage,
+			validTransport,
+			validStateMachine,
+			nil,
+			nil,
+		)
+
+		if err == nil {
+			t.Errorf("Expected error with invalid feature flags, got nil")
+		}
+	})
+
+	t.Run("invalid tuning params", func(t *testing.T) {
+		invalidTuningParams := TuningParams{
+			MaxApplyBatchSize:    0, // Invalid: must be positive
+			MaxSnapshotChunkSize: 0,
+		}
+
+		_, err := NewConfig(
+			validNodeID,
+			validPeers,
+			DefaultOptions(),
+			DefaultFeatureFlags(),
+			invalidTuningParams,
+			validStorage,
+			validTransport,
+			validStateMachine,
+			nil,
+			nil,
+		)
+
+		if err == nil {
+			t.Errorf("Expected error with invalid tuning params, got nil")
+		}
+	})
+
+	t.Run("missing required components", func(t *testing.T) {
+		_, err := NewConfig(
+			validNodeID,
+			validPeers,
+			DefaultOptions(),
+			DefaultFeatureFlags(),
+			DefaultTuningParams(),
+			nil, // Missing storage
+			validTransport,
+			validStateMachine,
+			nil,
+			nil,
+		)
+
+		if err == nil {
+			t.Errorf("Expected error with missing required component, got nil")
+		}
+	})
+}
+
+func TestOptionsValidatePanics(t *testing.T) {
+	// Test that "With" methods panic with invalid values
+	testCases := []struct {
+		name     string
+		testFunc func()
+	}{
+		{
+			name: "WithElectionTicks with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithElectionTicks(0)
+			},
+		},
+		{
+			name: "WithHeartbeatTicks with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithHeartbeatTicks(0)
+			},
+		},
+		{
+			name: "WithRandomizationFactor with negative value",
+			testFunc: func() {
+				DefaultOptions().WithRandomizationFactor(-0.1)
+			},
+		},
+		{
+			name: "WithMaxEntriesPerRequest with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithMaxEntriesPerRequest(0)
+			},
+		},
+		{
+			name: "WithSnapshotThreshold with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithSnapshotThreshold(0)
+			},
+		},
+		{
+			name: "WithStorageSyncDelay with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithStorageSyncDelay(0)
+			},
+		},
+		{
+			name: "WithLogCompactionMinEntries with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithLogCompactionMinEntries(0)
+			},
+		},
+		{
+			name: "WithApplyTickCount with non-positive value",
+			testFunc: func() {
+				DefaultOptions().WithApplyTickCount(0)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("Expected panic but none occurred")
+				}
+			}()
+
+			tc.testFunc()
+		})
+	}
+}
+
+func TestValidatePeerSet(t *testing.T) {
+	validNodeID := NodeID("node1")
+	validPeers := []PeerConfig{
+		{ID: "node1", Address: "localhost:1234"},
+		{ID: "node2", Address: "localhost:1235"},
+		{ID: "node3", Address: "localhost:1236"},
+	}
+
+	testCases := []struct {
+		name      string
+		nodeID    NodeID
+		peers     []PeerConfig
+		wantError bool
+	}{
+		{
+			name:      "valid configuration",
+			nodeID:    validNodeID,
+			peers:     validPeers,
+			wantError: false,
+		},
+		{
+			name:      "empty node ID",
+			nodeID:    "",
+			peers:     validPeers,
+			wantError: true,
+		},
+		{
+			name:      "empty peer list",
+			nodeID:    validNodeID,
+			peers:     []PeerConfig{},
+			wantError: true,
+		},
+		{
+			name:   "peer with empty ID",
+			nodeID: validNodeID,
+			peers: []PeerConfig{
+				{ID: "node1", Address: "localhost:1234"},
+				{ID: "", Address: "localhost:1235"},
+			},
+			wantError: true,
+		},
+		{
+			name:   "peer with empty address",
+			nodeID: validNodeID,
+			peers: []PeerConfig{
+				{ID: "node1", Address: "localhost:1234"},
+				{ID: "node2", Address: ""},
+			},
+			wantError: true,
+		},
+		{
+			name:   "duplicate peer IDs",
+			nodeID: validNodeID,
+			peers: []PeerConfig{
+				{ID: "node1", Address: "localhost:1234"},
+				{ID: "node2", Address: "localhost:1235"},
+				{ID: "node2", Address: "localhost:1236"},
+			},
+			wantError: true,
+		},
+		{
+			name:   "node ID not in peer list",
+			nodeID: "node4",
+			peers: []PeerConfig{
+				{ID: "node1", Address: "localhost:1234"},
+				{ID: "node2", Address: "localhost:1235"},
+				{ID: "node3", Address: "localhost:1236"},
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validatePeerSet(tc.nodeID, tc.peers)
+
+			if (err != nil) != tc.wantError {
+				t.Errorf("validatePeerSet() error = %v, wantError %v", err, tc.wantError)
+			}
+		})
 	}
 }
