@@ -1,4 +1,4 @@
-package raft
+package logger
 
 // Logger defines an interface for structured, context-aware logging used in a Raft implementation.
 //
