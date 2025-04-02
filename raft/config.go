@@ -1,11 +1,15 @@
 package raft
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/jathurchan/raftlock/types"
+)
 
 // PeerConfig represents a static configuration entry for a peer node in the Raft cluster.
 type PeerConfig struct {
-	ID      NodeID // Unique identifier of the peer node.
-	Address string // Network address for RPC communication.
+	ID      types.NodeID // Unique identifier of the peer node.
+	Address string       // Network address for RPC communication.
 }
 
 // Config contains the full configuration for a Raft node instance.
@@ -13,7 +17,7 @@ type PeerConfig struct {
 // of a Raft node's configuration including identity, peer information,
 // behavior options, and component dependencies.
 type Config struct {
-	ID    NodeID
+	ID    types.NodeID
 	Peers []PeerConfig
 
 	Options      Options
@@ -159,7 +163,7 @@ func DefaultTuningParams() TuningParams {
 // and their inter-dependencies, ensuring a valid and consistent configuration.
 // It also provides defaults for optional components like Logger and Metrics.
 func NewConfig(
-	id NodeID,
+	id types.NodeID,
 	peers []PeerConfig,
 	opts Options,
 	flags FeatureFlags,
@@ -347,7 +351,7 @@ func (o Options) WithApplyTickCount(ticks int) Options {
 // - Verifying the local node's ID is non-empty and exists in the peer list
 // - Checking that all peer IDs and addresses are non-empty
 // - Confirming there are no duplicate peer IDs
-func validatePeerSet(id NodeID, peers []PeerConfig) error {
+func validatePeerSet(id types.NodeID, peers []PeerConfig) error {
 	if id == "" {
 		return fmt.Errorf("raft: node ID cannot be empty")
 	}
@@ -356,7 +360,7 @@ func validatePeerSet(id NodeID, peers []PeerConfig) error {
 	}
 
 	var idFound bool
-	seen := make(map[NodeID]struct{})
+	seen := make(map[types.NodeID]struct{})
 
 	for _, peer := range peers {
 		if peer.ID == "" {
