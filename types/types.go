@@ -1,4 +1,4 @@
-package raft
+package types
 
 // NodeID uniquely identifies a Raft node within a cluster.
 // It should be globally unique and remain stable across restarts.

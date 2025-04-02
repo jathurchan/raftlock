@@ -2,6 +2,8 @@ package raft
 
 import (
 	"testing"
+
+	"github.com/jathurchan/raftlock/types"
 )
 
 func TestDefaultOptions(t *testing.T) {
@@ -350,7 +352,7 @@ func TestTuningParamsValidate(t *testing.T) {
 }
 
 func TestNewConfig(t *testing.T) {
-	validNodeID := NodeID("node1")
+	validNodeID := types.NodeID("node1")
 	validPeers := []PeerConfig{
 		{ID: "node1", Address: "localhost:1234"},
 		{ID: "node2", Address: "localhost:1235"},
@@ -603,7 +605,7 @@ func TestOptionsValidatePanics(t *testing.T) {
 }
 
 func TestValidatePeerSet(t *testing.T) {
-	validNodeID := NodeID("node1")
+	validNodeID := types.NodeID("node1")
 	validPeers := []PeerConfig{
 		{ID: "node1", Address: "localhost:1234"},
 		{ID: "node2", Address: "localhost:1235"},
@@ -612,7 +614,7 @@ func TestValidatePeerSet(t *testing.T) {
 
 	testCases := []struct {
 		name      string
-		nodeID    NodeID
+		nodeID    types.NodeID
 		peers     []PeerConfig
 		wantError bool
 	}{
