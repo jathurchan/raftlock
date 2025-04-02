@@ -2,10 +2,6 @@ package raft
 
 import "fmt"
 
-// NodeID uniquely identifies a Raft node within the cluster.
-// It's a string-based identifier that should be stable across restarts.
-type NodeID string
-
 // PeerConfig represents a static configuration entry for a peer node in the Raft cluster.
 type PeerConfig struct {
 	ID      NodeID // Unique identifier of the peer node.
