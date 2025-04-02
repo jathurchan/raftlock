@@ -13,6 +13,12 @@ const (
 	// DefaultChunkSizeBytes is the default chunk size for large I/O operations (1MB)
 	DefaultChunkSizeBytes = 1024 * 1024
 
+	// DefaultRetainedLogSize is the default minimum number of log entries to keep after truncation [NEW]
+	DefaultRetainedLogSize = 100
+
+	// DefaultIndexMapInitialCapacity is the default initial capacity for the index-to-offset map [NEW]
+	DefaultIndexMapInitialCapacity = 1024
+
 	// MaxEntrySize is the maximum allowed size for a log entry (64MB)
 	MaxEntrySizeBytes = 64 * 1024 * 1024
 
