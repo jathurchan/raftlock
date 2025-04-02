@@ -1,4 +1,4 @@
-package raft
+package logger
 
 // NoOpLogger is a Logger implementation that silently discards all log messages.
 // It is useful for testing, benchmarking, or disabling logging entirely.

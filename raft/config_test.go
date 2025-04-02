@@ -3,6 +3,7 @@ package raft
 import (
 	"testing"
 
+	"github.com/jathurchan/raftlock/storage"
 	"github.com/jathurchan/raftlock/types"
 )
 
@@ -359,7 +360,7 @@ func TestNewConfig(t *testing.T) {
 	}
 
 	// Mocks for required components
-	type mockStorage struct{ Storage }
+	type mockStorage struct{ storage.Storage }
 	type mockTransport struct{ Transport }
 	type mockStateMachine struct{ StateMachine }
 

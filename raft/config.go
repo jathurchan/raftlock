@@ -3,6 +3,8 @@ package raft
 import (
 	"fmt"
 
+	"github.com/jathurchan/raftlock/logger"
+	"github.com/jathurchan/raftlock/storage"
 	"github.com/jathurchan/raftlock/types"
 )
 
@@ -24,10 +26,10 @@ type Config struct {
 	FeatureFlags FeatureFlags
 	TuningParams TuningParams
 
-	Storage      Storage
+	Storage      storage.Storage
 	Transport    Transport
 	StateMachine StateMachine
-	Logger       Logger
+	Logger       logger.Logger
 	Metrics      Metrics
 }
 
@@ -168,10 +170,10 @@ func NewConfig(
 	opts Options,
 	flags FeatureFlags,
 	tuning TuningParams,
-	storage Storage,
+	storage storage.Storage,
 	transport Transport,
 	stateMachine StateMachine,
-	logger Logger,
+	lgr logger.Logger,
 	metrics Metrics,
 ) (Config, error) {
 	if err := validatePeerSet(id, peers); err != nil {
@@ -189,8 +191,8 @@ func NewConfig(
 	if storage == nil || transport == nil || stateMachine == nil {
 		return Config{}, fmt.Errorf("raft: missing required components")
 	}
-	if logger == nil {
-		logger = &NoOpLogger{}
+	if lgr == nil {
+		lgr = &logger.NoOpLogger{}
 	}
 	if metrics == nil {
 		metrics = &NoOpMetrics{}
@@ -205,7 +207,7 @@ func NewConfig(
 		Storage:      storage,
 		Transport:    transport,
 		StateMachine: stateMachine,
-		Logger:       logger,
+		Logger:       lgr,
 		Metrics:      metrics,
 	}, nil
 }
