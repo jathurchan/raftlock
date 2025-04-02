@@ -18,6 +18,22 @@ type LogEntry struct {
 	Command []byte // Command to be applied to the state machine
 }
 
+// PersistentState represents the Raft persistent state
+type PersistentState struct {
+	// The latest term the current node has seen.
+	// Starts at 0 and is incremented monotonically.
+	CurrentTerm Term `json:"current_term"`
+	// The Candidate the current node voted for in the current term.
+	// Empty if the node hasn't voted.
+	VotedFor NodeID `json:"voted_for"`
+}
+
+// SnapshotMetadata contains information about a snapshot
+type SnapshotMetadata struct {
+	LastIncludedIndex Index `json:"last_included_index"`
+	LastIncludedTerm  Term  `json:"last_included_term"`
+}
+
 type RequestVoteRequest struct {
 	Term         Term   // Candidate's term
 	CandidateID  NodeID // Candidate requesting vote (Empty if none)
