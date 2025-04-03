@@ -59,12 +59,12 @@ func (fs *FileStorage) checkForRecoveryMarkers() (bool, error) {
 	recoveryMarker := filepath.Join(fs.dir, "recovery.marker")
 	snapshotMarker := filepath.Join(fs.dir, "snapshot.marker")
 
-	recoveryExists, err := fileExists(recoveryMarker)
+	recoveryExists, err := fileExists(osFS{}, recoveryMarker)
 	if err != nil {
 		return false, fmt.Errorf("%w: failed to check recovery marker: %v", ErrStorageIO, err)
 	}
 
-	snapshotExists, err := fileExists(snapshotMarker)
+	snapshotExists, err := fileExists(osFS{}, snapshotMarker)
 	if err != nil {
 		return false, fmt.Errorf("%w: failed to check snapshot marker: %v", ErrStorageIO, err)
 	}
@@ -89,7 +89,7 @@ func (fs *FileStorage) performRecovery() error {
 // recoverFromSnapshotOperation recovers from interrupted snapshot operations.
 func (fs *FileStorage) recoverFromSnapshotOperation() error {
 	markerPath := filepath.Join(fs.dir, "snapshot.marker")
-	exists, err := fileExists(markerPath)
+	exists, err := fileExists(osFS{}, markerPath)
 	if err != nil {
 		return fmt.Errorf("%w: failed to check snapshot marker: %v", ErrStorageIO, err)
 	}
@@ -121,10 +121,10 @@ func (fs *FileStorage) recoverFromSnapshotOperation() error {
 // handleSnapshotRecovery handles recovery based on snapshot marker state.
 func (fs *FileStorage) handleSnapshotRecovery(metaCommitted bool, markerPath string) error {
 	// Check for temporary files
-	tmpMetaExists, _ := fileExists(fs.snapshotMetadataFile() + ".tmp")
-	tmpDataExists, _ := fileExists(fs.snapshotDataFile() + ".tmp")
-	metaExists, _ := fileExists(fs.snapshotMetadataFile())
-	dataExists, _ := fileExists(fs.snapshotDataFile())
+	tmpMetaExists, _ := fileExists(osFS{}, fs.snapshotMetadataFile()+".tmp")
+	tmpDataExists, _ := fileExists(osFS{}, fs.snapshotDataFile()+".tmp")
+	metaExists, _ := fileExists(osFS{}, fs.snapshotMetadataFile())
+	dataExists, _ := fileExists(osFS{}, fs.snapshotDataFile())
 
 	if !metaCommitted {
 		// Metadata not committed yet, clean up temp files
@@ -182,12 +182,12 @@ func (fs *FileStorage) completeSnapshotDataCommit(tmpDataExists bool) error {
 
 // checkAndRepairConsistency verifies consistency between metadata and log file.
 func (fs *FileStorage) checkAndRepairConsistency() error {
-	metaExists, err := fileExists(fs.metadataFile())
+	metaExists, err := fileExists(osFS{}, fs.metadataFile())
 	if err != nil {
 		return fmt.Errorf("%w: failed to check metadata file: %v", ErrStorageIO, err)
 	}
 
-	logExists, err := fileExists(fs.logFile())
+	logExists, err := fileExists(osFS{}, fs.logFile())
 	if err != nil {
 		return fmt.Errorf("%w: failed to check log file: %v", ErrStorageIO, err)
 	}
