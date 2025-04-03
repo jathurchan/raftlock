@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jathurchan/raftlock/types"
 )
 
 // initialize handles storage initialization and recovery.
@@ -56,20 +58,32 @@ func (fs *FileStorage) initialize() error {
 
 // checkForRecoveryMarkers looks for evidence of interrupted operations.
 func (fs *FileStorage) checkForRecoveryMarkers() (bool, error) {
-	recoveryMarker := filepath.Join(fs.dir, "recovery.marker")
-	snapshotMarker := filepath.Join(fs.dir, "snapshot.marker")
+	recoveryMarker := fs.recoveryMarkerPath()
+	snapshotMarker := fs.snapshotMarkerPath()
 
-	recoveryExists, err := fileExists(osFS{}, recoveryMarker)
+	recoveryExists, err := fs.fileExists(recoveryMarker)
 	if err != nil {
 		return false, fmt.Errorf("%w: failed to check recovery marker: %v", ErrStorageIO, err)
 	}
 
-	snapshotExists, err := fileExists(osFS{}, snapshotMarker)
+	snapshotExists, err := fs.fileExists(snapshotMarker)
 	if err != nil {
 		return false, fmt.Errorf("%w: failed to check snapshot marker: %v", ErrStorageIO, err)
 	}
 
 	return recoveryExists || snapshotExists, nil
+}
+
+// fileExists checks if a file exists at the given path
+func (fs *FileStorage) fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 // performRecovery attempts to recover from interrupted operations.
@@ -88,8 +102,8 @@ func (fs *FileStorage) performRecovery() error {
 
 // recoverFromSnapshotOperation recovers from interrupted snapshot operations.
 func (fs *FileStorage) recoverFromSnapshotOperation() error {
-	markerPath := filepath.Join(fs.dir, "snapshot.marker")
-	exists, err := fileExists(osFS{}, markerPath)
+	markerPath := fs.snapshotMarkerPath()
+	exists, err := fs.fileExists(markerPath)
 	if err != nil {
 		return fmt.Errorf("%w: failed to check snapshot marker: %v", ErrStorageIO, err)
 	}
@@ -100,12 +114,6 @@ func (fs *FileStorage) recoverFromSnapshotOperation() error {
 
 	fs.logger.Infow("Found snapshot marker, recovering from interrupted snapshot operation")
 
-	defer func() {
-		if err := os.Remove(markerPath); err != nil {
-			fs.logger.Warnw("Failed to remove snapshot marker", "path", markerPath, "error", err)
-		}
-	}()
-
 	// Read marker to determine progress
 	markerData, err := os.ReadFile(markerPath)
 	if err != nil {
@@ -115,40 +123,55 @@ func (fs *FileStorage) recoverFromSnapshotOperation() error {
 	markerStr := string(markerData)
 	metaCommitted := strings.Contains(markerStr, "meta_committed=true")
 
-	return fs.handleSnapshotRecovery(metaCommitted, markerPath)
+	// Perform snapshot recovery
+	if err := fs.handleSnapshotRecovery(metaCommitted); err != nil {
+		return err
+	}
+
+	// Remove marker after recovery
+	if err := fs.removeFile(markerPath); err != nil {
+		fs.logger.Warnw("Failed to remove snapshot marker", "path", markerPath, "error", err)
+	}
+
+	return nil
 }
 
 // handleSnapshotRecovery handles recovery based on snapshot marker state.
-func (fs *FileStorage) handleSnapshotRecovery(metaCommitted bool, markerPath string) error {
+func (fs *FileStorage) handleSnapshotRecovery(metaCommitted bool) error {
 	// Check for temporary files
-	tmpMetaExists, _ := fileExists(osFS{}, fs.snapshotMetadataFile()+".tmp")
-	tmpDataExists, _ := fileExists(osFS{}, fs.snapshotDataFile()+".tmp")
-	metaExists, _ := fileExists(osFS{}, fs.snapshotMetadataFile())
-	dataExists, _ := fileExists(osFS{}, fs.snapshotDataFile())
+	metaFile := fs.snapshotMetadataFile()
+	dataFile := fs.snapshotDataFile()
+	tmpMetaFile := metaFile + ".tmp"
+	tmpDataFile := dataFile + ".tmp"
+
+	tmpMetaExists, _ := fs.fileExists(tmpMetaFile)
+	tmpDataExists, _ := fs.fileExists(tmpDataFile)
+	metaExists, _ := fs.fileExists(metaFile)
+	dataExists, _ := fs.fileExists(dataFile)
 
 	if !metaCommitted {
 		// Metadata not committed yet, clean up temp files
-		return fs.cleanupIncompleteSnapshot(tmpMetaExists, tmpDataExists)
+		return fs.cleanupIncompleteSnapshot(tmpMetaFile, tmpDataFile, tmpMetaExists, tmpDataExists)
 	}
 
 	if metaExists && tmpDataExists && !dataExists {
 		// Metadata committed but data not yet, try to complete
-		return fs.completeSnapshotDataCommit(tmpDataExists)
+		return fs.completeSnapshotDataCommit(tmpDataFile, dataFile, metaFile)
 	}
 
 	return nil
 }
 
 // cleanupIncompleteSnapshot removes temporary files for incomplete snapshot operations.
-func (fs *FileStorage) cleanupIncompleteSnapshot(tmpMetaExists, tmpDataExists bool) error {
+func (fs *FileStorage) cleanupIncompleteSnapshot(tmpMetaFile, tmpDataFile string, tmpMetaExists, tmpDataExists bool) error {
 	if tmpMetaExists {
-		if err := os.Remove(fs.snapshotMetadataFile() + ".tmp"); err != nil {
+		if err := fs.removeFile(tmpMetaFile); err != nil {
 			fs.logger.Warnw("Failed to remove temporary metadata file", "error", err)
 		}
 	}
 
 	if tmpDataExists {
-		if err := os.Remove(fs.snapshotDataFile() + ".tmp"); err != nil {
+		if err := fs.removeFile(tmpDataFile); err != nil {
 			fs.logger.Warnw("Failed to remove temporary data file", "error", err)
 		}
 	}
@@ -158,36 +181,36 @@ func (fs *FileStorage) cleanupIncompleteSnapshot(tmpMetaExists, tmpDataExists bo
 }
 
 // completeSnapshotDataCommit completes an interrupted snapshot data commit.
-func (fs *FileStorage) completeSnapshotDataCommit(tmpDataExists bool) error {
-	if tmpDataExists {
-		if err := os.Rename(fs.snapshotDataFile()+".tmp", fs.snapshotDataFile()); err != nil {
-			fs.logger.Warnw("Failed to complete snapshot data file rename", "error", err)
+func (fs *FileStorage) completeSnapshotDataCommit(tmpDataFile, dataFile, metaFile string) error {
+	if err := os.Rename(tmpDataFile, dataFile); err != nil {
+		fs.logger.Warnw("Failed to complete snapshot data file rename", "error", err)
 
-			// Handle based on recovery mode
-			if fs.options.RecoveryMode == RecoveryModeAggressive {
-				if err := os.Remove(fs.snapshotMetadataFile()); err != nil {
-					fs.logger.Warnw("Failed to remove snapshot metadata", "error", err)
-				}
-				fs.logger.Warnw("Removed snapshot metadata due to missing data file")
+		// Handle based on recovery mode
+		if fs.options.RecoveryMode == RecoveryModeAggressive {
+			if err := fs.removeFile(metaFile); err != nil {
+				fs.logger.Warnw("Failed to remove snapshot metadata", "error", err)
 			}
-
-			return fmt.Errorf("%w: failed to complete snapshot data commit: %v", ErrStorageIO, err)
-		} else {
-			fs.logger.Infow("Completed interrupted snapshot operation")
+			fs.logger.Warnw("Removed snapshot metadata due to missing data file")
 		}
+
+		return fmt.Errorf("%w: failed to complete snapshot data commit: %v", ErrStorageIO, err)
 	}
 
+	fs.logger.Infow("Completed interrupted snapshot operation")
 	return nil
 }
 
 // checkAndRepairConsistency verifies consistency between metadata and log file.
 func (fs *FileStorage) checkAndRepairConsistency() error {
-	metaExists, err := fileExists(osFS{}, fs.metadataFile())
+	metaFile := fs.metadataFile()
+	logFile := fs.logFile()
+
+	metaExists, err := fs.fileExists(metaFile)
 	if err != nil {
 		return fmt.Errorf("%w: failed to check metadata file: %v", ErrStorageIO, err)
 	}
 
-	logExists, err := fileExists(osFS{}, fs.logFile())
+	logExists, err := fs.fileExists(logFile)
 	if err != nil {
 		return fmt.Errorf("%w: failed to check log file: %v", ErrStorageIO, err)
 	}
@@ -261,18 +284,23 @@ func (fs *FileStorage) cleanupTempFiles() error {
 		}
 
 		for _, file := range matches {
-			err := os.Remove(file)
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err != nil {
+			if err := fs.removeFile(file); err != nil && !os.IsNotExist(err) {
 				errs = append(errs, fmt.Errorf("%w: error removing temporary file %q: %v", ErrStorageIO, file, err))
-				fs.logger.Warnw("Failed to remove temporary file", "file", file, "error", err)
 			}
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// removeFile removes a file with appropriate error handling
+func (fs *FileStorage) removeFile(path string) error {
+	err := os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		fs.logger.Warnw("Failed to remove file", "file", path, "error", err)
+		return err
+	}
+	return nil
 }
 
 // initStateAndMetadata initializes state and metadata, building index map.
@@ -313,7 +341,93 @@ func (fs *FileStorage) initStateAndMetadata() error {
 // removeRecoveryMarker removes the recovery marker file
 func (fs *FileStorage) removeRecoveryMarker() {
 	markerPath := filepath.Join(fs.dir, "recovery.marker")
-	if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
+	if err := fs.removeFile(markerPath); err != nil && !os.IsNotExist(err) {
 		fs.logger.Warnw("Failed to remove recovery marker", "error", err)
 	}
+}
+
+// buildIndexOffsetMap rebuilds the index-to-offset mapping from log file
+func (fs *FileStorage) buildIndexOffsetMap() error {
+	if !fs.options.Features.EnableIndexMap {
+		fs.logger.Debugw("Skipping index offset map build: feature disabled")
+		return nil
+	}
+
+	// Create dependencies
+	fileSystem := OsFileSystem{}
+	reader := NewDefaultLogEntryReader(&fs.options, MaxEntrySizeBytes, LengthPrefixSize)
+	handler := NewDefaultLogCorruptionHandler(fileSystem, fs.logger)
+	builder := NewIndexBuilder(fileSystem, reader, handler, fs.logger)
+
+	// Build index map
+	logPath := fs.logFile()
+	fs.logMu.Lock()
+	defer fs.logMu.Unlock()
+
+	indexMap, err := builder.BuildIndexOffsetMap(logPath, true)
+	if err != nil {
+		return err
+	}
+
+	fs.indexToOffsetMap = indexMap
+	return fs.syncMetadataFromIndex("buildIndexOffsetMap")
+}
+
+// syncMetadataFromIndex synchronizes first/last log indices from index map
+func (fs *FileStorage) syncMetadataFromIndex(operationContext string) error {
+	manager := NewMetadataManager(fs.logger)
+
+	currentFirst := types.Index(fs.firstLogIndex.Load())
+	currentLast := types.Index(fs.lastLogIndex.Load())
+
+	newFirst, newLast, changed, err := manager.GetIndicesFromMap(
+		fs.indexToOffsetMap,
+		currentFirst,
+		currentLast,
+		operationContext)
+
+	if err != nil {
+		return err
+	}
+
+	if changed {
+		fs.firstLogIndex.Store(uint64(newFirst))
+		fs.lastLogIndex.Store(uint64(newLast))
+
+		if err := fs.saveMetadata(); err != nil {
+			fs.logger.Errorw(fmt.Sprintf("Failed to persist metadata during %s", operationContext),
+				"error", err)
+			return fmt.Errorf("%w: failed saving metadata during %s", ErrStorageIO, operationContext)
+		}
+	}
+
+	return nil
+}
+
+// verifyLogConsistency verifies the log is in a consistent state
+func (fs *FileStorage) verifyLogConsistency() error {
+	if !fs.options.Features.EnableIndexMap {
+		fs.logger.Debugw("Skipping log consistency check: index map feature disabled")
+		return nil
+	}
+
+	fs.logger.Debugw("Starting log consistency verification")
+
+	if err := fs.syncMetadataFromIndex("verifyLogConsistency"); err != nil {
+		return err
+	}
+
+	if err := fs.verifyLogContinuity(); err != nil {
+		fs.logger.Errorw("Log continuity verification failed", "error", err)
+		return err
+	}
+
+	fs.logger.Debugw("Log consistency verification completed successfully")
+	return nil
+}
+
+// verifyLogContinuity verifies that log indices form a contiguous sequence
+func (fs *FileStorage) verifyLogContinuity() error {
+	verifier := NewLogConsistencyVerifier(fs.logger)
+	return verifier.VerifyLogContinuity(fs.indexToOffsetMap)
 }
