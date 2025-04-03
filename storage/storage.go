@@ -184,6 +184,11 @@ func (fs *FileStorage) snapshotDataFile() string {
 	return filepath.Join(fs.dir, "snapshot.dat")
 }
 
+// recoveryMarkerPath returns the path to the recovery marker file.
+func (fs *FileStorage) recoveryMarkerPath() string {
+	return filepath.Join(fs.dir, "recovery.marker")
+}
+
 // snapshotMarkerPath returns the path to the snapshot marker file.
 func (fs *FileStorage) snapshotMarkerPath() string {
 	return filepath.Join(fs.dir, "snapshot.marker")

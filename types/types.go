@@ -18,6 +18,12 @@ type LogEntry struct {
 	Command []byte // Command to be applied to the state machine
 }
 
+// IndexOffsetPair maps a log entry index to its file offset.
+type IndexOffsetPair struct {
+	Index  Index
+	Offset int64
+}
+
 // PersistentState represents the Raft persistent state
 type PersistentState struct {
 	// The latest term the current node has seen.
