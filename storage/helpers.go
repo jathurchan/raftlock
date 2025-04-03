@@ -10,9 +10,19 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
+type fileStatter interface {
+	Stat(name string) (os.FileInfo, error)
+}
+
+type osFS struct{}
+
+func (osFS) Stat(name string) (os.FileInfo, error) {
+	return os.Stat(name)
+}
+
 // fileExists checks if a file exists
-func fileExists(path string) (bool, error) {
-	_, err := os.Stat(path)
+func fileExists(fs fileStatter, path string) (bool, error) {
+	_, err := fs.Stat(path)
 	if err == nil {
 		return true, nil
 	}

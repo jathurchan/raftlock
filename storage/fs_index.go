@@ -24,7 +24,7 @@ func (fs *FileStorage) buildIndexOffsetMap() error {
 	}
 
 	logPath := fs.logFile()
-	exists, err := fileExists(logPath)
+	exists, err := fileExists(osFS{}, logPath)
 	if err != nil {
 		fs.logger.Errorw("Error checking log file existence", "error", err, "path", logPath)
 		return fmt.Errorf("%w: error checking log file existence", ErrStorageIO)
