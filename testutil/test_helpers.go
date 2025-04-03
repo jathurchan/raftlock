@@ -15,11 +15,17 @@ func AssertLessThanEqual(t *testing.T, a, b uint64) {
 	}
 }
 
-// Helper function that would be needed for tu.AssertTrue
-func AssertTrue(t *testing.T, condition bool) {
+func AssertTrue(t testing.TB, condition bool, msgAndArgs ...interface{}) {
 	t.Helper()
 	if !condition {
-		t.Errorf("Expected condition to be true")
+		t.Errorf("Expected condition to be true\n%s", FormatMsgAndArgs(msgAndArgs...))
+	}
+}
+
+func AssertFalse(t testing.TB, condition bool, msgAndArgs ...interface{}) {
+	t.Helper()
+	if condition {
+		t.Errorf("Expected condition to be false\n%s", FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
