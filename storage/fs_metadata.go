@@ -8,6 +8,8 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
+var jsonMarshalIndent = json.MarshalIndent
+
 // metadataSchema defines the structure for log metadata persistence.
 type metadataSchema struct {
 	FirstIndex types.Index `json:"first_index"`
@@ -79,7 +81,7 @@ func (fs *FileStorage) saveMetadata() error {
 		LastIndex:  types.Index(fs.lastLogIndex.Load()),
 	}
 
-	data, err := json.MarshalIndent(metadata, "", "  ")
+	data, err := jsonMarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("%w: failed to marshal metadata: %v", ErrStorageIO, err)
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +109,12 @@ func RequireNotNil(t testing.TB, object interface{}, msgAndArgs ...interface{}) 
 	v := reflect.ValueOf(object)
 	if v.Kind() == reflect.Ptr && v.IsNil() {
 		t.Fatalf("Required not nil but got nil pointer\n%s", FormatMsgAndArgs(msgAndArgs...))
+	}
+}
+
+func AssertContains(t testing.TB, s, substr string, msgAndArgs ...interface{}) {
+	t.Helper()
+	if !strings.Contains(s, substr) {
+		t.Errorf("Expected string to contain substring:\nstring: %q\nsubstring: %q\n%s", s, substr, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
