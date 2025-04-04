@@ -2,84 +2,86 @@ package storage
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 
+	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/types"
 )
 
-// LogEntryReader provides methods for reading and deserializing log entries
-type LogEntryReader interface {
-	ReadNextEntry(file File) (types.LogEntry, int64, error)
-	DeserializeEntry(data []byte) (types.LogEntry, error)
+// logEntryReader defines the interface for reading and decoding log entries
+// from a binary stream such as a Raft log file. It returns the parsed entry,
+// number of bytes read, or an error.
+type logEntryReader interface {
+	ReadNext(file file) (types.LogEntry, int64, error)
 }
 
-// DefaultLogEntryReader implements LogEntryReader
-type DefaultLogEntryReader struct {
-	options      *FileStorageOptions
-	maxEntrySize int
-	prefixSize   int
+// defaultLogEntryReader provides a concrete implementation of LogEntryReader.
+type defaultLogEntryReader struct {
+	maxSize    int
+	prefixSize int
+	serializer serializer
+	logger     logger.Logger
 }
 
-// NewDefaultLogEntryReader creates a new DefaultLogEntryReader
-func NewDefaultLogEntryReader(options *FileStorageOptions, maxEntrySize, prefixSize int) *DefaultLogEntryReader {
-	return &DefaultLogEntryReader{
-		options:      options,
-		maxEntrySize: maxEntrySize,
-		prefixSize:   prefixSize,
+// newLogEntryReader constructs a defaultLogEntryReader with the given limits and serializer.
+func newLogEntryReader(maxSize, prefixSize int, serializer serializer, log logger.Logger) logEntryReader {
+	return &defaultLogEntryReader{
+		maxSize:    maxSize,
+		prefixSize: prefixSize,
+		serializer: serializer,
+		logger:     log.WithComponent("logreader"),
 	}
 }
 
-// ReadNextEntry reads the next log entry starting from the current file offset.
-// Returns the deserialized entry, total bytes read, or an error.
-// Returns io.EOF if no complete entry is available.
-func (r *DefaultLogEntryReader) ReadNextEntry(file File) (types.LogEntry, int64, error) {
+// ReadNext attempts to read a complete log entry from the current offset of the file.
+// It returns:
+//   - the parsed LogEntry
+//   - the total number of bytes read (prefix + body)
+//   - an error, or io.EOF if the end of the file is reached without a full entry
+//
+// Format expected:
+//
+//	[prefixSize bytes] => uint32 (big-endian) indicating the entry length
+//	[entry bytes]      => serialized log entry payload
+func (r *defaultLogEntryReader) ReadNext(file file) (types.LogEntry, int64, error) {
 	var bytesRead int64
 	lenBuf := make([]byte, r.prefixSize)
 
-	// Read length prefix
-	n, err := io.ReadFull(file, lenBuf)
+	n, err := file.ReadFull(lenBuf)
 	bytesRead += int64(n)
 	if err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			r.logger.Debugw("EOF or partial read while reading prefix", "bytesRead", bytesRead)
 			return types.LogEntry{}, bytesRead, io.EOF
 		}
-		return types.LogEntry{}, bytesRead, fmt.Errorf("error reading entry length: %w", err)
+		r.logger.Errorw("Error reading entry length prefix", "error", err, "bytesRead", bytesRead)
+		return types.LogEntry{}, bytesRead, err
 	}
 
 	length := binary.BigEndian.Uint32(lenBuf)
-	if length == 0 || length > uint32(r.maxEntrySize) {
-		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: invalid entry length %d (max %d)",
-			ErrCorruptedLog, length, r.maxEntrySize)
+	if length == 0 || length > uint32(r.maxSize) {
+		r.logger.Warnw("Invalid log entry length",
+			"length", length,
+			"maxAllowed", r.maxSize)
+		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: entry length %d (max %d)",
+			ErrCorruptedLog, length, r.maxSize)
 	}
 
-	// Read data
 	data := make([]byte, length)
-	m, err := io.ReadFull(file, data)
+	m, err := file.ReadFull(data)
 	bytesRead += int64(m)
 	if err != nil {
-		return types.LogEntry{}, bytesRead, fmt.Errorf("error reading entry data: %w", err)
+		r.logger.Errorw("Error reading log entry body", "error", err, "bytesRead", bytesRead)
+		return types.LogEntry{}, bytesRead, err
 	}
 
-	// Deserialize
-	entry, err := r.DeserializeEntry(data)
+	entry, err := r.serializer.UnmarshalLogEntry(data)
 	if err != nil {
-		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: failed to deserialize entry: %v",
-			ErrCorruptedLog, err)
+		r.logger.Warnw("Failed to deserialize log entry", "error", err)
+		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: deserialization failed: %v", ErrCorruptedLog, err)
 	}
 
+	r.logger.Debugw("Read log entry", "index", entry.Index, "term", entry.Term, "size", bytesRead)
 	return entry, bytesRead, nil
-}
-
-// DeserializeEntry deserializes a log entry from raw bytes based on storage options.
-func (r *DefaultLogEntryReader) DeserializeEntry(data []byte) (types.LogEntry, error) {
-	if r.options.Features.EnableBinaryFormat {
-		return deserializeLogEntry(data)
-	}
-	var entry types.LogEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return types.LogEntry{}, err
-	}
-	return entry, nil
 }
