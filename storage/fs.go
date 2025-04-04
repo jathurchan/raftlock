@@ -3,32 +3,61 @@ package storage
 import (
 	"io"
 	"os"
+	"path/filepath"
 )
 
-// FileSystem is an interface for file system operations to enable mocking in tests
-type FileSystem interface {
-	Open(name string) (File, error)
+// fileSystem defines an interface for file system operations.
+// It allows mocking during testing by abstracting underlying file I/O operations.
+type fileSystem interface {
+	ReadFile(name string) ([]byte, error)
+	Open(name string) (file, error)
 	Exists(name string) (bool, error)
 	Truncate(name string, size int64) error
+	WriteFile(name string, data []byte, perm os.FileMode) error
+	Rename(oldPath, newPath string) error
+	MkdirAll(path string, perm os.FileMode) error
+	Dir(path string) string
+	Remove(name string) error
+	IsNotExist(err error) bool
+	Glob(pattern string) ([]string, error)
+	Join(elem ...string) string
 }
 
-// File is an interface for file operations to enable mocking in tests
-type File interface {
+// file defines an interface for file-level operations.
+// It extends io.Reader and io.Closer, adding methods for more complete file reading functionality.
+type file interface {
 	io.Reader
 	io.Closer
 	Seek(offset int64, whence int) (int64, error)
+	ReadFull(buf []byte) (int, error)
+	ReadAll() ([]byte, error)
 }
 
-// OsFileSystem implements FileSystem using the OS's file operations
-type OsFileSystem struct{}
+// defaultFileSystem provides a concrete implementation of fileSystem
+// using the standard library's os and filepath packages.
+type defaultFileSystem struct{}
 
-// Open opens the named file
-func (fs OsFileSystem) Open(name string) (File, error) {
-	return os.Open(name)
+// newDefaultFileSystem returns a new instance of the defaultFileSystem.
+func newDefaultFileSystem() fileSystem {
+	return defaultFileSystem{}
 }
 
-// Exists checks if a file exists
-func (fs OsFileSystem) Exists(name string) (bool, error) {
+// ReadFile reads the contents of the specified file and returns the data.
+func (fs defaultFileSystem) ReadFile(name string) ([]byte, error) {
+	return os.ReadFile(name)
+}
+
+// Open opens the specified file and wraps it in a file interface.
+func (fs defaultFileSystem) Open(name string) (file, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &defaultFile{File: f}, nil
+}
+
+// Exists reports whether the specified file exists.
+func (fs defaultFileSystem) Exists(name string) (bool, error) {
 	_, err := os.Stat(name)
 	if err == nil {
 		return true, nil
@@ -39,12 +68,62 @@ func (fs OsFileSystem) Exists(name string) (bool, error) {
 	return false, err
 }
 
-// Truncate truncates the named file to size
-func (fs OsFileSystem) Truncate(name string, size int64) error {
+// Truncate resizes the specified file to the given size.
+func (fs defaultFileSystem) Truncate(name string, size int64) error {
 	return os.Truncate(name, size)
 }
 
-// OsFile wraps *os.File to implement the File interface
-type OsFile struct {
+// WriteFile writes data to the specified file with the given permissions.
+func (fs defaultFileSystem) WriteFile(name string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(name, data, perm)
+}
+
+// Rename renames (moves) a file from oldPath to newPath.
+func (fs defaultFileSystem) Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+
+// MkdirAll creates a directory and all necessary parents with the given permissions.
+func (fs defaultFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
+// Dir returns the directory component of the given path.
+func (fs defaultFileSystem) Dir(path string) string {
+	return filepath.Dir(path)
+}
+
+// Remove deletes the specified file or directory.
+func (fs defaultFileSystem) Remove(name string) error {
+	return os.Remove(name)
+}
+
+// IsNotExist reports whether the error indicates a file or directory does not exist.
+func (fs defaultFileSystem) IsNotExist(err error) bool {
+	return os.IsNotExist(err)
+}
+
+// Glob returns the names of all files matching the pattern.
+func (fs defaultFileSystem) Glob(pattern string) ([]string, error) {
+	return filepath.Glob(pattern)
+}
+
+// Join joins any number of path elements into a single path.
+func (fs defaultFileSystem) Join(elem ...string) string {
+	return filepath.Join(elem...)
+}
+
+// defaultFile wraps *os.File to implement the file interface.
+type defaultFile struct {
 	*os.File
+}
+
+// ReadFull reads exactly len(buf) bytes into buf.
+func (f *defaultFile) ReadFull(buf []byte) (int, error) {
+	return io.ReadFull(f.File, buf)
+}
+
+// ReadAll reads the entire contents of the file.
+func (f *defaultFile) ReadAll() ([]byte, error) {
+	return io.ReadAll(f.File)
 }
