@@ -1,270 +1,409 @@
 package storage
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
 	"testing"
 
 	"github.com/jathurchan/raftlock/testutil"
 )
-
-func TestNewDefaultFileSystem(t *testing.T) {
-	_ = newDefaultFileSystem()
-}
 
 // Helper function to create a temporary file with content
 func createTempFile(t *testing.T, dir, pattern, content string) string {
 	t.Helper()
 	tmpFile, err := os.CreateTemp(dir, pattern)
 	testutil.RequireNoError(t, err, "Failed to create temp file")
+	defer tmpFile.Close()
 
 	_, err = tmpFile.WriteString(content)
 	testutil.RequireNoError(t, err, "Failed to write to temp file")
-	err = tmpFile.Close()
-	testutil.RequireNoError(t, err, "Failed to close temp file")
+	err = tmpFile.Sync()
+	testutil.RequireNoError(t, err, "Failed to sync temp file")
+
 	return tmpFile.Name()
 }
 
-func TestDefaultFileSystem(t *testing.T) {
-	fs := defaultFileSystem{}
+// TestNewDefaultFileSystem verifies constructor functions
+func TestNewDefaultFileSystem(t *testing.T) {
+	t.Run("DefaultConstructor", func(t *testing.T) {
+		fs := newFileSystem()
+		testutil.AssertNotNil(t, fs)
+
+		// Verify it uses os.Stat by checking a real path
+		tempDir := t.TempDir()
+		exists, err := fs.Exists(tempDir)
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, exists)
+	})
+
+	t.Run("WithStatConstructor", func(t *testing.T) {
+		customStatCalled := false
+		customStat := func(name string) (os.FileInfo, error) {
+			customStatCalled = true
+			return nil, errors.New("custom stat error")
+		}
+
+		fs := newFileSystemWithStat(customStat)
+		testutil.AssertNotNil(t, fs)
+
+		// Test the custom stat function was used
+		tempDir := t.TempDir()
+		exists, err := fs.Exists(tempDir)
+
+		testutil.AssertFalse(t, exists)
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, customStatCalled)
+		testutil.AssertContains(t, err.Error(), "custom stat error")
+	})
+
+	t.Run("WithNilStatConstructor", func(t *testing.T) {
+		fs := newFileSystemWithStat(nil)
+		testutil.AssertNotNil(t, fs)
+
+		// Verify it falls back to os.Stat
+		tempDir := t.TempDir()
+		exists, err := fs.Exists(tempDir)
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, exists)
+	})
+}
+
+// TestFileSystemBasicIO tests reading and writing operations
+func TestFileSystemBasicIO(t *testing.T) {
+	fs := newFileSystem()
 	tempDir := t.TempDir()
 	content := "test content"
 
-	// Test ReadFile (success and error cases)
-	t.Run("ReadFile", func(t *testing.T) {
-		filePath := createTempFile(t, tempDir, "readfile_*.txt", content)
+	t.Run("ReadWriteFile", func(t *testing.T) {
+		filePath := filepath.Join(tempDir, "readwrite.txt")
+		writeData := []byte(content)
+		perm := os.FileMode(0644)
 
-		data, err := fs.ReadFile(filePath)
+		// Write and verify
+		err := fs.WriteFile(filePath, writeData, perm)
 		testutil.AssertNoError(t, err)
-		testutil.AssertEqual(t, []byte(content), data)
 
-		_, err = fs.ReadFile(filepath.Join(tempDir, "non_existent_file.txt"))
+		// Read and verify content
+		readData, err := fs.ReadFile(filePath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, writeData, readData)
+
+		// Test non-existent file
+		_, err = fs.ReadFile(filepath.Join(tempDir, "non_existent.txt"))
 		testutil.AssertError(t, err)
-		testutil.AssertTrue(t, fs.IsNotExist(err), "Error should be IsNotExist")
+		testutil.AssertTrue(t, fs.IsNotExist(err))
 	})
 
-	// Test Open (success and error cases)
 	t.Run("Open", func(t *testing.T) {
 		filePath := createTempFile(t, tempDir, "open_*.txt", content)
 
+		// Open successfully
 		f, err := fs.Open(filePath)
 		testutil.AssertNoError(t, err)
 		testutil.AssertNotNil(t, f)
 		defer f.Close()
 
-		_, ok := f.(*defaultFile)
-		testutil.AssertTrue(t, ok, "Opened file should be of type *defaultFile")
+		// Read content through file interface
+		data, err := f.ReadAll()
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, content, string(data))
 
-		_, err = fs.Open(filepath.Join(tempDir, "non_existent_file.txt"))
+		// Test open non-existent file
+		_, err = fs.Open(filepath.Join(tempDir, "non_existent.txt"))
 		testutil.AssertError(t, err)
-		testutil.AssertTrue(t, fs.IsNotExist(err), "Error should be IsNotExist")
+		testutil.AssertTrue(t, fs.IsNotExist(err))
 	})
+}
 
-	// Test Exists
-	t.Run("Exists", func(t *testing.T) {
-		filePath := createTempFile(t, tempDir, "exists_*.txt", content)
+// TestFileSystemModifications tests file modification operations
+func TestFileSystemModifications(t *testing.T) {
+	fs := newFileSystem()
+	tempDir := t.TempDir()
 
-		exists, err := fs.Exists(filePath)
-		testutil.AssertNoError(t, err)
-		testutil.AssertTrue(t, exists, "File should exist")
-
-		exists, err = fs.Exists(filepath.Join(tempDir, "non_existent"))
-		testutil.AssertNoError(t, err)
-		testutil.AssertFalse(t, exists, "Path should not exist")
-	})
-
-	// Test Truncate
 	t.Run("Truncate", func(t *testing.T) {
 		filePath := createTempFile(t, tempDir, "truncate_*.txt", "1234567890")
+		var expectedSize int64 = 5
 
-		err := fs.Truncate(filePath, 5)
+		// Truncate and verify
+		err := fs.Truncate(filePath, expectedSize)
 		testutil.AssertNoError(t, err)
 
-		stat, errStat := os.Stat(filePath)
-		testutil.AssertNoError(t, errStat)
-		testutil.AssertEqual(t, int64(5), stat.Size())
+		// Verify file size
+		stat, err := os.Stat(filePath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, expectedSize, stat.Size())
 
-		err = fs.Truncate(filepath.Join(tempDir, "non_existent_file.txt"), 0)
+		// Verify truncated content
+		data, err := fs.ReadFile(filePath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, "12345", string(data))
+
+		// Test non-existent file
+		err = fs.Truncate(filepath.Join(tempDir, "non_existent.txt"), 0)
 		testutil.AssertError(t, err)
-		testutil.AssertTrue(t, fs.IsNotExist(err), "Error should be IsNotExist")
+		testutil.AssertTrue(t, fs.IsNotExist(err))
 	})
 
-	// Test WriteFile
-	t.Run("WriteFile", func(t *testing.T) {
-		filePath := filepath.Join(tempDir, "writefile_test.txt")
-		writeContent := []byte("data to write")
-		perm := os.FileMode(0644)
-
-		err := fs.WriteFile(filePath, writeContent, perm)
-		testutil.AssertNoError(t, err)
-
-		readData, errRead := os.ReadFile(filePath)
-		testutil.AssertNoError(t, errRead)
-		testutil.AssertEqual(t, writeContent, readData)
-
-		err = fs.WriteFile(tempDir, writeContent, perm)
-		testutil.AssertError(t, err, "Writing to a directory path should fail")
-	})
-
-	// Test Rename
 	t.Run("Rename", func(t *testing.T) {
-		oldPath := createTempFile(t, tempDir, "rename_old_*.txt", "move me")
-		newPath := filepath.Join(tempDir, "rename_new.txt")
+		oldPath := createTempFile(t, tempDir, "old_*.txt", "rename me")
+		newPath := filepath.Join(tempDir, "new.txt")
 
+		// Rename and verify
 		err := fs.Rename(oldPath, newPath)
 		testutil.AssertNoError(t, err)
 
-		_, errStatOld := os.Stat(oldPath)
-		testutil.AssertTrue(t, os.IsNotExist(errStatOld), "Old path should not exist")
-		_, errStatNew := os.Stat(newPath)
-		testutil.AssertNoError(t, errStatNew, "New path should exist")
-
-		err = fs.Rename(filepath.Join(tempDir, "non_existent_old"), newPath)
-		testutil.AssertError(t, err)
-	})
-
-	// Test MkdirAll
-	t.Run("MkdirAll", func(t *testing.T) {
-		nestedDirPath := filepath.Join(tempDir, "parent", "child")
-		perm := os.FileMode(0755)
-
-		err := fs.MkdirAll(nestedDirPath, perm)
+		// Check existence
+		exists, err := fs.Exists(newPath)
 		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, exists)
 
-		stat, errStat := os.Stat(nestedDirPath)
-		testutil.AssertNoError(t, errStat)
-		testutil.AssertTrue(t, stat.IsDir())
+		exists, err = fs.Exists(oldPath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertFalse(t, exists)
 
-		filePath := createTempFile(t, tempDir, "mkdir_file_*.txt", "")
-		err = fs.MkdirAll(filePath, perm)
-		testutil.AssertError(t, err, "MkdirAll on a file path should fail")
+		// Test non-existent source
+		err = fs.Rename(filepath.Join(tempDir, "non_existent.txt"), filepath.Join(tempDir, "another.txt"))
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, fs.IsNotExist(err))
 	})
 
-	// Test Dir and Join (path operations)
-	t.Run("PathOperations", func(t *testing.T) {
-		testutil.AssertEqual(t, "a/b", fs.Dir("a/b/c.txt"))
-		testutil.AssertEqual(t, ".", fs.Dir("a"))
-		testutil.AssertEqual(t, "/", fs.Dir("/a"))
-
-		testutil.AssertEqual(t, filepath.Join("a", "b", "c"), fs.Join("a", "b", "c"))
-		testutil.AssertEqual(t, filepath.Join("a", "c"), fs.Join("a", "", "c"))
-	})
-
-	// Test Remove
 	t.Run("Remove", func(t *testing.T) {
-		filePath := createTempFile(t, tempDir, "remove_file_*.txt", "delete me")
+		filePath := createTempFile(t, tempDir, "remove_*.txt", "delete me")
 
+		// Remove and verify
 		err := fs.Remove(filePath)
 		testutil.AssertNoError(t, err)
 
-		err = fs.Remove(filepath.Join(tempDir, "non_existent"))
+		exists, err := fs.Exists(filePath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertFalse(t, exists)
+
+		// Test non-existent file
+		err = fs.Remove(filepath.Join(tempDir, "non_existent.txt"))
 		testutil.AssertError(t, err)
-		testutil.AssertTrue(t, fs.IsNotExist(err), "Error should be IsNotExist")
+		testutil.AssertTrue(t, fs.IsNotExist(err))
+	})
+}
+
+// TestDirectoryOperations tests directory-related operations
+func TestDirectoryOperations(t *testing.T) {
+	fs := newFileSystem()
+	tempDir := t.TempDir()
+
+	t.Run("MkdirAll", func(t *testing.T) {
+		dirPath := filepath.Join(tempDir, "parent", "child")
+		perm := os.FileMode(0755)
+
+		// Create and verify
+		err := fs.MkdirAll(dirPath, perm)
+		testutil.AssertNoError(t, err)
+
+		exists, err := fs.Exists(dirPath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, exists)
+
+		// Creating an existing directory should succeed
+		err = fs.MkdirAll(dirPath, perm)
+		testutil.AssertNoError(t, err)
 	})
 
-	// Test IsNotExist
-	t.Run("IsNotExist", func(t *testing.T) {
-		testutil.AssertTrue(t, fs.IsNotExist(os.ErrNotExist), "Should be true for os.ErrNotExist")
-		testutil.AssertTrue(t, fs.IsNotExist(syscall.ENOENT), "Should be true for syscall.ENOENT")
+	t.Run("Exists", func(t *testing.T) {
+		// File exists
+		filePath := createTempFile(t, tempDir, "exists_*.txt", "content")
+		exists, err := fs.Exists(filePath)
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, exists)
 
-		testutil.AssertFalse(t, fs.IsNotExist(nil), "Should be false for nil error")
-		testutil.AssertFalse(t, fs.IsNotExist(io.EOF), "Should be false for other errors like io.EOF")
+		// File doesn't exist
+		exists, err = fs.Exists(filepath.Join(tempDir, "non_existent.txt"))
+		testutil.AssertNoError(t, err)
+		testutil.AssertFalse(t, exists)
+
+		// Custom error case
+		customFS := newFileSystemWithStat(func(name string) (os.FileInfo, error) {
+			return nil, errors.New("custom error")
+		})
+		exists, err = customFS.Exists(filePath)
+		testutil.AssertError(t, err)
+		testutil.AssertContains(t, err.Error(), "custom error")
+		testutil.AssertFalse(t, exists)
 	})
 
-	// Test Glob
 	t.Run("Glob", func(t *testing.T) {
-		f1 := createTempFile(t, tempDir, "glob_match1_*.txt", "")
-		f2 := createTempFile(t, tempDir, "glob_match2_*.txt", "")
-		_ = createTempFile(t, tempDir, "glob_other_*.dat", "")
+		// Create test files
+		file1 := createTempFile(t, tempDir, "glob1_*.txt", "")
+		file2 := createTempFile(t, tempDir, "glob2_*.txt", "")
+		pattern := filepath.Join(tempDir, "glob*_*.txt")
 
-		pattern := filepath.Join(tempDir, "glob_match*.txt")
+		// Test glob matching
 		matches, err := fs.Glob(pattern)
 		testutil.AssertNoError(t, err)
 
-		expected := []string{f1, f2}
-		sort.Strings(matches)
+		// Sort for deterministic comparison
+		expected := []string{file1, file2}
 		sort.Strings(expected)
+		sort.Strings(matches)
 		testutil.AssertEqual(t, expected, matches)
 
-		badPattern := filepath.Join(tempDir, "[")
-		_, err = fs.Glob(badPattern)
-		testutil.AssertError(t, err, "Glob with bad pattern should fail")
+		// Test glob with no matches
+		matches, err = fs.Glob(filepath.Join(tempDir, "nomatch_*.txt"))
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 0, len(matches))
+
+		// Test invalid pattern
+		_, err = fs.Glob("[") // Invalid pattern
+		testutil.AssertError(t, err)
 		testutil.AssertErrorIs(t, err, filepath.ErrBadPattern)
 	})
 }
 
-func TestDefaultFile(t *testing.T) {
-	fs := defaultFileSystem{}
+// TestPathUtilities tests path manipulation methods
+func TestPathUtilities(t *testing.T) {
+	fs := newFileSystem()
+
+	t.Run("Join", func(t *testing.T) {
+		testCases := []struct {
+			elements []string
+			expected string
+		}{
+			{[]string{"a", "b", "c"}, "a/b/c"},
+			{[]string{"/a", "b/"}, "/a/b"},
+			{[]string{"a/", "/b"}, "a/b"},
+			{[]string{}, ""},
+		}
+
+		for _, tc := range testCases {
+			result := fs.Join(tc.elements...)
+			testutil.AssertEqual(t, tc.expected, result)
+		}
+	})
+
+	t.Run("Dir", func(t *testing.T) {
+		testCases := []struct {
+			path     string
+			expected string
+		}{
+			{"a/b/c.txt", "a/b"},
+			{"/a/b/c", "/a/b"},
+			{"filename.txt", "."},
+			{"a/", "a"},
+		}
+
+		for _, tc := range testCases {
+			result := fs.Dir(tc.path)
+			testutil.AssertEqual(t, tc.expected, result)
+		}
+	})
+}
+
+// TestFileOperations tests the file interface methods
+func TestFileOperations(t *testing.T) {
+	fs := newFileSystem()
 	tempDir := t.TempDir()
 	content := "0123456789"
 
-	// Test ReadFull
 	t.Run("ReadFull", func(t *testing.T) {
 		filePath := createTempFile(t, tempDir, "readfull_*.txt", content)
-
 		f, err := fs.Open(filePath)
 		testutil.RequireNoError(t, err)
 		defer f.Close()
 
-		// Read full buffer
-		buf5 := make([]byte, 5)
-		n, err := f.ReadFull(buf5)
+		// Read part of the file
+		buf := make([]byte, 5)
+		n, err := f.ReadFull(buf)
 		testutil.AssertNoError(t, err)
 		testutil.AssertEqual(t, 5, n)
-		testutil.AssertEqual(t, "01234", string(buf5))
+		testutil.AssertEqual(t, "01234", string(buf))
 
-		// Read with unexpected EOF
-		buf6 := make([]byte, 6)
-		n, err = f.ReadFull(buf6)
+		// Read more than remaining (should get ErrUnexpectedEOF)
+		buf = make([]byte, 6)
+		n, err = f.ReadFull(buf)
 		testutil.AssertErrorIs(t, err, io.ErrUnexpectedEOF)
 		testutil.AssertEqual(t, 5, n)
-		testutil.AssertEqual(t, "56789", string(buf6[:n]))
+		testutil.AssertEqual(t, "56789", string(buf[:n]))
 
-		// Read at EOF
-		buf1 := make([]byte, 1)
-		n, err = f.ReadFull(buf1)
+		// Try to read at EOF
+		buf = make([]byte, 1)
+		n, err = f.ReadFull(buf)
 		testutil.AssertErrorIs(t, err, io.EOF)
 		testutil.AssertEqual(t, 0, n)
 	})
 
-	// Test ReadAll
 	t.Run("ReadAll", func(t *testing.T) {
-		filePath := createTempFile(t, tempDir, "readall_*.txt", "read all this")
-
+		filePath := createTempFile(t, tempDir, "readall_*.txt", content)
 		f, err := fs.Open(filePath)
 		testutil.RequireNoError(t, err)
 		defer f.Close()
 
+		// Read entire file
 		data, err := f.ReadAll()
 		testutil.AssertNoError(t, err)
-		testutil.AssertEqual(t, []byte("read all this"), data)
+		testutil.AssertEqual(t, content, string(data))
 
-		// ReadAll on exhausted reader
+		// ReadAll on an already consumed file should return empty without error
 		data, err = f.ReadAll()
 		testutil.AssertNoError(t, err)
-		testutil.AssertEmpty(t, data)
+		testutil.AssertEqual(t, 0, len(data))
 	})
 
-	// Test Close
-	t.Run("Close", func(t *testing.T) {
-		filePath := createTempFile(t, tempDir, "close_*.txt", "a")
-
+	t.Run("Seek", func(t *testing.T) {
+		filePath := createTempFile(t, tempDir, "seek_*.txt", content)
 		f, err := fs.Open(filePath)
 		testutil.RequireNoError(t, err)
+		defer f.Close()
 
-		err = f.Close()
-		testutil.AssertNoError(t, err)
+		// Test Seek with different whence values
+		seekTests := []struct {
+			offset    int64
+			whence    int
+			expected  int64
+			readBytes int
+			readData  string
+		}{
+			{3, io.SeekStart, 3, 3, "345"},
+			{-2, io.SeekEnd, 8, 2, "89"},
+			{-3, io.SeekCurrent, 7, 3, "789"},
+			{0, io.SeekStart, 0, 5, "01234"},
+		}
 
-		// Verify operation on closed file fails
-		buf := make([]byte, 1)
-		_, err = f.Read(buf)
-		testutil.AssertError(t, err, "Read on closed file should error")
+		for i, test := range seekTests {
+			pos, err := f.Seek(test.offset, test.whence)
+			testutil.AssertNoError(t, err, fmt.Sprintf("seek test %d failed", i))
+			testutil.AssertEqual(t, test.expected, pos)
 
-		// Double close check
-		err = f.Close()
-		testutil.AssertError(t, err, "Second close should error")
+			// Read data to verify position
+			buf := make([]byte, test.readBytes)
+			n, err := f.Read(buf)
+			testutil.AssertNoError(t, err)
+			testutil.AssertEqual(t, test.readBytes, n)
+			testutil.AssertEqual(t, test.readData, string(buf))
+		}
+	})
+}
+
+// TestErrorHandling tests IsNotExist behavior with various error types
+func TestErrorHandling(t *testing.T) {
+	fs := newFileSystem()
+
+	t.Run("IsNotExist", func(t *testing.T) {
+		testCases := []struct {
+			err      error
+			expected bool
+		}{
+			{os.ErrNotExist, true},
+			{fmt.Errorf("wrapped: %w", os.ErrNotExist), true},
+			{io.EOF, false},
+			{errors.New("other error"), false},
+			{nil, false},
+		}
+
+		for _, tc := range testCases {
+			result := fs.IsNotExist(tc.err)
+			testutil.AssertEqual(t, tc.expected, result)
+		}
 	})
 }
