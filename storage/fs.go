@@ -1,10 +1,13 @@
 package storage
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 )
+
+type fileStatFunc func(name string) (os.FileInfo, error)
 
 // fileSystem defines an interface for file system operations.
 // It allows mocking during testing by abstracting underlying file I/O operations.
@@ -35,11 +38,22 @@ type file interface {
 
 // defaultFileSystem provides a concrete implementation of fileSystem
 // using the standard library's os and filepath packages.
-type defaultFileSystem struct{}
+type defaultFileSystem struct {
+	statFunc fileStatFunc
+}
 
-// newDefaultFileSystem returns a new instance of the defaultFileSystem.
-func newDefaultFileSystem() fileSystem {
-	return defaultFileSystem{}
+// newFileSystem returns a new defaultFileSystem using os.Stat.
+func newFileSystem() fileSystem {
+	return newFileSystemWithStat(os.Stat)
+}
+
+// newFileSystemWithStat returns a defaultFileSystem using the provided stat function.
+// If the stat function is nil, os.Stat is used as the default.
+func newFileSystemWithStat(stat fileStatFunc) fileSystem {
+	if stat == nil {
+		stat = os.Stat
+	}
+	return defaultFileSystem{statFunc: stat}
 }
 
 // ReadFile reads the contents of the specified file and returns the data.
@@ -58,11 +72,11 @@ func (fs defaultFileSystem) Open(name string) (file, error) {
 
 // Exists reports whether the specified file exists.
 func (fs defaultFileSystem) Exists(name string) (bool, error) {
-	_, err := os.Stat(name)
+	_, err := fs.statFunc(name)
 	if err == nil {
 		return true, nil
 	}
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	return false, err
@@ -100,7 +114,7 @@ func (fs defaultFileSystem) Remove(name string) error {
 
 // IsNotExist reports whether the error indicates a file or directory does not exist.
 func (fs defaultFileSystem) IsNotExist(err error) bool {
-	return os.IsNotExist(err)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // Glob returns the names of all files matching the pattern.
