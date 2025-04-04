@@ -37,21 +37,22 @@ func (m *mockSerializer) UnmarshalSnapshotMetadata([]byte) (types.SnapshotMetada
 	return types.SnapshotMetadata{}, nil
 }
 
-type readerWithFull struct {
+type mockFile struct {
 	*bytes.Reader
 }
 
-func (r *readerWithFull) ReadFull(buf []byte) (int, error) { return io.ReadFull(r.Reader, buf) }
-func (r *readerWithFull) Close() error                     { return nil }
-func (r *readerWithFull) ReadAll() ([]byte, error)         { return io.ReadAll(r.Reader) }
+func (r *mockFile) ReadFull(buf []byte) (int, error) { return io.ReadFull(r.Reader, buf) }
+func (r *mockFile) Close() error                     { return nil }
+func (r *mockFile) ReadAll() ([]byte, error)         { return io.ReadAll(r.Reader) }
 
-type errorReader struct {
+// failingReader simulates a reader that returns an error after a limited number of bytes.
+type failingReader struct {
 	reader      io.Reader
 	err         error
 	bytesToRead int
 }
 
-func (r *errorReader) Read(p []byte) (int, error) {
+func (r *failingReader) Read(p []byte) (int, error) {
 	if r.bytesToRead <= 0 {
 		return 0, r.err
 	}
@@ -67,12 +68,12 @@ func (r *errorReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (r *errorReader) Close() error { return nil }
-func (r *errorReader) Seek(offset int64, whence int) (int64, error) {
+func (r *failingReader) Close() error { return nil }
+func (r *failingReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, errors.New("seek not implemented")
 }
-func (r *errorReader) ReadFull(buf []byte) (int, error) { return io.ReadFull(r, buf) }
-func (r *errorReader) ReadAll() ([]byte, error)         { return io.ReadAll(r) }
+func (r *failingReader) ReadFull(buf []byte) (int, error) { return io.ReadFull(r, buf) }
+func (r *failingReader) ReadAll() ([]byte, error)         { return io.ReadAll(r) }
 
 func createTestData(entryData []byte, prefixSize int) []byte {
 	prefix := make([]byte, prefixSize)

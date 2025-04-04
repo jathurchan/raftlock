@@ -41,7 +41,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Success",
 			maxSize: testMaxSize,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader(createTestData(serializedTestEntry, testPrefixSize)),
 			},
 			serializer: &mockSerializer{
@@ -59,7 +59,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "EOF on Prefix",
 			maxSize: testMaxSize,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader([]byte{}),
 			},
 			serializer:    &mockSerializer{},
@@ -70,7 +70,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Partial Prefix",
 			maxSize: testMaxSize,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader([]byte{0x00, 0x01}),
 			},
 			serializer:    &mockSerializer{},
@@ -81,7 +81,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Error Reading Prefix",
 			maxSize: testMaxSize,
-			fileReader: &errorReader{
+			fileReader: &failingReader{
 				reader:      bytes.NewReader([]byte{}),
 				err:         errors.New("read error"),
 				bytesToRead: 0,
@@ -94,7 +94,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Zero Length Entry",
 			maxSize: testMaxSize,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader(make([]byte, testPrefixSize)),
 			},
 			serializer:    &mockSerializer{},
@@ -105,7 +105,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Entry Too Large",
 			maxSize: 10,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader(createTestData(make([]byte, 11), testPrefixSize)),
 			},
 			serializer:    &mockSerializer{},
@@ -116,7 +116,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Incomplete Entry Body",
 			maxSize: testMaxSize,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader(append(binary.BigEndian.AppendUint32(nil, 10), []byte("short")...)),
 			},
 			serializer:    &mockSerializer{},
@@ -127,7 +127,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Error Reading Body",
 			maxSize: testMaxSize,
-			fileReader: &errorReader{
+			fileReader: &failingReader{
 				reader:      bytes.NewReader(createTestData(serializedTestEntry, testPrefixSize)),
 				err:         errors.New("body read error"),
 				bytesToRead: testPrefixSize,
@@ -140,7 +140,7 @@ func TestReadNext(t *testing.T) {
 		{
 			name:    "Deserialization Error",
 			maxSize: testMaxSize,
-			fileReader: &readerWithFull{
+			fileReader: &mockFile{
 				Reader: bytes.NewReader(createTestData(serializedTestEntry, testPrefixSize)),
 			},
 			serializer: &mockSerializer{
