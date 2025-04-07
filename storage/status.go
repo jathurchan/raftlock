@@ -2,43 +2,43 @@ package storage
 
 import "fmt"
 
-// StorageStatus represents the current status of the storage
-type StorageStatus int
+// storageStatus represents the current status of the storage
+type storageStatus int
 
 const (
-	// StorageStatusUnknown is the initial status
-	StorageStatusUnknown StorageStatus = iota
+	// storageStatusUnknown is the initial status
+	storageStatusUnknown storageStatus = iota
 
-	// StorageStatusInitializing indicates the storage is initializing
-	StorageStatusInitializing
+	// storageStatusInitializing indicates the storage is initializing
+	storageStatusInitializing
 
-	// StorageStatusRecovering indicates the storage is in recovery mode
-	StorageStatusRecovering
+	// storageStatusRecovering indicates the storage is in recovery mode
+	storageStatusRecovering
 
-	// StorageStatusReady indicates the storage is ready for use
-	StorageStatusReady
+	// storageStatusReady indicates the storage is ready for use
+	storageStatusReady
 
-	// StorageStatusCorrupted indicates the storage has detected corruption
-	StorageStatusCorrupted
+	// storageStatusCorrupted indicates the storage has detected corruption
+	storageStatusCorrupted
 
-	// StorageStatusClosed indicates the storage has been closed
-	StorageStatusClosed
+	// storageStatusClosed indicates the storage has been closed
+	storageStatusClosed
 )
 
-// String returns a string representation of the storage status
-func (s StorageStatus) String() string {
+// string returns a string representation of the storage status
+func (s storageStatus) string() string {
 	switch s {
-	case StorageStatusUnknown:
+	case storageStatusUnknown:
 		return "Unknown"
-	case StorageStatusInitializing:
+	case storageStatusInitializing:
 		return "Initializing"
-	case StorageStatusRecovering:
+	case storageStatusRecovering:
 		return "Recovering"
-	case StorageStatusReady:
+	case storageStatusReady:
 		return "Ready"
-	case StorageStatusCorrupted:
+	case storageStatusCorrupted:
 		return "Corrupted"
-	case StorageStatusClosed:
+	case storageStatusClosed:
 		return "Closed"
 	default:
 		return fmt.Sprintf("Status(%d)", int(s))
