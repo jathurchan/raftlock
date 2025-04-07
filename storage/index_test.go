@@ -371,3 +371,179 @@ func TestIndexService_VerifyConsistency(t *testing.T) {
 		})
 	}
 }
+
+func TestIndexService_GetBounds(t *testing.T) {
+	tests := []struct {
+		name         string
+		indexMap     []types.IndexOffsetPair
+		currentFirst types.Index
+		currentLast  types.Index
+		expected     boundsResult
+	}{
+		{
+			name:         "Empty index map, no current bounds",
+			indexMap:     []types.IndexOffsetPair{},
+			currentFirst: 0,
+			currentLast:  0,
+			expected: boundsResult{
+				NewFirst: 0,
+				NewLast:  0,
+				Changed:  false,
+				WasReset: false,
+			},
+		},
+		{
+			name:         "Empty index map, existing current bounds",
+			indexMap:     []types.IndexOffsetPair{},
+			currentFirst: 1,
+			currentLast:  5,
+			expected: boundsResult{
+				NewFirst: 0,
+				NewLast:  0,
+				Changed:  true,
+				WasReset: true,
+			},
+		},
+		{
+			name: "Non-empty index map, same bounds",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			currentFirst: 1,
+			currentLast:  3,
+			expected: boundsResult{
+				NewFirst: 1,
+				NewLast:  3,
+				Changed:  false,
+				WasReset: false,
+			},
+		},
+		{
+			name: "Non-empty index map, different first",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 2, Offset: 0},
+				{Index: 3, Offset: 10},
+				{Index: 4, Offset: 20},
+			},
+			currentFirst: 1,
+			currentLast:  4,
+			expected: boundsResult{
+				NewFirst: 2,
+				NewLast:  4,
+				Changed:  true,
+				WasReset: false,
+			},
+		},
+		{
+			name: "Non-empty index map, different last",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+			currentFirst: 1,
+			currentLast:  3,
+			expected: boundsResult{
+				NewFirst: 1,
+				NewLast:  4,
+				Changed:  true,
+				WasReset: false,
+			},
+		},
+		{
+			name: "Non-empty index map, both different",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 2, Offset: 0},
+				{Index: 3, Offset: 10},
+				{Index: 4, Offset: 20},
+				{Index: 5, Offset: 30},
+			},
+			currentFirst: 1,
+			currentLast:  4,
+			expected: boundsResult{
+				NewFirst: 2,
+				NewLast:  5,
+				Changed:  true,
+				WasReset: false,
+			},
+		},
+		{
+			name: "Non-empty index map, current first higher",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			currentFirst: 2,
+			currentLast:  2,
+			expected: boundsResult{
+				NewFirst: 1,
+				NewLast:  2,
+				Changed:  true,
+				WasReset: false,
+			},
+		},
+		{
+			name: "Non-empty index map, current last lower",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			currentFirst: 1,
+			currentLast:  2,
+			expected: boundsResult{
+				NewFirst: 1,
+				NewLast:  3,
+				Changed:  true,
+				WasReset: false,
+			},
+		},
+		{
+			name:         "Non-empty index map, single entry, same bounds",
+			indexMap:     []types.IndexOffsetPair{{Index: 5, Offset: 100}},
+			currentFirst: 5,
+			currentLast:  5,
+			expected: boundsResult{
+				NewFirst: 5,
+				NewLast:  5,
+				Changed:  false,
+				WasReset: false,
+			},
+		},
+		{
+			name:         "Non-empty index map, single entry, different first",
+			indexMap:     []types.IndexOffsetPair{{Index: 6, Offset: 100}},
+			currentFirst: 5,
+			currentLast:  5,
+			expected: boundsResult{
+				NewFirst: 6,
+				NewLast:  6,
+				Changed:  true,
+				WasReset: false,
+			},
+		},
+		{
+			name:         "Non-empty index map, single entry, different last (should also change first)",
+			indexMap:     []types.IndexOffsetPair{{Index: 7, Offset: 100}},
+			currentFirst: 7,
+			currentLast:  6,
+			expected: boundsResult{
+				NewFirst: 7,
+				NewLast:  7,
+				Changed:  true, // Corrected expectation
+				WasReset: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, _, _ := setupTestIndexService()
+			result := is.GetBounds(tt.indexMap, tt.currentFirst, tt.currentLast)
+			testutil.AssertEqual(t, tt.expected, result)
+		})
+	}
+}

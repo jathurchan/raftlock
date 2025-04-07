@@ -14,8 +14,15 @@ type buildResult struct {
 	LastValidIndex types.Index // Ignored if Truncated == false
 }
 
-// indexService defines methods for building and validating index-offset mappings from log files.
-// These mappings are used to efficiently locate log entries by index.
+type boundsResult struct {
+	NewFirst types.Index
+	NewLast  types.Index
+	Changed  bool
+	WasReset bool
+}
+
+// indexService defines operations for interpreting index-offset mappings derived from log files.
+// These mappings allow efficient access to log entries by their index and enable validation of log continuity.
 type indexService interface {
 	// Build parses the log file at the specified path and constructs a mapping of log indices
 	// to their corresponding byte offsets within the file.
@@ -27,6 +34,11 @@ type indexService interface {
 	// strictly increasing and gapless indices. If any discontinuity or out-of-order
 	// entry is found, it returns an error indicating log corruption.
 	VerifyConsistency(indexMap []types.IndexOffsetPair) error
+
+	// GetBounds analyzes the given index map and compares it against the current metadata range.
+	// It returns a boundsResult indicating the new first and last indices, whether the metadata has changed,
+	// and whether the change represents a full reset (i.e., the index map is empty).
+	GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult
 }
 
 // defaultIndexService provides a filesystem-backed implementation of indexService.
@@ -209,4 +221,44 @@ func (is *defaultIndexService) VerifyConsistency(indexMap []types.IndexOffsetPai
 
 	is.logger.Debugw("Log consistency OK", "entries", len(indexMap))
 	return nil
+}
+
+// GetBounds computes the desired metadata bounds based on the contents of the index map,
+// and compares them to the currently stored first and last indices.
+func (s *defaultIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
+	s.logger.Debugw("Calculating bounds",
+		"currentFirst", currentFirst,
+		"currentLast", currentLast,
+		"indexMapLength", len(indexMap),
+	)
+	if len(indexMap) == 0 {
+		if currentFirst == 0 && currentLast == 0 {
+			s.logger.Debugw("Index map empty, no change to bounds")
+			return boundsResult{0, 0, false, false}
+		}
+		s.logger.Infow("Index map is empty, resetting bounds",
+			"previousFirst", currentFirst,
+			"previousLast", currentLast,
+		)
+		return boundsResult{0, 0, true, true}
+	}
+
+	newFirst := indexMap[0].Index
+	newLast := indexMap[len(indexMap)-1].Index
+
+	if newFirst == currentFirst && newLast == currentLast {
+		s.logger.Debugw("Bounds unchanged",
+			"newFirst", newFirst,
+			"newLast", newLast,
+		)
+		return boundsResult{newFirst, newLast, false, false}
+	}
+
+	s.logger.Infow("Bounds changed",
+		"newFirst", newFirst,
+		"newLast", newLast,
+		"previousFirst", currentFirst,
+		"previousLast", currentLast,
+	)
+	return boundsResult{newFirst, newLast, true, false}
 }
