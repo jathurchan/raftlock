@@ -34,9 +34,8 @@ const (
 	// CommandLengthSize is the size of command length field in binary format.
 	CommandLengthSize = 8
 
-	// ChecksumSize is the size of checksum field in binary format.
-	ChecksumSize = 8
-
 	// HeaderSize is the total size of binary entry header (index + term + data length).
 	HeaderSize = IndexSize + TermSize + CommandLengthSize
+
+	TmpSuffix = ".tmp"
 )
