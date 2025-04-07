@@ -2,37 +2,64 @@ package logger
 
 // NoOpLogger is a Logger implementation that silently discards all log messages.
 // It is useful for testing, benchmarking, or disabling logging entirely.
-type NoOpLogger struct{}
+// Each method can be optionally overridden for testing purposes.
+type NoOpLogger struct {
+	DebugwFunc func(string, ...any)
+	InfowFunc  func(string, ...any)
+	WarnwFunc  func(string, ...any)
+	ErrorwFunc func(string, ...any)
+	FatalwFunc func(string, ...any)
+}
 
-// Debugw implements Logger.Debugw; it discards the debug message and key-value pairs.
-func (l *NoOpLogger) Debugw(msg string, keysAndValues ...any) {}
+// Debugw implements Logger.Debugw; it optionally calls DebugwFunc or discards the message.
+func (l *NoOpLogger) Debugw(msg string, keysAndValues ...any) {
+	if l.DebugwFunc != nil {
+		l.DebugwFunc(msg, keysAndValues...)
+	}
+}
 
-// Infow implements Logger.Infow; it discards the info message and key-value pairs.
-func (l *NoOpLogger) Infow(msg string, keysAndValues ...any) {}
+// Infow implements Logger.Infow; it optionally calls InfowFunc or discards the message.
+func (l *NoOpLogger) Infow(msg string, keysAndValues ...any) {
+	if l.InfowFunc != nil {
+		l.InfowFunc(msg, keysAndValues...)
+	}
+}
 
-// Warnw implements Logger.Warnw; it discards the warning message and key-value pairs.
-func (l *NoOpLogger) Warnw(msg string, keysAndValues ...any) {}
+// Warnw implements Logger.Warnw; it optionally calls WarnwFunc or discards the message.
+func (l *NoOpLogger) Warnw(msg string, keysAndValues ...any) {
+	if l.WarnwFunc != nil {
+		l.WarnwFunc(msg, keysAndValues...)
+	}
+}
 
-// Errorw implements Logger.Errorw; it discards the error message and key-value pairs.
-func (l *NoOpLogger) Errorw(msg string, keysAndValues ...any) {}
+// Errorw implements Logger.Errorw; it optionally calls ErrorwFunc or discards the message.
+func (l *NoOpLogger) Errorw(msg string, keysAndValues ...any) {
+	if l.ErrorwFunc != nil {
+		l.ErrorwFunc(msg, keysAndValues...)
+	}
+}
 
-// Fatalw implements Logger.Fatalw; it discards the fatal message and key-value pairs.
-// Unlike typical fatal loggers, this does not terminate the application.
-func (l *NoOpLogger) Fatalw(msg string, keysAndValues ...any) {}
+// Fatalw implements Logger.Fatalw; it optionally calls FatalwFunc or discards the message.
+func (l *NoOpLogger) Fatalw(msg string, keysAndValues ...any) {
+	if l.FatalwFunc != nil {
+		l.FatalwFunc(msg, keysAndValues...)
+	}
+}
 
-// With implements Logger.With; it returns the same NoOpLogger without storing the context.
+// With returns the same NoOpLogger; context is not stored.
 func (l *NoOpLogger) With(keysAndValues ...any) Logger { return l }
 
-// WithNodeID implements Logger.WithNodeID; it returns the same NoOpLogger without storing the context.
+// WithNodeID returns the same NoOpLogger; context is not stored.
 func (l *NoOpLogger) WithNodeID(id int) Logger { return l }
 
-// WithTerm implements Logger.WithTerm; it returns the same NoOpLogger without storing the context.
+// WithTerm returns the same NoOpLogger; context is not stored.
 func (l *NoOpLogger) WithTerm(term uint64) Logger { return l }
 
-// WithComponent implements Logger.WithComponent; it returns the same NoOpLogger without storing the context.
+// WithComponent returns the same NoOpLogger; context is not stored.
 func (l *NoOpLogger) WithComponent(name string) Logger { return l }
 
 // NewNoOpLogger returns a Logger that discards all log messages.
+// Can be type-asserted to *NoOpLogger for injecting test behavior.
 func NewNoOpLogger() Logger {
 	return &NoOpLogger{}
 }
