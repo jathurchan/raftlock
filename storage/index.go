@@ -15,8 +15,17 @@ type buildResult struct {
 }
 
 // indexService defines methods for building and validating index-offset mappings from log files.
+// These mappings are used to efficiently locate log entries by index.
 type indexService interface {
+	// Build parses the log file at the specified path and constructs a mapping of log indices
+	// to their corresponding byte offsets within the file.
+	// If the log file is missing, it returns an empty result without error.
+	// If corruption is detected during parsing, a truncated result is returned along with an error.
 	Build(logPath string) (buildResult, error)
+
+	// VerifyConsistency ensures that the provided index-offset map contains
+	// strictly increasing and gapless indices. If any discontinuity or out-of-order
+	// entry is found, it returns an error indicating log corruption.
 	VerifyConsistency(indexMap []types.IndexOffsetPair) error
 }
 
