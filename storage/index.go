@@ -98,7 +98,7 @@ func (s *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, e
 		// Preallocate capacity for performance, but start with zero length.
 		// This avoids including default-zero entries in the index map,
 		// ensuring that all appended entries are valid log entries.
-		indexMap = make([]types.IndexOffsetPair, 0, DefaultIndexMapInitialCapacity)
+		indexMap = make([]types.IndexOffsetPair, 0, defaultIndexMapInitialCapacity)
 	)
 
 	s.logger.Infow("Starting log scan to build index-offset map", "path", logPath)
