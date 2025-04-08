@@ -8,17 +8,6 @@ import (
 	"github.com/jathurchan/raftlock/logger"
 )
 
-const (
-	snapshotMetaFilename       = "snapshot_meta.json"
-	snapshotDataFilename       = "snapshot.dat"
-	snapshotMarkerFilename     = "snapshot.marker"
-	recoveryMarkerFilename     = "recovery.marker"
-	metadataFilename           = "metadata.json"
-	logFilename                = "log.dat"
-	stateFilename              = "state.json"
-	snapshotMarkerCommittedKey = "meta_committed=true"
-)
-
 // recoveryMode defines the level of strictness to apply during recovery.
 type recoveryMode int
 

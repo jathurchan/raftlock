@@ -39,4 +39,31 @@ const (
 
 	// tmpSuffix is the suffix used for temporary files created during atomic write operations.
 	tmpSuffix = ".tmp"
+
+	// snapshotMetaFilename is the filename used to persist snapshot metadata (e.g., last included index and term).
+	snapshotMetaFilename = "snapshot_meta.json"
+
+	// snapshotDataFilename is the filename for the raw snapshot data representing a compacted state.
+	snapshotDataFilename = "snapshot.dat"
+
+	// snapshotMarkerFilename indicates an in-progress or recently committed snapshot operation.
+	// Used for crash recovery to detect incomplete snapshots.
+	snapshotMarkerFilename = "snapshot.marker"
+
+	// recoveryMarkerFilename signals that the storage system is in an incomplete or recovering state.
+	// Created during startup and removed after successful initialization.
+	recoveryMarkerFilename = "recovery.marker"
+
+	// metadataFilename stores log metadata such as the first and last persisted log index.
+	metadataFilename = "metadata.json"
+
+	// logFilename is the primary file for binary-encoded Raft log entries.
+	logFilename = "log.dat"
+
+	// stateFilename stores the persistent Raft state (current term and voted-for candidate).
+	stateFilename = "state.json"
+
+	// snapshotMarkerCommittedKey is a marker string written to the snapshot marker file
+	// to indicate that the snapshot metadata has been successfully committed.
+	snapshotMarkerCommittedKey = "meta_committed=true"
 )
