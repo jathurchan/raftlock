@@ -37,5 +37,6 @@ const (
 	// HeaderSize is the total size of binary entry header (index + term + data length).
 	HeaderSize = IndexSize + TermSize + CommandLengthSize
 
+	// TmpSuffix is the suffix used for temporary files created during atomic write operations.
 	TmpSuffix = ".tmp"
 )
