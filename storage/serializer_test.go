@@ -135,15 +135,15 @@ func testBinaryLogEntryRoundTrip(t *testing.T, s binarySerializer) {
 
 func testBinaryLogEntryInvalidData(t *testing.T, s binarySerializer) {
 	// Test with too short data
-	tooShortData := make([]byte, HeaderSize-1)
+	tooShortData := make([]byte, headerSize-1)
 	_, err := s.UnmarshalLogEntry(tooShortData)
 	testutil.AssertError(t, err, "UnmarshalLogEntry should error with too short data")
 	testutil.AssertContains(t, err.Error(), "data too short", "Error message should indicate data is too short")
 
 	// Test with inconsistent command length
-	inconsistentData := make([]byte, HeaderSize+10) // Enough space for header + some data
+	inconsistentData := make([]byte, headerSize+10) // Enough space for header + some data
 	// Set command length to a value greater than the actual data
-	binary.BigEndian.PutUint64(inconsistentData[IndexSize+TermSize:HeaderSize], 100)
+	binary.BigEndian.PutUint64(inconsistentData[indexSize+termSize:headerSize], 100)
 
 	_, err = s.UnmarshalLogEntry(inconsistentData)
 	testutil.AssertError(t, err, "UnmarshalLogEntry should error with inconsistent command length")

@@ -103,13 +103,13 @@ func (m *defaultMetadataService) SaveMetadata(path string, metadata logMetadata,
 	}
 
 	if useAtomicWrite {
-		if err := m.atomicWriteFile(path, data, OwnRWOthR); err != nil {
+		if err := m.atomicWriteFile(path, data, ownRWOthR); err != nil {
 			m.logger.Errorw("Atomic write failed", "path", path, "error", err)
 			return err
 		}
 	}
 
-	if err := m.fs.WriteFile(path, data, OwnRWOthR); err != nil {
+	if err := m.fs.WriteFile(path, data, ownRWOthR); err != nil {
 		m.logger.Errorw("Non-atomic write failed", "path", path, "error", err)
 		return fmt.Errorf("%w: failed to write metadata file: %v", ErrStorageIO, err)
 	}
@@ -124,13 +124,13 @@ func (m *defaultMetadataService) atomicWriteFile(targetPath string, data []byte,
 	dir := m.fs.Dir(targetPath)
 
 	// Ensure the directory exists
-	if err := m.fs.MkdirAll(dir, OwnRWXOthRX); err != nil {
+	if err := m.fs.MkdirAll(dir, ownRWXOthRX); err != nil {
 		m.logger.Errorw("Failed to create parent directory for atomic write", "dir", dir, "error", err)
 		return fmt.Errorf("%w: failed to create directory %q: %v", ErrStorageIO, dir, err)
 	}
 
 	// Write to temporary file
-	tmpPath := targetPath + TmpSuffix
+	tmpPath := targetPath + tmpSuffix
 	if err := m.fs.WriteFile(tmpPath, data, perm); err != nil {
 		m.logger.Errorw("Failed to write temporary file during atomic write", "tmpPath", tmpPath, "error", err)
 		return m.handleErrorWithCleanup(

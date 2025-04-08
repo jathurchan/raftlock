@@ -198,9 +198,9 @@ func TestDefaultMetadataService_atomicWriteFile(t *testing.T) {
 		},
 		{
 			name:          "rename error",
-			fs:            &mockFileSystem{renameErr: errors.New("rename error"), files: map[string][]byte{path + TmpSuffix: data}},
+			fs:            &mockFileSystem{renameErr: errors.New("rename error"), files: map[string][]byte{path + tmpSuffix: data}},
 			expectedError: true,
-			expectedFiles: map[string][]byte{path + TmpSuffix: data},
+			expectedFiles: map[string][]byte{path + tmpSuffix: data},
 		},
 	}
 

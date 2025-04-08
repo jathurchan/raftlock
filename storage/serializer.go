@@ -107,49 +107,49 @@ func (s binarySerializer) MarshalLogEntry(entry types.LogEntry) ([]byte, error) 
 	commandLen := len(entry.Command)
 
 	// Calculate total size: header + command
-	totalSize := HeaderSize + commandLen
+	totalSize := headerSize + commandLen
 
 	// Allocate buffer
 	data := make([]byte, totalSize)
 
 	// Write index
-	binary.BigEndian.PutUint64(data[0:IndexSize], uint64(entry.Index))
+	binary.BigEndian.PutUint64(data[0:indexSize], uint64(entry.Index))
 
 	// Write term
-	binary.BigEndian.PutUint64(data[IndexSize:IndexSize+TermSize], uint64(entry.Term))
+	binary.BigEndian.PutUint64(data[indexSize:indexSize+termSize], uint64(entry.Term))
 
 	// Write command length
 	binary.BigEndian.PutUint64(
-		data[IndexSize+TermSize:HeaderSize],
+		data[indexSize+termSize:headerSize],
 		uint64(commandLen))
 
 	// Write command data
-	copy(data[HeaderSize:], entry.Command)
+	copy(data[headerSize:], entry.Command)
 
 	return data, nil
 }
 
 // UnmarshalLogEntry deserializes a log entry from binary format
 func (s binarySerializer) UnmarshalLogEntry(data []byte) (types.LogEntry, error) {
-	if len(data) < HeaderSize {
+	if len(data) < headerSize {
 		return types.LogEntry{}, fmt.Errorf("data too short for binary log entry")
 	}
 
 	// Extract header fields
-	index := types.Index(binary.BigEndian.Uint64(data[0:IndexSize]))
-	term := types.Term(binary.BigEndian.Uint64(data[IndexSize : IndexSize+TermSize]))
-	commandLen := binary.BigEndian.Uint64(data[IndexSize+TermSize : HeaderSize])
+	index := types.Index(binary.BigEndian.Uint64(data[0:indexSize]))
+	term := types.Term(binary.BigEndian.Uint64(data[indexSize : indexSize+termSize]))
+	commandLen := binary.BigEndian.Uint64(data[indexSize+termSize : headerSize])
 
 	// Validate command length
-	if uint64(len(data)-HeaderSize) != commandLen {
+	if uint64(len(data)-headerSize) != commandLen {
 		return types.LogEntry{}, fmt.Errorf(
 			"command length mismatch: header says %d, actual is %d",
-			commandLen, len(data)-HeaderSize)
+			commandLen, len(data)-headerSize)
 	}
 
 	// Extract command
 	command := make([]byte, commandLen)
-	copy(command, data[HeaderSize:])
+	copy(command, data[headerSize:])
 
 	return types.LogEntry{
 		Index:   index,
