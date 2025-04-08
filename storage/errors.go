@@ -2,6 +2,7 @@ package storage
 
 import "errors"
 
+// General storage errors.
 var (
 	// ErrStorageIO is returned when a low-level I/O failure occurs during a storage operation.
 	ErrStorageIO = errors.New("raft: storage I/O error")
@@ -9,6 +10,12 @@ var (
 	// ErrUninitializedStorage is returned if the storage is used before it has been properly initialized.
 	ErrUninitializedStorage = errors.New("raft: storage not initialized")
 
+	// ErrInvalidOffset is returned when an invalid file offset is encountered.
+	ErrInvalidOffset = errors.New("raft: invalid file offset")
+)
+
+// Log entry errors.
+var (
 	// ErrEntryNotFound is returned when a requested log entry is missing or has been compacted.
 	ErrEntryNotFound = errors.New("raft: log entry not found")
 
@@ -27,9 +34,21 @@ var (
 	// ErrEntryConflict is returned when an entry conflicts with an existing index-term pair.
 	ErrEntryConflict = errors.New("raft: log entry conflict at given index")
 
+	// ErrInvalidLogRange is returned when a requested range has start >= end.
+	ErrInvalidLogRange = errors.New("raft: invalid log range (start index must be less than end)")
+
+	// ErrCorruptedLog is returned when a log entry is structurally invalid or cannot be decoded.
+	ErrCorruptedLog = errors.New("raft: corrupted log entry")
+)
+
+// Persistent metadata errors.
+var (
 	// ErrCorruptedState is returned when persisted term or vote metadata is malformed or unreadable.
 	ErrCorruptedState = errors.New("raft: corrupted persistent state")
+)
 
+// Snapshot errors.
+var (
 	// ErrNoSnapshot is returned when a snapshot is requested but none is available.
 	ErrNoSnapshot = errors.New("raft: no snapshot available")
 
@@ -41,13 +60,4 @@ var (
 
 	// ErrSnapshotMismatch is returned when snapshot metadata does not align with the expected log structure.
 	ErrSnapshotMismatch = errors.New("raft: snapshot metadata does not match log history")
-
-	// ErrInvalidLogRange is returned when a requested range has start >= end.
-	ErrInvalidLogRange = errors.New("raft: invalid log range (start index must be less than end)")
-
-	// ErrInvalidOffset is returned when an invalid file offset is encountered.
-	ErrInvalidOffset = errors.New("raft: invalid file offset")
-
-	// ErrCorruptedLog is returned when a log entry is structurally invalid or cannot be decoded.
-	ErrCorruptedLog = errors.New("raft: corrupted log entry")
 )
