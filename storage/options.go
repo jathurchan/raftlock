@@ -1,19 +1,5 @@
 package storage
 
-// RecoveryMode defines recovery behavior
-type RecoveryMode int
-
-const (
-	// RecoveryModeConservative prioritizes data preservation over availability
-	RecoveryModeConservative RecoveryMode = iota
-
-	// RecoveryModeBalanced balances data preservation and availability
-	RecoveryModeBalanced
-
-	// RecoveryModeAggressive prioritizes availability over data preservation
-	RecoveryModeAggressive
-)
-
 // StorageFeatureFlags allows enabling/disabling specific optimizations
 type StorageFeatureFlags struct {
 	// EnableBinaryFormat uses efficient binary serialization instead of JSON
@@ -63,7 +49,7 @@ type FileStorageOptions struct {
 	SyncOnAppend bool
 
 	// RecoveryMode controls how aggressively to recover from failures
-	RecoveryMode RecoveryMode
+	RecoveryMode recoveryMode
 
 	// RetainedLogSize is the minimum entries to keep after truncation
 	RetainedLogSize uint64
@@ -81,9 +67,9 @@ func DefaultFileStorageOptions() FileStorageOptions {
 		Features:               DefaultFeatureFlags(),
 		AutoTruncateOnSnapshot: true,
 		SyncOnAppend:           true,
-		RecoveryMode:           RecoveryModeBalanced,
-		RetainedLogSize:        DefaultRetainedLogSize,
-		ChunkSize:              DefaultChunkSizeBytes,
-		LockTimeout:            DefaultLockTimeoutSeconds,
+		RecoveryMode:           normalMode,
+		RetainedLogSize:        defaultRetainedLogSize,
+		ChunkSize:              defaultChunkSizeBytes,
+		LockTimeout:            defaultLockTimeoutSeconds,
 	}
 }

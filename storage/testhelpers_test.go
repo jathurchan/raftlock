@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/jathurchan/raftlock/types"
@@ -29,13 +31,30 @@ var _ logEntryReader = (*mockLogEntryReader)(nil)
 // mockIndexService implements the `indexService` for testing.
 var _ indexService = (*mockIndexService)(nil)
 
+// mockMetadataService implements the `metadataService` for testing.
+var _ metadataService = (*mockMetadataService)(nil)
+
+// mockSystemInfo implements the `systemInfo` for testing.
+var _ systemInfo = (*mockSystemInfo)(nil)
+
 type mockFile struct {
 	*bytes.Reader
+
+	ReadAllFunc func() ([]byte, error)
 }
 
 func (r *mockFile) ReadFull(buf []byte) (int, error) { return io.ReadFull(r.Reader, buf) }
 func (r *mockFile) Close() error                     { return nil }
-func (r *mockFile) ReadAll() ([]byte, error)         { return io.ReadAll(r.Reader) }
+func (r *mockFile) ReadAll() ([]byte, error) {
+	if r.ReadAllFunc != nil {
+		return r.ReadAllFunc()
+	}
+
+	return io.ReadAll(r.Reader)
+}
+func (r *mockFile) Seek(offset int64, whence int) (int64, error) {
+	return r.Reader.Seek(offset, whence)
+}
 
 // mockFileSystem implements fileSystem for testing
 type mockFileSystem struct {
@@ -49,11 +68,22 @@ type mockFileSystem struct {
 	mkdirErr      error
 	removeErr     error
 	globErr       error
-	isNotExistErr bool  // Flag to simulate os.ErrNotExist on Exists error
-	statErr       error // General stat error if needed separate from existsErr
+	isNotExistErr bool
 
 	truncatedPath string
 	truncatedSize int64
+
+	ExistsFunc     func(string) (bool, error)
+	OpenFunc       func(string) (file, error)
+	ReadFileFunc   func(string) ([]byte, error)
+	TruncateFunc   func(name string, size int64) error
+	WriteFileFunc  func(string, []byte, os.FileMode) error
+	RemoveFunc     func(string) error
+	RenameFunc     func(string, string) error
+	MkdirAllFunc   func(string, os.FileMode) error
+	JoinFunc       func(...string) string
+	IsNotExistFunc func(error) bool
+	GlobFunc       func(string) ([]string, error)
 }
 
 func newMockFileSystem() *mockFileSystem {
@@ -63,21 +93,25 @@ func newMockFileSystem() *mockFileSystem {
 }
 
 func (mfs *mockFileSystem) ReadFile(name string) ([]byte, error) {
+	if mfs.ReadFileFunc != nil {
+		return mfs.ReadFileFunc(name)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	if mfs.openErr != nil {
 		return nil, mfs.openErr
 	}
-
 	data, ok := mfs.files[name]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-
 	return data, nil
 }
 
 func (mfs *mockFileSystem) Open(name string) (file, error) {
+	if mfs.OpenFunc != nil {
+		return mfs.OpenFunc(name)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	if mfs.openErr != nil {
@@ -87,16 +121,18 @@ func (mfs *mockFileSystem) Open(name string) (file, error) {
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-
 	return &mockFile{Reader: bytes.NewReader(data)}, nil
 }
 
 func (mfs *mockFileSystem) Exists(name string) (bool, error) {
+	if mfs.ExistsFunc != nil {
+		return mfs.ExistsFunc(name)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	if mfs.existsErr != nil {
 		if mfs.isNotExistErr {
-			return false, os.ErrNotExist // Simulate specific error type
+			return false, os.ErrNotExist
 		}
 		return false, mfs.existsErr
 	}
@@ -104,28 +140,24 @@ func (mfs *mockFileSystem) Exists(name string) (bool, error) {
 	return exists, nil
 }
 
-const errInvalidArgument = "invalid argument" // for clarity
-
 func (mfs *mockFileSystem) Truncate(name string, size int64) error {
+	if mfs.TruncateFunc != nil {
+		return mfs.TruncateFunc(name, size)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
-
 	mfs.truncatedPath = name
 	mfs.truncatedSize = size
-
 	if mfs.truncateErr != nil {
 		return mfs.truncateErr
 	}
-
 	data, ok := mfs.files[name]
 	if !ok {
 		return os.ErrNotExist
 	}
-
 	if size < 0 {
-		return errors.New(errInvalidArgument)
+		return errors.New("invalid argument")
 	}
-
 	if size > int64(len(data)) {
 		diff := int(size) - len(data)
 		mfs.files[name] = append(data, make([]byte, diff)...)
@@ -136,73 +168,97 @@ func (mfs *mockFileSystem) Truncate(name string, size int64) error {
 }
 
 func (mfs *mockFileSystem) WriteFile(name string, data []byte, perm os.FileMode) error {
+	if mfs.WriteFileFunc != nil {
+		return mfs.WriteFileFunc(name, data, perm)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
-
 	if mfs.writeFileErr != nil {
 		return mfs.writeFileErr
 	}
-
 	mfs.files[name] = data
 	return nil
 }
 
 func (mfs *mockFileSystem) Remove(name string) error {
+	if mfs.RemoveFunc != nil {
+		return mfs.RemoveFunc(name)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
-
 	if mfs.removeErr != nil {
 		return mfs.removeErr
 	}
-
 	_, exists := mfs.files[name]
 	if !exists {
 		return os.ErrNotExist
 	}
-
 	delete(mfs.files, name)
 	return nil
 }
 
 func (mfs *mockFileSystem) Rename(oldPath, newPath string) error {
+	if mfs.RenameFunc != nil {
+		return mfs.RenameFunc(oldPath, newPath)
+	}
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
-
 	if mfs.renameErr != nil {
 		return mfs.renameErr
 	}
-
 	data, exists := mfs.files[oldPath]
 	if !exists {
 		return os.ErrNotExist
 	}
-
 	mfs.files[newPath] = data
 	delete(mfs.files, oldPath)
 	return nil
 }
 
-// Implement other methods as needed or with panics if unused
-func (mfs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error { return mfs.mkdirErr }
-func (mfs *mockFileSystem) Dir(path string) string                       { return path } // Simplistic
-func (mfs *mockFileSystem) IsNotExist(err error) bool                    { return errors.Is(err, os.ErrNotExist) }
+func (mfs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	if mfs.MkdirAllFunc != nil {
+		return mfs.MkdirAllFunc(path, perm)
+	}
+	return mfs.mkdirErr
+}
+
+func (mfs *mockFileSystem) Dir(path string) string { return path }
+
+func (mfs *mockFileSystem) IsNotExist(err error) bool {
+	if mfs.IsNotExistFunc != nil {
+		return mfs.IsNotExistFunc(err)
+	}
+	return errors.Is(err, os.ErrNotExist)
+}
+
 func (mfs *mockFileSystem) Glob(pattern string) ([]string, error) {
+	if mfs.GlobFunc != nil {
+		return mfs.GlobFunc(pattern)
+	}
 	if mfs.globErr != nil {
 		return nil, mfs.globErr
 	}
-	// This can be made smarter if needed
-	return []string{}, nil
-}
-func (mfs *mockFileSystem) Join(elem ...string) string {
-	panic("mockFileSystem.Join not implemented")
+	var matches []string
+	for name := range mfs.files {
+		if strings.Contains(name, pattern) {
+			matches = append(matches, name)
+		}
+	}
+	return matches, nil
 }
 
-// Helper to reset truncation tracking
+func (mfs *mockFileSystem) Join(elem ...string) string {
+	if mfs.JoinFunc != nil {
+		return mfs.JoinFunc(elem...)
+	}
+	return filepath.Join(elem...)
+}
+
 func (mfs *mockFileSystem) resetTruncate() {
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	mfs.truncatedPath = ""
-	mfs.truncatedSize = -1 // Use -1 to indicate not called
+	mfs.truncatedSize = -1
 }
 
 // failingReader simulates a reader that returns an error after a limited number of bytes.
@@ -210,6 +266,7 @@ type failingReader struct {
 	reader      io.Reader
 	err         error
 	bytesToRead int
+	failReadAll bool
 }
 
 func (r *failingReader) Read(p []byte) (int, error) {
@@ -232,8 +289,15 @@ func (r *failingReader) Close() error { return nil }
 func (r *failingReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, errors.New("seek not implemented")
 }
-func (r *failingReader) ReadFull(buf []byte) (int, error) { return io.ReadFull(r, buf) }
-func (r *failingReader) ReadAll() ([]byte, error)         { return io.ReadAll(r) }
+func (r *failingReader) ReadFull(buf []byte) (int, error) {
+	return io.ReadFull(r, buf)
+}
+func (r *failingReader) ReadAll() ([]byte, error) {
+	if r.failReadAll {
+		return nil, r.err
+	}
+	return io.ReadAll(r.reader) // Use r.reader to avoid recursive calls
+}
 
 type mockSerializer struct {
 	unmarshalFunc       func([]byte) (types.LogEntry, error)
@@ -349,3 +413,47 @@ func (m *mockIndexService) VerifyConsistency(indexMap []types.IndexOffsetPair) e
 func (m *mockIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
 	return m.getBoundsResult
 }
+
+type mockMetadataService struct {
+	loadError        error
+	saveError        error
+	syncError        error
+	validateError    error
+	savedPath        string
+	savedMetadata    logMetadata
+	savedAtomicWrite bool
+	saveCalled       bool
+
+	SaveMetadataFunc func(path string, metadata logMetadata, useAtomicWrite bool) error
+}
+
+func (mms *mockMetadataService) LoadMetadata(path string) (logMetadata, error) {
+	return logMetadata{}, mms.loadError
+}
+func (mms *mockMetadataService) SaveMetadata(path string, metadata logMetadata, useAtomicWrite bool) error {
+	if mms.SaveMetadataFunc != nil {
+		return mms.SaveMetadataFunc(path, metadata, useAtomicWrite)
+	}
+
+	mms.saveCalled = true
+	mms.savedPath = path
+	mms.savedMetadata = metadata
+	mms.savedAtomicWrite = useAtomicWrite
+	return mms.saveError
+}
+func (mms *mockMetadataService) SyncMetadataFromIndexMap(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+	return 0, 0, mms.syncError
+}
+func (mms *mockMetadataService) ValidateMetadataRange(firstIndex, lastIndex types.Index) error {
+	return mms.validateError
+}
+
+type mockSystemInfo struct {
+	PIDFunc          func() int
+	HostnameFunc     func() string
+	NowUnixMilliFunc func() int64
+}
+
+func (m *mockSystemInfo) PID() int            { return m.PIDFunc() }
+func (m *mockSystemInfo) Hostname() string    { return m.HostnameFunc() }
+func (m *mockSystemInfo) NowUnixMilli() int64 { return m.NowUnixMilliFunc() }
