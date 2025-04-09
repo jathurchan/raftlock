@@ -33,26 +33,18 @@ type metadataService interface {
 
 // defaultMetadataService implements metadataService.
 type defaultMetadataService struct {
-	fs           fileSystem
-	serializer   serializer
-	indexService indexService
-	logger       logger.Logger
+	fs         fileSystem
+	serializer serializer
+	index      indexService
+	logger     logger.Logger
 }
 
-// newMetadataService creates a new DefaultMetadataService with JSON serialization.
-func newMetadataService(fs fileSystem, logger logger.Logger) metadataService {
-	return &defaultMetadataService{
-		fs:         fs,
-		serializer: NewJsonSerializer(),
-		logger:     logger.WithComponent("metadata"),
-	}
-}
-
-// newMetadataServiceWithSerializer creates a new DefaultMetadataService with custom serializer.
-func newMetadataServiceWithSerializer(fs fileSystem, serializer serializer, logger logger.Logger) metadataService {
+// newMetadataServiceWithDeps creates a new DefaultMetadataService with custom serializer.
+func newMetadataServiceWithDeps(fs fileSystem, serializer serializer, index indexService, logger logger.Logger) metadataService {
 	return &defaultMetadataService{
 		fs:         fs,
 		serializer: serializer,
+		index:      index,
 		logger:     logger.WithComponent("metadata"),
 	}
 }
@@ -121,35 +113,7 @@ func (m *defaultMetadataService) SaveMetadata(path string, metadata logMetadata,
 // atomicWriteFile writes data to a temporary file and then atomically renames it to the target path.
 // This ensures the file is never in a partially-written state.
 func (m *defaultMetadataService) atomicWriteFile(targetPath string, data []byte, perm os.FileMode) error {
-	dir := m.fs.Dir(targetPath)
-
-	// Ensure the directory exists
-	if err := m.fs.MkdirAll(dir, ownRWXOthRX); err != nil {
-		m.logger.Errorw("Failed to create parent directory for atomic write", "dir", dir, "error", err)
-		return fmt.Errorf("%w: failed to create directory %q: %v", ErrStorageIO, dir, err)
-	}
-
-	// Write to temporary file
-	tmpPath := targetPath + tmpSuffix
-	if err := m.fs.WriteFile(tmpPath, data, perm); err != nil {
-		m.logger.Errorw("Failed to write temporary file during atomic write", "tmpPath", tmpPath, "error", err)
-		return m.handleErrorWithCleanup(
-			fmt.Errorf("%w: failed to write temporary file %q: %v", ErrStorageIO, tmpPath, err),
-			tmpPath,
-		)
-	}
-
-	// Atomically rename temporary file to final destination
-	if err := m.fs.Rename(tmpPath, targetPath); err != nil {
-		m.logger.Errorw("Failed to rename temporary file to target path", "tmpPath", tmpPath, "targetPath", targetPath, "error", err)
-		return m.handleErrorWithCleanup(
-			fmt.Errorf("%w: failed to rename temporary file %q to %q: %v", ErrStorageIO, tmpPath, targetPath, err),
-			tmpPath,
-		)
-	}
-
-	m.logger.Debugw("Atomic metadata write succeeded", "path", targetPath)
-	return nil
+	return m.fs.AtomicWrite(targetPath, data, perm)
 }
 
 // handleErrorWithCleanup attempts to remove the temporary file and combines any cleanup
@@ -172,7 +136,7 @@ func (m *defaultMetadataService) SyncMetadataFromIndexMap(
 	useAtomicWrite bool,
 ) (types.Index, types.Index, error) {
 
-	boundsRes := m.indexService.GetBounds(indexMap, currentFirst, currentLast)
+	boundsRes := m.index.GetBounds(indexMap, currentFirst, currentLast)
 
 	if !boundsRes.Changed {
 		m.logger.Debugw("No metadata update required; bounds are unchanged",

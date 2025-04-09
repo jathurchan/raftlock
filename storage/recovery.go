@@ -45,6 +45,7 @@ type recoveryService interface {
 type defaultRecoveryService struct {
 	fs         fileSystem
 	serializer serializer
+	indexSvc   indexService
 	logger     logger.Logger
 	dir        string
 	mode       recoveryMode
@@ -61,41 +62,20 @@ type defaultRecoveryService struct {
 	HandleMissingLogFileFunc          func(metaFile string) error
 }
 
-// newRecoveryService creates a new recovery service with a default JSON serializer.
-func newRecoveryService(fs fileSystem, logger logger.Logger, dir string, mode recoveryMode) recoveryService {
-	return newRecoveryServiceWithSerializer(fs, NewJsonSerializer(), logger, dir, mode)
-}
-
-func newRecoveryServiceWithSerializer(
+func newRecoveryService(
 	fs fileSystem,
 	serializer serializer,
 	logger logger.Logger,
 	dir string,
 	mode recoveryMode,
-) recoveryService {
-	return newRecoveryServiceWithDeps(
-		fs,
-		serializer,
-		logger,
-		dir,
-		mode,
-		newMetadataServiceWithSerializer(fs, serializer, logger),
-		&defaultSystemInfo{},
-	)
-}
-
-func newRecoveryServiceWithDeps(
-	fs fileSystem,
-	serializer serializer,
-	logger logger.Logger,
-	dir string,
-	mode recoveryMode,
+	indexSvc indexService,
 	metaSvc metadataService,
 	proc systemInfo,
 ) recoveryService {
 	return &defaultRecoveryService{
 		fs:         fs,
 		serializer: serializer,
+		indexSvc:   indexSvc,
 		logger:     logger.WithComponent("recovery"),
 		dir:        dir,
 		mode:       mode,
@@ -104,7 +84,7 @@ func newRecoveryServiceWithDeps(
 	}
 }
 
-func (r *defaultRecoveryService) path(name string) string    { return r.fs.Join(r.dir, name) }
+func (r *defaultRecoveryService) path(name string) string    { return r.fs.Path(r.dir, name) }
 func (r *defaultRecoveryService) tmpPath(name string) string { return name + tmpSuffix }
 
 // CheckForRecoveryMarkers determines if recovery is needed based on marker files.

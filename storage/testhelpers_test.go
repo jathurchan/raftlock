@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,23 +74,53 @@ type mockFileSystem struct {
 	truncatedPath string
 	truncatedSize int64
 
-	ExistsFunc     func(string) (bool, error)
-	OpenFunc       func(string) (file, error)
-	ReadFileFunc   func(string) ([]byte, error)
-	TruncateFunc   func(name string, size int64) error
-	WriteFileFunc  func(string, []byte, os.FileMode) error
-	RemoveFunc     func(string) error
-	RenameFunc     func(string, string) error
-	MkdirAllFunc   func(string, os.FileMode) error
-	JoinFunc       func(...string) string
-	IsNotExistFunc func(error) bool
-	GlobFunc       func(string) ([]string, error)
+	ExistsFunc      func(string) (bool, error)
+	OpenFunc        func(string) (file, error)
+	ReadFileFunc    func(string) ([]byte, error)
+	TruncateFunc    func(name string, size int64) error
+	WriteFileFunc   func(string, []byte, os.FileMode) error
+	RemoveFunc      func(string) error
+	RenameFunc      func(string, string) error
+	MkdirAllFunc    func(string, os.FileMode) error
+	JoinFunc        func(...string) string
+	IsNotExistFunc  func(error) bool
+	GlobFunc        func(string) ([]string, error)
+	TempPathFunc    func(string) string
+	AtomicWriteFunc func(path string, data []byte, perm os.FileMode) error
 }
 
 func newMockFileSystem() *mockFileSystem {
 	return &mockFileSystem{
 		files: make(map[string][]byte),
 	}
+}
+
+func (mfs *mockFileSystem) Path(dirPath, name string) string {
+	return mfs.Join(dirPath, name)
+}
+
+func (mfs *mockFileSystem) TempPath(path string) string {
+	if mfs.TempPathFunc != nil {
+		return mfs.TempPathFunc(path)
+	}
+	return path + ".tmp"
+}
+
+func (mfs *mockFileSystem) AtomicWrite(path string, data []byte, perm os.FileMode) error {
+	if mfs.AtomicWriteFunc != nil {
+		return mfs.AtomicWriteFunc(path, data, perm)
+	}
+
+	tmpPath := mfs.TempPath(path)
+
+	if err := mfs.WriteFile(tmpPath, data, perm); err != nil {
+		return fmt.Errorf("mock atomic write: failed writing temp file: %w", err)
+	}
+	if err := mfs.Rename(tmpPath, path); err != nil {
+		_ = mfs.Remove(tmpPath)
+		return fmt.Errorf("mock atomic write: failed renaming temp file: %w", err)
+	}
+	return nil
 }
 
 func (mfs *mockFileSystem) ReadFile(name string) ([]byte, error) {
@@ -175,6 +206,9 @@ func (mfs *mockFileSystem) WriteFile(name string, data []byte, perm os.FileMode)
 	defer mfs.mu.Unlock()
 	if mfs.writeFileErr != nil {
 		return mfs.writeFileErr
+	}
+	if mfs.files == nil {
+		return errors.New("mockFileSystem.files map is nil — use newMockFileSystem()")
 	}
 	mfs.files[name] = data
 	return nil
@@ -317,7 +351,7 @@ func (m *mockSerializer) MarshalMetadata(metadata logMetadata) ([]byte, error) {
 	if m.marshalMetadataFunc != nil {
 		return m.marshalMetadataFunc(metadata)
 	}
-	return NewJsonSerializer().MarshalMetadata(metadata)
+	return newJsonSerializer().MarshalMetadata(metadata)
 }
 
 // All unused methods stubbed
