@@ -59,39 +59,56 @@ func (r *mockFile) Seek(offset int64, whence int) (int64, error) {
 
 // mockFileSystem implements fileSystem for testing
 type mockFileSystem struct {
-	mu            sync.Mutex
-	files         map[string][]byte
-	openErr       error
-	existsErr     error
-	truncateErr   error
-	writeFileErr  error
-	renameErr     error
-	mkdirErr      error
-	removeErr     error
-	globErr       error
-	isNotExistErr bool
+	mu             sync.Mutex
+	files          map[string][]byte
+	openErr        error
+	existsErr      error
+	truncateErr    error
+	writeFileErr   error
+	renameErr      error
+	mkdirErr       error
+	removeErr      error
+	globErr        error
+	isNotExistErr  bool
+	atomicWriteErr error
 
 	truncatedPath string
 	truncatedSize int64
 
-	ExistsFunc      func(string) (bool, error)
-	OpenFunc        func(string) (file, error)
-	ReadFileFunc    func(string) ([]byte, error)
-	TruncateFunc    func(name string, size int64) error
-	WriteFileFunc   func(string, []byte, os.FileMode) error
-	RemoveFunc      func(string) error
-	RenameFunc      func(string, string) error
-	MkdirAllFunc    func(string, os.FileMode) error
-	JoinFunc        func(...string) string
-	IsNotExistFunc  func(error) bool
-	GlobFunc        func(string) ([]string, error)
-	TempPathFunc    func(string) string
-	AtomicWriteFunc func(path string, data []byte, perm os.FileMode) error
+	ExistsFunc           func(string) (bool, error)
+	OpenFunc             func(string) (file, error)
+	ReadFileFunc         func(string) ([]byte, error)
+	TruncateFunc         func(name string, size int64) error
+	WriteFileFunc        func(string, []byte, os.FileMode) error
+	RemoveFunc           func(string) error
+	RenameFunc           func(string, string) error
+	MkdirAllFunc         func(string, os.FileMode) error
+	JoinFunc             func(...string) string
+	IsNotExistFunc       func(error) bool
+	GlobFunc             func(string) ([]string, error)
+	TempPathFunc         func(string) string
+	AtomicWriteFunc      func(path string, data []byte, perm os.FileMode) error
+	WriteMaybeAtomicFunc func(path string, data []byte, perm os.FileMode, atomic bool) error
 }
 
 func newMockFileSystem() *mockFileSystem {
 	return &mockFileSystem{
 		files: make(map[string][]byte),
+	}
+}
+
+func (mfs *mockFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error {
+	if mfs.WriteMaybeAtomicFunc != nil {
+		return mfs.WriteMaybeAtomicFunc(path, data, perm, atomic)
+	}
+	if atomic {
+		if mfs.atomicWriteErr != nil {
+			return mfs.atomicWriteErr
+		}
+		mfs.files[path] = data
+		return nil
+	} else {
+		return mfs.WriteFile(path, data, perm)
 	}
 }
 

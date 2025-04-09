@@ -28,6 +28,7 @@ type fileSystem interface {
 	Path(dirPath, name string) string
 	TempPath(path string) string
 	AtomicWrite(path string, data []byte, perm os.FileMode) error
+	WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error
 }
 
 // file defines an interface for file-level operations.
@@ -62,6 +63,13 @@ func newFileSystemWithStat(stat fileStatFunc) fileSystem {
 func (fs defaultFileSystem) Path(dirPath, name string) string { return fs.Join(dirPath, name) }
 func (fs defaultFileSystem) TempPath(path string) string {
 	return path + tmpSuffix
+}
+
+func (fs defaultFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error {
+	if atomic {
+		return fs.AtomicWrite(path, data, perm)
+	}
+	return fs.WriteFile(path, data, perm)
 }
 
 // atomicWriteFile writes data to a temporary file and then atomically renames it to the target path.
