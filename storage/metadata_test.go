@@ -92,11 +92,6 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 	metadata := logMetadata{FirstIndex: 1, LastIndex: 10}
 	serializedMetadata, _ := newJsonSerializer().MarshalMetadata(metadata)
 
-	failingFS := newMockFileSystem()
-	failingFS.AtomicWriteFunc = func(path string, data []byte, perm os.FileMode) error {
-		return errors.New("simulated atomic write error")
-	}
-
 	tests := []struct {
 		name           string
 		fs             *mockFileSystem
@@ -131,7 +126,7 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 			expectedFiles:  map[string][]byte{},
 		},
 		{
-			name:           "non-atomic write error",
+			name:           "write error (non-atomic)",
 			fs:             &mockFileSystem{writeFileErr: errors.New("write error")},
 			serializer:     newJsonSerializer(),
 			index:          &mockIndexService{},
@@ -151,8 +146,10 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 			expectedFiles:  map[string][]byte{path: serializedMetadata},
 		},
 		{
-			name:           "atomic write error (mkdir)",
-			fs:             failingFS,
+			name: "write error (atomic)",
+			fs: &mockFileSystem{
+				atomicWriteErr: errors.New("atomic write error"),
+			},
 			serializer:     newJsonSerializer(),
 			index:          &mockIndexService{},
 			metadata:       metadata,
@@ -172,103 +169,7 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 				testutil.AssertError(t, err)
 			} else {
 				testutil.AssertNoError(t, err)
-			}
-
-			// Check file contents only for successful cases
-			if !tt.expectedError {
 				testutil.AssertEqual(t, tt.expectedFiles, tt.fs.files)
-			}
-		})
-	}
-}
-
-func TestDefaultMetadataService_atomicWriteFile(t *testing.T) {
-	path := "metadata.json"
-	data := []byte("test data")
-	perm := os.FileMode(0666)
-
-	tests := []struct {
-		name          string
-		fs            *mockFileSystem
-		expectedError bool
-		expectedFiles map[string][]byte
-	}{
-		{
-			name:          "successful atomic write",
-			fs:            newMockFileSystem(),
-			expectedError: false,
-			expectedFiles: map[string][]byte{path: data},
-		},
-		{
-			name:          "mkdir error",
-			fs:            &mockFileSystem{mkdirErr: errors.New("mkdir error")},
-			expectedError: true,
-			expectedFiles: map[string][]byte{},
-		},
-		{
-			name:          "write temp file error",
-			fs:            &mockFileSystem{writeFileErr: errors.New("write temp error")},
-			expectedError: true,
-			expectedFiles: map[string][]byte{},
-		},
-		{
-			name:          "rename error",
-			fs:            &mockFileSystem{renameErr: errors.New("rename error"), files: map[string][]byte{path + tmpSuffix: data}},
-			expectedError: true,
-			expectedFiles: map[string][]byte{path + tmpSuffix: data},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger := logger.NewNoOpLogger()
-			sut := &defaultMetadataService{fs: tt.fs, logger: logger.WithComponent("metadata")}
-			err := sut.atomicWriteFile(path, data, perm)
-
-			if tt.expectedError {
-				testutil.AssertError(t, err)
-			} else {
-				testutil.AssertNoError(t, err)
-				testutil.AssertEqual(t, tt.expectedFiles, tt.fs.files)
-			}
-		})
-	}
-}
-
-func TestDefaultMetadataService_handleErrorWithCleanup(t *testing.T) {
-	tmpPath := "metadata.json.tmp"
-	primaryErr := errors.New("primary error")
-
-	tests := []struct {
-		name           string
-		fs             *mockFileSystem
-		cleanupSuccess bool
-	}{
-		{
-			name:           "successful cleanup",
-			fs:             &mockFileSystem{files: map[string][]byte{tmpPath: []byte("temp data")}, removeErr: nil},
-			cleanupSuccess: true,
-		},
-		{
-			name:           "cleanup failure",
-			fs:             &mockFileSystem{files: map[string][]byte{tmpPath: []byte("temp data")}, removeErr: errors.New("remove error")},
-			cleanupSuccess: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger := logger.NewNoOpLogger()
-			sut := &defaultMetadataService{fs: tt.fs, logger: logger.WithComponent("metadata")}
-			err := sut.handleErrorWithCleanup(primaryErr, tmpPath)
-
-			testutil.AssertError(t, err)
-			testutil.AssertTrue(t, errors.Is(err, primaryErr), "Primary error should be preserved")
-
-			if tt.cleanupSuccess {
-				testutil.AssertEqual(t, map[string][]byte{}, tt.fs.files, "Temp file should be removed")
-			} else {
-				testutil.AssertTrue(t, len(tt.fs.files) > 0, "Temp file should still exist")
 			}
 		})
 	}

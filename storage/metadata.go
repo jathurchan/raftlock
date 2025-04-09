@@ -94,35 +94,13 @@ func (m *defaultMetadataService) SaveMetadata(path string, metadata logMetadata,
 		return fmt.Errorf("%w: failed to marshal metadata: %v", ErrStorageIO, err)
 	}
 
-	if useAtomicWrite {
-		if err := m.atomicWriteFile(path, data, ownRWOthR); err != nil {
-			m.logger.Errorw("Atomic write failed", "path", path, "error", err)
-			return err
-		}
-	}
-
-	if err := m.fs.WriteFile(path, data, ownRWOthR); err != nil {
-		m.logger.Errorw("Non-atomic write failed", "path", path, "error", err)
+	if err := m.fs.WriteMaybeAtomic(path, data, ownRWOthR, useAtomicWrite); err != nil {
+		m.logger.Errorw("Failed to write metadata", "path", path, "error", err)
 		return fmt.Errorf("%w: failed to write metadata file: %v", ErrStorageIO, err)
 	}
 
 	m.logger.Infow("Metadata successfully saved", "path", path)
 	return nil
-}
-
-// atomicWriteFile writes data to a temporary file and then atomically renames it to the target path.
-// This ensures the file is never in a partially-written state.
-func (m *defaultMetadataService) atomicWriteFile(targetPath string, data []byte, perm os.FileMode) error {
-	return m.fs.AtomicWrite(targetPath, data, perm)
-}
-
-// handleErrorWithCleanup attempts to remove the temporary file and combines any cleanup
-// error with the primary error.
-func (m *defaultMetadataService) handleErrorWithCleanup(primaryErr error, tmpPath string) error {
-	if rmErr := m.fs.Remove(tmpPath); rmErr != nil {
-		return fmt.Errorf("%w; additionally failed to clean up temp file: %v", primaryErr, rmErr)
-	}
-	return primaryErr
 }
 
 // SyncMetadataFromIndexMap determines if metadata needs updating based on the provided index map.
