@@ -63,11 +63,11 @@ type FileStorage struct {
 	//   - storageStatusClosed
 	status atomic.Value // stores a storageStatus
 
-	file       fileSystem
-	serializer serializer
-	index      indexService
-	metadata   metadataService
-	recovery   recoveryService
+	fileSystem  fileSystem
+	serializer  serializer
+	indexSvc    indexService
+	metadataSvc metadataService
+	recoverySvc recoveryService
 
 	// logger is the structured logger used for logging storage operations and events.
 	logger logger.Logger
@@ -143,14 +143,14 @@ func newFileStorageWithDeps(
 	logger = logger.WithComponent("storage")
 
 	s := &FileStorage{
-		dir:        cfg.Dir,
-		options:    options,
-		file:       fileSystem,
-		serializer: serializer,
-		index:      indexService,
-		metadata:   metadataService,
-		recovery:   recoveryService,
-		logger:     logger,
+		dir:         cfg.Dir,
+		options:     options,
+		fileSystem:  fileSystem,
+		serializer:  serializer,
+		indexSvc:    indexService,
+		metadataSvc: metadataService,
+		recoverySvc: recoveryService,
+		logger:      logger,
 	}
 
 	s.status.Store(storageStatusInitializing)
@@ -167,7 +167,7 @@ func newFileStorageWithDeps(
 // initialize handles storage initialization and recovery
 func (s *FileStorage) initialize() error {
 	// Check for recovery markers
-	recoveryNeeded, err := s.recovery.CheckForRecoveryMarkers()
+	recoveryNeeded, err := s.recoverySvc.CheckForRecoveryMarkers()
 	if err != nil {
 		return fmt.Errorf("failed checking recovery markers: %w", err)
 	}
@@ -176,16 +176,16 @@ func (s *FileStorage) initialize() error {
 		s.status.Store(storageStatusRecovering)
 		s.logger.Infow("Recovery markers found, entering recovery mode")
 
-		if err := s.recovery.PerformRecovery(); err != nil {
+		if err := s.recoverySvc.PerformRecovery(); err != nil {
 			return fmt.Errorf("recovery failed: %w", err)
 		}
 	}
 
-	if err := s.recovery.CreateRecoveryMarker(); err != nil {
+	if err := s.recoverySvc.CreateRecoveryMarker(); err != nil {
 		return fmt.Errorf("failed to create recovery marker: %w", err)
 	}
 
-	if err := s.recovery.CleanupTempFiles(); err != nil {
+	if err := s.recoverySvc.CleanupTempFiles(); err != nil {
 		s.logger.Warnw("Failed to clean up temporary files", "error", err)
 	}
 
@@ -193,7 +193,7 @@ func (s *FileStorage) initialize() error {
 		return err
 	}
 
-	s.recovery.RemoveRecoveryMarker()
+	s.recoverySvc.RemoveRecoveryMarker()
 
 	s.status.Store(storageStatusReady)
 	s.logger.Infow("Storage initialized successfully",
@@ -261,7 +261,7 @@ func (s *FileStorage) rebuildIndexStateLocked() error {
 
 // loadMetadataLocked assumes s.logMu is already held
 func (s *FileStorage) loadMetadataLocked() error {
-	metadata, err := s.metadata.LoadMetadata(s.file.Path(s.dir, metadataFilename))
+	metadata, err := s.metadataSvc.LoadMetadata(s.fileSystem.Path(s.dir, metadataFilename))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File doesn't exist, initialize with empty state
@@ -272,7 +272,7 @@ func (s *FileStorage) loadMetadataLocked() error {
 	}
 
 	// Validate loaded metadata
-	if err := s.metadata.ValidateMetadataRange(metadata.FirstIndex, metadata.LastIndex); err != nil {
+	if err := s.metadataSvc.ValidateMetadataRange(metadata.FirstIndex, metadata.LastIndex); err != nil {
 		return err
 	}
 
@@ -293,10 +293,10 @@ func (s *FileStorage) saveMetadataLocked() error {
 		LastIndex:  types.Index(s.lastLogIndex.Load()),
 	}
 
-	metadataPath := s.file.Path(s.dir, metadataFilename)
+	metadataPath := s.fileSystem.Path(s.dir, metadataFilename)
 	useAtomic := s.options.Features.EnableAtomicWrites
 
-	if err := s.metadata.SaveMetadata(metadataPath, metadata, useAtomic); err != nil {
+	if err := s.metadataSvc.SaveMetadata(metadataPath, metadata, useAtomic); err != nil {
 		return fmt.Errorf("failed to save metadata: %w", err)
 	}
 
@@ -310,11 +310,11 @@ func (s *FileStorage) buildIndexOffsetMapLocked() error {
 		return nil // Skip if feature disabled
 	}
 
-	logPath := s.file.Path(s.dir, logFilename)
+	logPath := s.fileSystem.Path(s.dir, logFilename)
 
 	s.logger.Debugw("Building index offset map", "path", logPath)
 
-	result, err := s.index.Build(logPath)
+	result, err := s.indexSvc.Build(logPath)
 	if err != nil {
 		return fmt.Errorf("failed to build index-offset map: %w", err)
 	}
@@ -350,9 +350,9 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 	currentFirst := types.Index(s.firstLogIndex.Load())
 	currentLast := types.Index(s.lastLogIndex.Load())
 
-	metadataPath := s.file.Path(s.dir, metadataFilename)
+	metadataPath := s.fileSystem.Path(s.dir, metadataFilename)
 
-	newFirst, newLast, err := s.metadata.SyncMetadataFromIndexMap(
+	newFirst, newLast, err := s.metadataSvc.SyncMetadataFromIndexMap(
 		metadataPath,
 		s.indexToOffsetMap,
 		currentFirst,
@@ -368,7 +368,7 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 	// Update in-memory bounds to match the new persisted values
 	s.updateLogBoundsLocked(newFirst, newLast)
 
-	return s.index.VerifyConsistency(s.indexToOffsetMap)
+	return s.indexSvc.VerifyConsistency(s.indexToOffsetMap)
 }
 
 // verifyInMemoryState ensures that the in-memory log index bounds (firstLogIndex and lastLogIndex)
@@ -380,7 +380,7 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 //
 // Returns an error if a mismatch is detected, indicating potential internal inconsistency.
 func (s *FileStorage) verifyInMemoryState() error {
-	expected := s.index.GetBounds(s.indexToOffsetMap, 0, 0)
+	expected := s.indexSvc.GetBounds(s.indexToOffsetMap, 0, 0)
 
 	memFirst := s.firstLogIndex.Load()
 	memLast := s.lastLogIndex.Load()
@@ -411,12 +411,12 @@ func (s *FileStorage) LoadState(ctx context.Context) (types.PersistentState, err
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 
-	statePath := s.file.Path(s.dir, stateFilename)
+	statePath := s.fileSystem.Path(s.dir, stateFilename)
 	s.logger.Debugw("Attempting to read persisted state file", "path", statePath)
 
-	data, err := s.file.ReadFile(statePath)
+	data, err := s.fileSystem.ReadFile(statePath)
 	if err != nil {
-		if s.file.IsNotExist(err) {
+		if s.fileSystem.IsNotExist(err) {
 			s.logger.Infow("State file does not exist, assuming fresh start", "path", statePath)
 			return types.PersistentState{CurrentTerm: 0, VotedFor: ""}, nil
 		}
@@ -449,7 +449,7 @@ func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 
-	statePath := s.file.Path(s.dir, stateFilename)
+	statePath := s.fileSystem.Path(s.dir, stateFilename)
 	useAtomicWrite := s.options.Features.EnableAtomicWrites
 
 	s.logger.Debugw("Attempting to persist state", "path", statePath, "term", state.CurrentTerm, "votedFor", state.VotedFor)
@@ -460,7 +460,7 @@ func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState
 		return fmt.Errorf("%w: failed to marshal state: %v", ErrStorageIO, err)
 	}
 
-	if err := s.file.WriteMaybeAtomic(statePath, data, ownRWOthR, useAtomicWrite); err != nil {
+	if err := s.fileSystem.WriteMaybeAtomic(statePath, data, ownRWOthR, useAtomicWrite); err != nil {
 		s.logger.Errorw("Failed to write state", "path", statePath, "error", err)
 		return fmt.Errorf("%w: failed to write metadata file: %v", ErrStorageIO, err)
 	}
