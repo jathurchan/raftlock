@@ -14,29 +14,17 @@ func TestNewRecoveryService(t *testing.T) {
 	// Test default constructor
 	fs := newMockFileSystem()
 	log := &logger.NoOpLogger{}
-	rs := newRecoveryService(fs, log, "/tmp/raft", normalMode)
-
-	if rs == nil {
-		t.Fatal("Expected non-nil recovery service")
-	}
 
 	// Test with serializer constructor
-	serializer := NewJsonSerializer()
-	rs = newRecoveryServiceWithSerializer(fs, serializer, log, "/tmp/raft", normalMode)
-
-	if rs == nil {
-		t.Fatal("Expected non-nil recovery service from serializer constructor")
-	}
-
-	// Test with dependencies constructor
-	metaSvc := &mockMetadataService{}
+	serializer := newJsonSerializer()
+	indexSvc := &mockIndexService{}
+	metadataSvc := &mockMetadataService{}
 	sysInfo := &mockSystemInfo{
 		PIDFunc:          func() int { return 123 },
 		HostnameFunc:     func() string { return "test-host" },
 		NowUnixMilliFunc: func() int64 { return 1000 },
 	}
-
-	rs = newRecoveryServiceWithDeps(fs, serializer, log, "/tmp/raft", normalMode, metaSvc, sysInfo)
+	rs := newRecoveryService(fs, serializer, log, "/tmp/raft", normalMode, indexSvc, metadataSvc, sysInfo)
 
 	if rs == nil {
 		t.Fatal("Expected non-nil recovery service from dependencies constructor")
@@ -116,7 +104,7 @@ func TestCheckForRecoveryMarkers(t *testing.T) {
 				return false, nil
 			}
 
-			rs := newRecoveryService(fs, &logger.NoOpLogger{}, "/tmp/raft", normalMode)
+			rs := newRecoveryService(fs, &mockSerializer{}, &logger.NoOpLogger{}, "/tmp/raft", normalMode, &mockIndexService{}, &mockMetadataService{}, &mockSystemInfo{})
 			result, err := rs.CheckForRecoveryMarkers()
 
 			if tc.expectedErr && err == nil {

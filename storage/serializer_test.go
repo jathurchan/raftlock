@@ -34,13 +34,13 @@ var (
 
 // TestJsonSerializer tests all methods of the jsonSerializer
 func TestJsonSerializer(t *testing.T) {
-	serializer := NewJsonSerializer()
+	serializer := newJsonSerializer()
 	testSerializer(t, serializer)
 }
 
 // TestBinarySerializer tests all methods of the binarySerializer
 func TestBinarySerializer(t *testing.T) {
-	serializer := NewBinarySerializer()
+	serializer := newBinarySerializer()
 	testSerializer(t, serializer)
 
 	// Additional binary-specific tests
@@ -85,7 +85,7 @@ func testSerializer(t *testing.T, s serializer) {
 
 // Test invalid JSON for each type in the jsonSerializer
 func TestJsonSerializerInvalidData(t *testing.T) {
-	s := NewJsonSerializer()
+	s := newJsonSerializer()
 	invalidJson := []byte("{invalid json]")
 
 	// Test all unmarshal methods with invalid data

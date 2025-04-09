@@ -14,12 +14,13 @@ import (
 func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 	path := "metadata.json"
 	metadata := logMetadata{FirstIndex: 1, LastIndex: 10}
-	serializedMetadata, _ := NewJsonSerializer().MarshalMetadata(metadata)
+	serializedMetadata, _ := newJsonSerializer().MarshalMetadata(metadata)
 
 	tests := []struct {
 		name          string
 		fs            *mockFileSystem
 		serializer    serializer
+		index         indexService
 		expected      logMetadata
 		expectedError error
 	}{
@@ -28,7 +29,8 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 			fs: &mockFileSystem{
 				files: map[string][]byte{path: serializedMetadata},
 			},
-			serializer:    NewJsonSerializer(),
+			serializer:    newJsonSerializer(),
+			index:         &mockIndexService{},
 			expected:      metadata,
 			expectedError: nil,
 		},
@@ -38,7 +40,8 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 				existsErr:     os.ErrNotExist,
 				isNotExistErr: true,
 			},
-			serializer:    NewJsonSerializer(),
+			serializer:    newJsonSerializer(),
+			index:         &mockIndexService{},
 			expected:      logMetadata{},
 			expectedError: fmt.Errorf("metadata file not found: %w", os.ErrNotExist),
 		},
@@ -47,7 +50,8 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 			fs: &mockFileSystem{
 				openErr: errors.New("read error"),
 			},
-			serializer:    NewJsonSerializer(),
+			serializer:    newJsonSerializer(),
+			index:         &mockIndexService{},
 			expected:      logMetadata{},
 			expectedError: fmt.Errorf("%w: failed to read metadata file: %v", ErrStorageIO, errors.New("read error")),
 		},
@@ -56,7 +60,8 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 			fs: &mockFileSystem{
 				files: map[string][]byte{path: []byte("invalid json")},
 			},
-			serializer:    NewJsonSerializer(),
+			serializer:    newJsonSerializer(),
+			index:         &mockIndexService{},
 			expected:      logMetadata{},
 			expectedError: fmt.Errorf("%w: failed to unmarshal metadata: %v", ErrCorruptedState, errors.New("invalid character 'i' looking for beginning of value")),
 		},
@@ -65,7 +70,7 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := logger.NewNoOpLogger()
-			sut := newMetadataServiceWithSerializer(tt.fs, tt.serializer, logger)
+			sut := newMetadataServiceWithDeps(tt.fs, tt.serializer, tt.index, logger)
 			actual, err := sut.LoadMetadata(path)
 
 			testutil.AssertEqual(t, tt.expected, actual)
@@ -85,12 +90,18 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 	path := "metadata.json"
 	metadata := logMetadata{FirstIndex: 1, LastIndex: 10}
-	serializedMetadata, _ := NewJsonSerializer().MarshalMetadata(metadata)
+	serializedMetadata, _ := newJsonSerializer().MarshalMetadata(metadata)
+
+	failingFS := newMockFileSystem()
+	failingFS.AtomicWriteFunc = func(path string, data []byte, perm os.FileMode) error {
+		return errors.New("simulated atomic write error")
+	}
 
 	tests := []struct {
 		name           string
 		fs             *mockFileSystem
 		serializer     serializer
+		index          indexService
 		metadata       logMetadata
 		useAtomicWrite bool
 		expectedError  bool
@@ -99,7 +110,8 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 		{
 			name:           "successful non-atomic save",
 			fs:             newMockFileSystem(),
-			serializer:     NewJsonSerializer(),
+			serializer:     newJsonSerializer(),
+			index:          &mockIndexService{},
 			metadata:       metadata,
 			useAtomicWrite: false,
 			expectedError:  false,
@@ -121,7 +133,8 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 		{
 			name:           "non-atomic write error",
 			fs:             &mockFileSystem{writeFileErr: errors.New("write error")},
-			serializer:     NewJsonSerializer(),
+			serializer:     newJsonSerializer(),
+			index:          &mockIndexService{},
 			metadata:       metadata,
 			useAtomicWrite: false,
 			expectedError:  true,
@@ -130,7 +143,8 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 		{
 			name:           "successful atomic save",
 			fs:             newMockFileSystem(),
-			serializer:     NewJsonSerializer(),
+			serializer:     newJsonSerializer(),
+			index:          &mockIndexService{},
 			metadata:       metadata,
 			useAtomicWrite: true,
 			expectedError:  false,
@@ -138,8 +152,9 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 		},
 		{
 			name:           "atomic write error (mkdir)",
-			fs:             &mockFileSystem{mkdirErr: errors.New("mkdir error")},
-			serializer:     NewJsonSerializer(),
+			fs:             failingFS,
+			serializer:     newJsonSerializer(),
+			index:          &mockIndexService{},
 			metadata:       metadata,
 			useAtomicWrite: true,
 			expectedError:  true,
@@ -150,7 +165,7 @@ func TestDefaultMetadataService_SaveMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := logger.NewNoOpLogger()
-			sut := newMetadataServiceWithSerializer(tt.fs, tt.serializer, logger)
+			sut := newMetadataServiceWithDeps(tt.fs, tt.serializer, tt.index, logger)
 			err := sut.SaveMetadata(path, tt.metadata, tt.useAtomicWrite)
 
 			if tt.expectedError {
@@ -328,10 +343,10 @@ func TestDefaultMetadataService_SyncMetadataFromIndexMap(t *testing.T) {
 			}
 
 			sut := &defaultMetadataService{
-				fs:           fs,
-				indexService: indexService,
-				serializer:   NewJsonSerializer(),
-				logger:       logger.WithComponent("metadata"),
+				fs:         fs,
+				index:      indexService,
+				serializer: newJsonSerializer(),
+				logger:     logger.WithComponent("metadata"),
 			}
 
 			currentFirst := types.Index(0)
@@ -402,25 +417,13 @@ func TestDefaultMetadataService_ValidateMetadataRange(t *testing.T) {
 	}
 }
 
-func TestNewMetadataService(t *testing.T) {
-	fs := newMockFileSystem()
-	logger := logger.NewNoOpLogger()
-
-	service := newMetadataService(fs, logger)
-
-	testutil.AssertNotNil(t, service)
-
-	// Type assertion to verify the concrete type
-	_, ok := service.(*defaultMetadataService)
-	testutil.AssertTrue(t, ok, "Should return a defaultMetadataService instance")
-}
-
 func TestNewMetadataServiceWithSerializer(t *testing.T) {
 	fs := newMockFileSystem()
-	serializer := NewJsonSerializer()
+	serializer := newJsonSerializer()
+	indexSvc := &mockIndexService{}
 	logger := logger.NewNoOpLogger()
 
-	service := newMetadataServiceWithSerializer(fs, serializer, logger)
+	service := newMetadataServiceWithDeps(fs, serializer, indexSvc, logger)
 
 	testutil.AssertNotNil(t, service)
 

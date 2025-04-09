@@ -158,12 +158,12 @@ func (s binarySerializer) UnmarshalLogEntry(data []byte) (types.LogEntry, error)
 	}, nil
 }
 
-// NewJsonSerializer creates a new JsonSerializer
-func NewJsonSerializer() jsonSerializer {
+// newJsonSerializer creates a new JsonSerializer
+func newJsonSerializer() jsonSerializer {
 	return jsonSerializer{}
 }
 
-// NewBinarySerializer creates a new BinarySerializer
-func NewBinarySerializer() binarySerializer {
+// newBinarySerializer creates a new BinarySerializer
+func newBinarySerializer() binarySerializer {
 	return binarySerializer{}
 }

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +25,9 @@ type fileSystem interface {
 	IsNotExist(err error) bool
 	Glob(pattern string) ([]string, error)
 	Join(elem ...string) string
+	Path(dirPath, name string) string
+	TempPath(path string) string
+	AtomicWrite(path string, data []byte, perm os.FileMode) error
 }
 
 // file defines an interface for file-level operations.
@@ -54,6 +58,33 @@ func newFileSystemWithStat(stat fileStatFunc) fileSystem {
 		stat = os.Stat
 	}
 	return defaultFileSystem{statFunc: stat}
+}
+func (fs defaultFileSystem) Path(dirPath, name string) string { return fs.Join(dirPath, name) }
+func (fs defaultFileSystem) TempPath(path string) string {
+	return path + tmpSuffix
+}
+
+// atomicWriteFile writes data to a temporary file and then atomically renames it to the target path.
+// This ensures the file is never in a partially-written state.
+func (fs defaultFileSystem) AtomicWrite(path string, data []byte, perm os.FileMode) error {
+	dir := fs.Dir(path)
+	if err := fs.MkdirAll(dir, ownRWXOthRX); err != nil {
+		return fmt.Errorf("failed to create dir for atomic write: %w", err)
+	}
+
+	tmpPath := fs.TempPath(path)
+
+	if err := fs.WriteFile(tmpPath, data, perm); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	if err := fs.Rename(tmpPath, path); err != nil {
+		// Attempt cleanup
+		_ = fs.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
 }
 
 // ReadFile reads the contents of the specified file and returns the data.
