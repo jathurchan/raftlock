@@ -441,7 +441,32 @@ func (s *FileStorage) LoadState(ctx context.Context) (types.PersistentState, err
 //   - ErrStorageIO if the operation fails due to I/O issues.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState) error {
-	panic("not implemented")
+	if err := ctx.Err(); err != nil {
+		s.logger.Warnw("SaveState aborted: context error", "error", err)
+		return err
+	}
+
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	statePath := s.file.Path(s.dir, stateFilename)
+	useAtomicWrite := s.options.Features.EnableAtomicWrites
+
+	s.logger.Debugw("Attempting to persist state", "path", statePath, "term", state.CurrentTerm, "votedFor", state.VotedFor)
+
+	data, err := s.serializer.MarshalState(state)
+	if err != nil {
+		s.logger.Errorw("Failed to encode state", "path", statePath, "error", err)
+		return fmt.Errorf("%w: failed to marshal state: %v", ErrStorageIO, err)
+	}
+
+	if err := s.file.WriteMaybeAtomic(statePath, data, ownRWOthR, useAtomicWrite); err != nil {
+		s.logger.Errorw("Failed to write state", "path", statePath, "error", err)
+		return fmt.Errorf("%w: failed to write metadata file: %v", ErrStorageIO, err)
+	}
+
+	s.logger.Infow("State saved", "path", statePath)
+	return nil
 }
 
 // AppendLogEntries persists one or more log entries to the Raft log.
