@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -66,7 +65,7 @@ type mockFileSystem struct {
 	truncateErr    error
 	writeFileErr   error
 	renameErr      error
-	mkdirErr       error
+	mkdirAllErr    error
 	removeErr      error
 	globErr        error
 	isNotExistErr  bool
@@ -128,16 +127,7 @@ func (mfs *mockFileSystem) AtomicWrite(path string, data []byte, perm os.FileMod
 		return mfs.AtomicWriteFunc(path, data, perm)
 	}
 
-	tmpPath := mfs.TempPath(path)
-
-	if err := mfs.WriteFile(tmpPath, data, perm); err != nil {
-		return fmt.Errorf("mock atomic write: failed writing temp file: %w", err)
-	}
-	if err := mfs.Rename(tmpPath, path); err != nil {
-		_ = mfs.Remove(tmpPath)
-		return fmt.Errorf("mock atomic write: failed renaming temp file: %w", err)
-	}
-	return nil
+	return atomicWrite(mfs, path, data, perm)
 }
 
 func (mfs *mockFileSystem) ReadFile(name string) ([]byte, error) {
@@ -270,7 +260,7 @@ func (mfs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	if mfs.MkdirAllFunc != nil {
 		return mfs.MkdirAllFunc(path, perm)
 	}
-	return mfs.mkdirErr
+	return mfs.mkdirAllErr
 }
 
 func (mfs *mockFileSystem) Dir(path string) string { return path }
