@@ -1,5 +1,7 @@
 package storage
 
+import "time"
+
 const (
 	// ownRWOthR represents file permission 0644 (owner read/write, others read).
 	ownRWOthR = 0644
@@ -66,4 +68,7 @@ const (
 	// snapshotMarkerCommittedKey is a marker string written to the snapshot marker file
 	// to indicate that the snapshot metadata has been successfully committed.
 	snapshotMarkerCommittedKey = "meta_committed=true"
+
+	// defaultSlowOpThreshold is the threshold duration to log warnings for slow operations (100ms).
+	defaultSlowOpThreshold = 100 * time.Millisecond
 )
