@@ -27,6 +27,130 @@ func createTempFile(t *testing.T, dir, pattern, content string) string {
 	return tmpFile.Name()
 }
 
+func TestAtomicWrite(t *testing.T) {
+	testPath := "test/dir/file.txt"
+	testData := []byte("atomic test data")
+	perm := os.FileMode(0644)
+
+	t.Run("Success", func(t *testing.T) {
+		fs := newMockFileSystem()
+		err := fs.AtomicWrite(testPath, testData, perm)
+		testutil.AssertNoError(t, err)
+	})
+
+	t.Run("MkdirAllError", func(t *testing.T) {
+		fs := newMockFileSystem()
+		expectedErr := errors.New("mkdir error")
+		fs.MkdirAllFunc = func(path string, perm os.FileMode) error {
+			return expectedErr
+		}
+		err := fs.AtomicWrite(testPath, testData, perm)
+		testutil.AssertError(t, err)
+		testutil.AssertContains(t, err.Error(), "failed to create dir for atomic write")
+		testutil.AssertContains(t, err.Error(), expectedErr.Error())
+	})
+
+	t.Run("WriteFileError", func(t *testing.T) {
+		fs := newMockFileSystem()
+		expectedErr := errors.New("write error")
+		fs.WriteFileFunc = func(name string, data []byte, perm os.FileMode) error {
+			return expectedErr
+		}
+		err := fs.AtomicWrite(testPath, testData, perm)
+		testutil.AssertError(t, err)
+		testutil.AssertContains(t, err.Error(), "failed to write temp file")
+		testutil.AssertContains(t, err.Error(), expectedErr.Error())
+	})
+
+	t.Run("RenameError", func(t *testing.T) {
+		fs := newMockFileSystem()
+		expectedErr := errors.New("rename error")
+
+		removeCalled := false
+		fs.RenameFunc = func(oldPath, newPath string) error {
+			return expectedErr
+		}
+		fs.RemoveFunc = func(name string) error {
+			removeCalled = true
+			return nil
+		}
+
+		err := fs.AtomicWrite(testPath, testData, perm)
+		testutil.AssertError(t, err)
+		testutil.AssertContains(t, err.Error(), "failed to rename temp file")
+		testutil.AssertContains(t, err.Error(), expectedErr.Error())
+		testutil.AssertTrue(t, removeCalled, "Expected Remove to be called on rename failure")
+	})
+}
+
+// TestWriteMaybeAtomic tests the WriteMaybeAtomic method
+func TestWriteMaybeAtomic(t *testing.T) {
+	tempDir := t.TempDir()
+	fs := newFileSystem() // Use the real file system
+	path := filepath.Join(tempDir, "maybe_atomic.txt")
+	testData := []byte("test data for maybe atomic write")
+	perm := os.FileMode(0644)
+
+	t.Run("AtomicTrue", func(t *testing.T) {
+		// Test with atomic flag set to true
+		err := fs.WriteMaybeAtomic(path, testData, perm, true)
+		testutil.AssertNoError(t, err)
+
+		// Verify file was written correctly
+		data, err := fs.ReadFile(path)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, testData, data)
+	})
+
+	t.Run("AtomicFalse", func(t *testing.T) {
+		// Test with atomic flag set to false
+		err := fs.WriteMaybeAtomic(path, []byte("non-atomic test"), perm, false)
+		testutil.AssertNoError(t, err)
+
+		// Verify file was written correctly with direct write
+		data, err := fs.ReadFile(path)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, []byte("non-atomic test"), data)
+	})
+}
+
+// TestTempPath tests the TempPath method
+func TestTempPath(t *testing.T) {
+	fs := newFileSystem()
+
+	t.Run("DefaultImplementation", func(t *testing.T) {
+		path := "test/path/file.txt"
+		tempPath := fs.TempPath(path)
+		testutil.AssertEqual(t, path+tmpSuffix, tempPath)
+	})
+}
+
+// TestPath tests the Path method
+func TestPath(t *testing.T) {
+	fs := newFileSystem()
+
+	t.Run("BasicPath", func(t *testing.T) {
+		dir := "dir"
+		file := "file.txt"
+		path := fs.Path(dir, file)
+		testutil.AssertEqual(t, filepath.Join(dir, file), path)
+	})
+
+	t.Run("WithEmptyDir", func(t *testing.T) {
+		dir := ""
+		file := "file.txt"
+		path := fs.Path(dir, file)
+		testutil.AssertEqual(t, "file.txt", path)
+	})
+
+	t.Run("WithEmptyFile", func(t *testing.T) {
+		dir := "dir"
+		file := ""
+		path := fs.Path(dir, file)
+		testutil.AssertEqual(t, "dir", path)
+	})
+}
+
 // TestNewDefaultFileSystem verifies constructor functions
 func TestNewDefaultFileSystem(t *testing.T) {
 	t.Run("DefaultConstructor", func(t *testing.T) {

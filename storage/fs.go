@@ -2,7 +2,6 @@ package storage
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -75,24 +74,7 @@ func (fs defaultFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.F
 // atomicWriteFile writes data to a temporary file and then atomically renames it to the target path.
 // This ensures the file is never in a partially-written state.
 func (fs defaultFileSystem) AtomicWrite(path string, data []byte, perm os.FileMode) error {
-	dir := fs.Dir(path)
-	if err := fs.MkdirAll(dir, ownRWXOthRX); err != nil {
-		return fmt.Errorf("failed to create dir for atomic write: %w", err)
-	}
-
-	tmpPath := fs.TempPath(path)
-
-	if err := fs.WriteFile(tmpPath, data, perm); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	if err := fs.Rename(tmpPath, path); err != nil {
-		// Attempt cleanup
-		_ = fs.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	return nil
+	return atomicWrite(fs, path, data, perm)
 }
 
 // ReadFile reads the contents of the specified file and returns the data.
