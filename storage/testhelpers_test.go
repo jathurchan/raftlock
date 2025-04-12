@@ -41,10 +41,14 @@ type mockFile struct {
 	*bytes.Reader
 
 	ReadAllFunc func() ([]byte, error)
+	WriteFunc   func([]byte) (int, error)
+	SyncFunc    func() error
 }
 
-func (r *mockFile) ReadFull(buf []byte) (int, error) { return io.ReadFull(r.Reader, buf) }
-func (r *mockFile) Close() error                     { return nil }
+func (r *mockFile) ReadFull(buf []byte) (int, error) {
+	return io.ReadFull(r.Reader, buf)
+}
+
 func (r *mockFile) ReadAll() ([]byte, error) {
 	if r.ReadAllFunc != nil {
 		return r.ReadAllFunc()
@@ -52,8 +56,28 @@ func (r *mockFile) ReadAll() ([]byte, error) {
 
 	return io.ReadAll(r.Reader)
 }
+
 func (r *mockFile) Seek(offset int64, whence int) (int64, error) {
 	return r.Reader.Seek(offset, whence)
+}
+
+func (r *mockFile) Close() error {
+	return nil
+}
+
+func (r *mockFile) Write(p []byte) (int, error) {
+	if r.WriteFunc != nil {
+		return r.WriteFunc(p)
+	}
+	// default: pretend write succeeded but don't store data
+	return len(p), nil
+}
+
+func (r *mockFile) Sync() error {
+	if r.SyncFunc != nil {
+		return r.SyncFunc()
+	}
+	return nil
 }
 
 // mockFileSystem implements fileSystem for testing
@@ -88,6 +112,7 @@ type mockFileSystem struct {
 	TempPathFunc         func(string) string
 	AtomicWriteFunc      func(path string, data []byte, perm os.FileMode) error
 	WriteMaybeAtomicFunc func(path string, data []byte, perm os.FileMode, atomic bool) error
+	AppendFileFunc       func(name string) (file, error)
 }
 
 func newMockFileSystem() *mockFileSystem {
@@ -302,6 +327,31 @@ func (mfs *mockFileSystem) resetTruncate() {
 	mfs.truncatedSize = -1
 }
 
+func (mfs *mockFileSystem) AppendFile(name string) (file, error) {
+	if mfs.AppendFileFunc != nil {
+		return mfs.AppendFileFunc(name)
+	}
+	mfs.mu.Lock()
+	defer mfs.mu.Unlock()
+
+	data := mfs.files[name] // returns nil if not exists, which is okay
+	writer := &bytes.Buffer{}
+	if data != nil {
+		writer.Write(data)
+	}
+
+	mockF := &mockFile{
+		Reader: bytes.NewReader(data),
+		WriteFunc: func(p []byte) (int, error) {
+			n, err := writer.Write(p)
+			mfs.files[name] = writer.Bytes()
+			return n, err
+		},
+	}
+
+	return mockF, nil
+}
+
 // failingReader simulates a reader that returns an error after a limited number of bytes.
 type failingReader struct {
 	reader      io.Reader
@@ -326,7 +376,9 @@ func (r *failingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (r *failingReader) Close() error { return nil }
+func (r *failingReader) Close() error {
+	return nil
+}
 func (r *failingReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, errors.New("seek not implemented")
 }
@@ -338,6 +390,14 @@ func (r *failingReader) ReadAll() ([]byte, error) {
 		return nil, r.err
 	}
 	return io.ReadAll(r.reader) // Use r.reader to avoid recursive calls
+}
+
+func (r *failingReader) Write(p []byte) (int, error) {
+	return 0, errors.New("write not supported")
+}
+
+func (r *failingReader) Sync() error {
+	return nil // no-op for test
 }
 
 type mockSerializer struct {
@@ -453,6 +513,14 @@ func (m *mockIndexService) VerifyConsistency(indexMap []types.IndexOffsetPair) e
 
 func (m *mockIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
 	return m.getBoundsResult
+}
+
+func (m *mockIndexService) Append(base, additions []types.IndexOffsetPair) []types.IndexOffsetPair {
+	panic("mockIndexService.AppendEntries not implemented")
+}
+
+func (m *mockIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair {
+	panic("mockIndexService.TruncateLastEntries not implemented")
 }
 
 type mockMetadataService struct {

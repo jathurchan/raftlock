@@ -39,6 +39,15 @@ type indexService interface {
 	// It returns a boundsResult indicating the new first and last indices, whether the metadata has changed,
 	// and whether the change represents a full reset (i.e., the index map is empty).
 	GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult
+
+	// Append appends new index-offset entries to the given base map.
+	// If additions is empty, the original map is returned unmodified.
+	Append(base, additions []types.IndexOffsetPair) []types.IndexOffsetPair
+
+	// TruncateLast removes the last 'count' entries from the index map.
+	// If count is zero or less, the original map is returned.
+	// If count is greater than or equal to the length of the map, an empty slice is returned.
+	TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair
 }
 
 // defaultIndexService provides a filesystem-backed implementation of indexService.
@@ -261,4 +270,31 @@ func (s *defaultIndexService) GetBounds(indexMap []types.IndexOffsetPair, curren
 		"previousLast", currentLast,
 	)
 	return boundsResult{newFirst, newLast, true, false}
+}
+
+// Append extends the existing index-offset map with new entries.
+func (s *defaultIndexService) Append(base, additions []types.IndexOffsetPair) []types.IndexOffsetPair {
+	if len(additions) == 0 {
+		s.logger.Debugw("No additions to append", "baseLen", len(base))
+		return base
+	}
+	s.logger.Debugw("Appending entries to index map", "baseLen", len(base), "addLen", len(additions))
+	return append(base, additions...)
+}
+
+// TruncateLast removes the last 'count' entries from the index-offset map.
+func (s *defaultIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair {
+	if count <= 0 {
+		s.logger.Debugw("No truncation needed", "mapSize", len(indexMap))
+		return indexMap
+	}
+
+	if count >= len(indexMap) {
+		s.logger.Warnw("Truncation count exceeds or matches map size — returning empty", "count", count, "mapSize", len(indexMap))
+		return nil
+	}
+
+	newLen := len(indexMap) - count
+	s.logger.Debugw("Truncating last entries", "originalLen", len(indexMap), "newLen", newLen)
+	return indexMap[:newLen]
 }

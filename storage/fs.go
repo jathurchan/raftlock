@@ -28,6 +28,7 @@ type fileSystem interface {
 	TempPath(path string) string
 	AtomicWrite(path string, data []byte, perm os.FileMode) error
 	WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error
+	AppendFile(name string) (file, error)
 }
 
 // file defines an interface for file-level operations.
@@ -36,6 +37,8 @@ type file interface {
 	io.Reader
 	io.Closer
 	Seek(offset int64, whence int) (int64, error)
+	Write([]byte) (int, error)
+	Sync() error
 	ReadFull(buf []byte) (int, error)
 	ReadAll() ([]byte, error)
 }
@@ -146,6 +149,17 @@ func (fs defaultFileSystem) Glob(pattern string) ([]string, error) {
 // Join joins any number of path elements into a single path.
 func (fs defaultFileSystem) Join(elem ...string) string {
 	return filepath.Join(elem...)
+}
+
+// AppendFile opens the specified file in append mode (creating it if it does not exist)
+// and returns a handle that implements the file interface. Data written will be appended
+// to the end of the file.
+func (fs defaultFileSystem) AppendFile(name string) (file, error) {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_APPEND, ownRWOthR)
+	if err != nil {
+		return nil, err
+	}
+	return &defaultFile{File: f}, nil
 }
 
 // defaultFile wraps *os.File to implement the file interface.
