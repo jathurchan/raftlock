@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
@@ -14,6 +16,8 @@ import (
 // number of bytes read, or an error.
 type logEntryReader interface {
 	ReadNext(file file) (types.LogEntry, int64, error)
+	ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error)
+	ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error)
 }
 
 // defaultLogEntryReader provides a concrete implementation of LogEntryReader.
@@ -84,4 +88,55 @@ func (r *defaultLogEntryReader) ReadNext(file file) (types.LogEntry, int64, erro
 
 	r.logger.Debugw("Read log entry", "index", entry.Index, "term", entry.Term, "size", bytesRead)
 	return entry, bytesRead, nil
+}
+
+func (r *defaultLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error) {
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return types.LogEntry{}, 0, fmt.Errorf("%w: failed to seek to offset: %v", ErrStorageIO, err)
+	}
+
+	entry, bytesRead, err := r.ReadNext(file)
+	if err != nil {
+		return types.LogEntry{}, bytesRead, err
+	}
+
+	if expectedIndex != 0 && entry.Index != expectedIndex {
+		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: index mismatch (expected %d, got %d)", ErrCorruptedLog, expectedIndex, entry.Index)
+	}
+
+	return entry, bytesRead, nil
+}
+
+func (r *defaultLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+	var (
+		entries    []types.LogEntry
+		totalBytes int64
+	)
+
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		entry, n, err := r.ReadNext(file)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("%w: failed to scan log entry: %v", ErrCorruptedLog, err)
+		}
+
+		if entry.Index < start {
+			continue
+		}
+
+		if entry.Index >= end {
+			break
+		}
+
+		entries = append(entries, entry)
+		totalBytes += n
+	}
+
+	return entries, nil
 }
