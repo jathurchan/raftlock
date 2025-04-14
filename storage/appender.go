@@ -25,8 +25,8 @@ type logAppender interface {
 // defaultLogAppender implements logAppender.
 type defaultLogAppender struct {
 	logFilePath  string
-	serializer   serializer
 	fileSystem   fileSystem
+	serializer   serializer
 	logger       logger.Logger
 	syncOnAppend bool
 }
@@ -114,6 +114,7 @@ func (a *defaultLogAppender) writeToFile(ctx context.Context, f file, entries []
 	lenBuf := make([]byte, lengthPrefixSize)
 
 	for i, entry := range entries {
+		// Periodically check for context cancellation to avoid excessive overhead
 		if i%10 == 0 && ctx.Err() != nil {
 			return nil, a.failAndRollback(f, start, "context canceled")
 		}
@@ -123,45 +124,52 @@ func (a *defaultLogAppender) writeToFile(ctx context.Context, f file, entries []
 			Offset: pos,
 		})
 
-		data, err := a.serializer.MarshalLogEntry(entry)
+		newPos, err := a.writeEntry(f, entry, pos, lenBuf)
 		if err != nil {
-			return nil, a.failAndRollback(f, start, "serialize entry: %w", ErrStorageIO, err)
+			return nil, a.failAndRollback(f, start, "entry %d write failed: %w", entry.Index, err)
 		}
-
-		binary.BigEndian.PutUint32(lenBuf, uint32(len(data)))
-		for _, chunk := range [][]byte{lenBuf, data} {
-			n, err := f.Write(chunk)
-			if err != nil {
-				return nil, a.failAndRollback(f, start, "write failed: %w", ErrStorageIO, err)
-			}
-			pos += int64(n)
-		}
+		pos = newPos
 	}
 	return offsets, nil
 }
 
-func (a *defaultLogAppender) syncIfNeeded(f file, start int64) error {
-	if a.syncOnAppend {
-		if err := f.Sync(); err != nil {
-			return a.failAndRollback(f, start, "sync failed: %w", ErrStorageIO, err)
+func (a *defaultLogAppender) writeEntry(f file, entry types.LogEntry, pos int64, lenBuf []byte) (int64, error) {
+	data, err := a.serializer.MarshalLogEntry(entry)
+	if err != nil {
+		return pos, fmt.Errorf("serialize entry %d: %w", entry.Index, err)
+	}
+
+	binary.BigEndian.PutUint32(lenBuf, uint32(len(data)))
+
+	for _, chunk := range [][]byte{lenBuf, data} {
+		n, err := f.Write(chunk)
+		if err != nil {
+			return pos, fmt.Errorf("write chunk for entry %d: %w", entry.Index, err)
 		}
+		pos += int64(n)
+	}
+	return pos, nil
+}
+
+func (a *defaultLogAppender) syncIfNeeded(f file, start int64) error {
+	if !a.syncOnAppend {
+		return nil
+	}
+	if err := f.Sync(); err != nil {
+		return a.failAndRollback(f, start, "sync failed: %w", ErrStorageIO, err)
 	}
 	return nil
 }
 
-func (a *defaultLogAppender) rollback(f file, to int64) {
-	_ = f.Close()
-	err := a.fileSystem.Truncate(a.logFilePath, to)
-	if err != nil {
-		a.logger.Errorw("rollback failed during truncate to offset %d: %v", to, err)
-	} else {
-		a.logger.Warnw("rollback performed to offset %d", to)
-	}
-}
-
 func (a *defaultLogAppender) failAndRollback(f file, start int64, format string, args ...any) error {
 	_ = f.Close()
-	_ = a.fileSystem.Truncate(a.logFilePath, start)
-	a.logger.Warnw("rollback to offset %d after failure: "+format, append([]any{start}, args...)...)
+	err := a.fileSystem.Truncate(a.logFilePath, start)
+	if err != nil {
+		a.logger.Errorw("rollback failed during truncate to offset %d: %v", start, err)
+	} else {
+		a.logger.Warnw("rollback performed to offset %d", start)
+	}
+	msg := fmt.Sprintf("rollback to offset %d after failure: %s", start, fmt.Sprintf(format, args...))
+	a.logger.Warnw(msg)
 	return fmt.Errorf(format, args...)
 }
