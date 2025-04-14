@@ -65,6 +65,8 @@ type FileStorage struct {
 
 	fileSystem  fileSystem
 	serializer  serializer
+	logAppender logAppender
+	locker      rwOperationLocker
 	indexSvc    indexService
 	metadataSvc metadataService
 	recoverySvc recoveryService
@@ -111,12 +113,19 @@ func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, lo
 	fileSystem := newFileSystem()
 	serializer := getSerializer(options.Features.EnableBinaryFormat)
 	entryReader := newLogEntryReader(maxEntrySizeBytes, lengthPrefixSize, serializer, logger)
+	logAppender := newLogAppender(
+		fileSystem.Path(cfg.Dir, logFilename),
+		fileSystem,
+		serializer,
+		logger,
+		options.SyncOnAppend,
+	)
 	indexService := newIndexServiceWithReader(fileSystem, entryReader, logger)
 	metadataService := newMetadataServiceWithDeps(fileSystem, serializer, indexService, logger)
 	systemInfo := NewSystemInfo()
 	recoveryService := newRecoveryService(fileSystem, serializer, logger, cfg.Dir, normalMode, indexService, metadataService, systemInfo)
 
-	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, indexService, metadataService, recoveryService, logger)
+	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, logAppender, indexService, metadataService, recoveryService, logger)
 }
 
 func getSerializer(enableBinary bool) serializer {
@@ -131,6 +140,7 @@ func newFileStorageWithDeps(
 	options FileStorageOptions,
 	fileSystem fileSystem,
 	serializer serializer,
+	logAppender logAppender,
 	indexService indexService,
 	metadataService metadataService,
 	recoveryService recoveryService,
@@ -147,11 +157,19 @@ func newFileStorageWithDeps(
 		options:     options,
 		fileSystem:  fileSystem,
 		serializer:  serializer,
+		logAppender: logAppender,
 		indexSvc:    indexService,
 		metadataSvc: metadataService,
 		recoverySvc: recoveryService,
 		logger:      logger,
 	}
+
+	s.locker = newRWOperationLocker(
+		&s.logMu,
+		logger,
+		options,
+		&s.metrics.slowOperations,
+	)
 
 	s.status.Store(storageStatusInitializing)
 	s.logger.Infow("Initializing storage", "dir", cfg.Dir)
@@ -265,7 +283,7 @@ func (s *FileStorage) loadMetadataLocked() error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File doesn't exist, initialize with empty state
-			s.updateLogBoundsLocked(0, 0)
+			s.setInMemoryLogBoundsLocked(0, 0)
 			return nil
 		}
 		return err // Error already wrapped and logged inside LoadMetadata
@@ -276,7 +294,7 @@ func (s *FileStorage) loadMetadataLocked() error {
 		return err
 	}
 
-	s.updateLogBoundsLocked(metadata.FirstIndex, metadata.LastIndex)
+	s.setInMemoryLogBoundsLocked(metadata.FirstIndex, metadata.LastIndex)
 
 	s.logger.Debugw("Loaded metadata",
 		"firstIndex", metadata.FirstIndex,
@@ -330,13 +348,6 @@ func (s *FileStorage) buildIndexOffsetMapLocked() error {
 	return nil
 }
 
-// updateLogBoundsLocked sets the in-memory first and last log indices atomically.
-// updateLogBoundsLocked assumes s.logMu is already held
-func (s *FileStorage) updateLogBoundsLocked(first, last types.Index) {
-	s.firstLogIndex.Store(uint64(first))
-	s.lastLogIndex.Store(uint64(last))
-}
-
 // syncLogStateFromIndexMapLocked ensures in-memory log index bounds and on-disk metadata
 // are consistent with the actual log content, as represented by indexToOffsetMap.
 // If discrepancies are found, it updates both in-memory and persistent metadata.
@@ -366,32 +377,9 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 	}
 
 	// Update in-memory bounds to match the new persisted values
-	s.updateLogBoundsLocked(newFirst, newLast)
+	s.setInMemoryLogBoundsLocked(newFirst, newLast)
 
 	return s.indexSvc.VerifyConsistency(s.indexToOffsetMap)
-}
-
-// verifyInMemoryState ensures that the in-memory log index bounds (firstLogIndex and lastLogIndex)
-// are consistent with the actual contents of the log, as represented by indexToOffsetMap.
-//
-// This method is intended to be used after recovery or rebuilding operations (e.g., truncation,
-// index map rebuild, metadata sync) to catch any silent discrepancies between the in-memory state
-// and the true log content.
-//
-// Returns an error if a mismatch is detected, indicating potential internal inconsistency.
-func (s *FileStorage) verifyInMemoryState() error {
-	expected := s.indexSvc.GetBounds(s.indexToOffsetMap, 0, 0)
-
-	memFirst := s.firstLogIndex.Load()
-	memLast := s.lastLogIndex.Load()
-
-	if uint64(expected.NewFirst) != memFirst || uint64(expected.NewLast) != memLast {
-		return fmt.Errorf("in-memory state inconsistent: expected (%d-%d), got (%d-%d)",
-			expected.NewFirst, expected.NewLast,
-			memFirst, memLast)
-	}
-
-	return nil
 }
 
 // LoadState loads the most recently persisted PersistentState from disk.
@@ -479,7 +467,71 @@ func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState
 //   - ErrStorageIO on I/O failure.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) AppendLogEntries(ctx context.Context, entries []types.LogEntry) error {
-	panic("not implemented")
+	currentLastIndex := types.Index(s.lastLogIndex.Load())
+
+	return s.locker.DoWrite(ctx, func() error {
+		result, err := s.logAppender.Append(ctx, entries, currentLastIndex)
+		if err != nil {
+			s.logger.Warnw("Failed to append log entries",
+				"entryCount", len(entries),
+				"currentLastIndex", currentLastIndex,
+				"error", err,
+			)
+			return err
+		}
+
+		return s.commitAppendChangesLocked(
+			result.Offsets,
+			result.FirstIndex,
+			result.LastIndex,
+			currentLastIndex,
+		)
+	})
+}
+
+// commitAppendChangesLocked finalizes an append operation by updating in-memory state,
+// appending to the index map (if enabled), and syncing both in-memory and persistent metadata.
+// If state synchronization fails, it rolls back both in-memory and index map changes.
+// Assumes s.logMu is already held by the caller.
+func (s *FileStorage) commitAppendChangesLocked(
+	newOffsets []types.IndexOffsetPair,
+	firstNewIndex, lastNewIndex, currentLastIndex types.Index,
+) error {
+	s.logger.Debugw("Committing append changes",
+		"firstNewIndex", firstNewIndex,
+		"lastNewIndex", lastNewIndex,
+		"currentLastIndex", currentLastIndex,
+		"numNewOffsets", len(newOffsets),
+	)
+	s.maybeInitInMemoryLogBoundsLocked(firstNewIndex, lastNewIndex)
+
+	if s.options.Features.EnableIndexMap {
+		s.indexToOffsetMap = s.indexSvc.Append(s.indexToOffsetMap, newOffsets)
+	}
+
+	if err := s.syncLogStateFromIndexMapLocked(); err != nil {
+		s.logger.Errorw("Failed to sync log state after append",
+			"error", err,
+			"firstNewIndex", firstNewIndex,
+			"lastNewIndex", lastNewIndex,
+		)
+
+		wasFirstInit := firstNewIndex == s.FirstLogIndex()
+		s.rollbackInMemoryState(currentLastIndex, wasFirstInit)
+
+		if s.options.Features.EnableIndexMap {
+			s.rollbackIndexMapState(len(newOffsets))
+		}
+
+		return fmt.Errorf("log append succeeded but state sync failed: %w", err)
+	}
+
+	s.logger.Infow("Append changes committed successfully",
+		"firstNewIndex", firstNewIndex,
+		"lastNewIndex", lastNewIndex,
+	)
+
+	return nil
 }
 
 // GetLogEntries returns a slice of log entries within the range [start, end).
@@ -562,4 +614,59 @@ func (s *FileStorage) FirstLogIndex() types.Index {
 //   - ErrStorageIO if cleanup fails.
 func (s *FileStorage) Close() error {
 	panic("not implemented")
+}
+
+// setInMemoryLogBoundsLocked sets the in-memory first and last log indices atomically.
+// It assumes s.logMu is already held and that range was validated using ValidateMetadataRange.
+func (s *FileStorage) setInMemoryLogBoundsLocked(first, last types.Index) {
+	s.firstLogIndex.Store(uint64(first))
+	s.lastLogIndex.Store(uint64(last))
+}
+
+// maybeInitInMemoryLogBoundsLocked sets the in-memory log bounds if the first index is unset (zero).
+// It assumes s.logMu is already held and that range was validated using ValidateMetadataRange.
+func (s *FileStorage) maybeInitInMemoryLogBoundsLocked(first, last types.Index) {
+	currentFirst := types.Index(s.firstLogIndex.Load())
+	if currentFirst == 0 {
+		s.firstLogIndex.Store(uint64(first))
+	}
+	s.lastLogIndex.Store(uint64(last))
+}
+
+// verifyInMemoryState ensures that the in-memory log index bounds (firstLogIndex and lastLogIndex)
+// are consistent with the actual contents of the log, as represented by indexToOffsetMap.
+//
+// This method is intended to be used after recovery or rebuilding operations (e.g., truncation,
+// index map rebuild, metadata sync) to catch any silent discrepancies between the in-memory state
+// and the true log content.
+//
+// Returns an error if a mismatch is detected, indicating potential internal inconsistency.
+func (s *FileStorage) verifyInMemoryState() error {
+	expected := s.indexSvc.GetBounds(s.indexToOffsetMap, 0, 0)
+
+	memFirst := s.firstLogIndex.Load()
+	memLast := s.lastLogIndex.Load()
+
+	if uint64(expected.NewFirst) != memFirst || uint64(expected.NewLast) != memLast {
+		return fmt.Errorf("in-memory state inconsistent: expected (%d-%d), got (%d-%d)",
+			expected.NewFirst, expected.NewLast,
+			memFirst, memLast)
+	}
+
+	return nil
+}
+
+// rollbackInMemoryState reverts the in-memory log index bounds after a failed append.
+// If isFirstInit is true, it means the first index had just been initialized and should be reset to zero.
+func (s *FileStorage) rollbackInMemoryState(previousLast types.Index, isFirstInit bool) {
+	s.lastLogIndex.Store(uint64(previousLast))
+	if isFirstInit {
+		s.firstLogIndex.Store(0)
+	}
+}
+
+// rollbackIndexMapState reverts the last N entries from the index-to-offset map after a failed append.
+// If N exceeds the map size, the map is cleared entirely.
+func (s *FileStorage) rollbackIndexMapState(count int) {
+	s.indexToOffsetMap = s.indexSvc.TruncateLast(s.indexToOffsetMap, count)
 }
