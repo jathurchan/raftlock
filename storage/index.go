@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/types"
@@ -29,6 +31,10 @@ type indexService interface {
 	// If the log file is missing, it returns an empty result without error.
 	// If corruption is detected during parsing, a truncated result is returned along with an error.
 	Build(logPath string) (buildResult, error)
+
+	// ReadInRange returns log entries in the specified [start, end) index range using the index map.
+	// Offsets from the index map are used to seek entries directly within the log file.
+	ReadInRange(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error)
 
 	// VerifyConsistency ensures that the provided index-offset map contains
 	// strictly increasing and gapless indices. If any discontinuity or out-of-order
@@ -92,8 +98,8 @@ func (is *defaultIndexService) Build(logPath string) (buildResult, error) {
 
 // scanLogAndBuildMap reads entries from a log file and builds an index-offset map.
 // Detects and handles corruption, enforces monotonic and gapless index order.
-func (s *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, error) {
-	file, err := s.fs.Open(logPath)
+func (is *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, error) {
+	file, err := is.fs.Open(logPath)
 	if err != nil {
 		return buildResult{}, fmt.Errorf("%w: failed to open log file %q: %v", ErrStorageIO, logPath, err)
 	}
@@ -110,17 +116,17 @@ func (s *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, e
 		indexMap = make([]types.IndexOffsetPair, 0, defaultIndexMapInitialCapacity)
 	)
 
-	s.logger.Infow("Starting log scan to build index-offset map", "path", logPath)
+	is.logger.Infow("Starting log scan to build index-offset map", "path", logPath)
 
 	for {
 		entryOffset := offset
 
-		entry, bytesRead, err := s.reader.ReadNext(file)
+		entry, bytesRead, err := is.reader.ReadNext(file)
 		offset += bytesRead
 
 		switch {
 		case err == io.EOF:
-			s.logger.Infow("Log scan complete", "entriesRead", entriesRead, "finalOffset", offset)
+			is.logger.Infow("Log scan complete", "entriesRead", entriesRead, "finalOffset", offset)
 			return buildResult{
 				IndexMap:       indexMap,
 				Truncated:      false,
@@ -128,21 +134,21 @@ func (s *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, e
 			}, nil
 
 		case err != nil:
-			return s.buildCorruptionResult(indexMap, lastIndex,
-				s.handleCorruption(logPath, entryOffset, "read failure", err))
+			return is.buildCorruptionResult(indexMap, lastIndex,
+				is.handleCorruption(logPath, entryOffset, "read failure", err))
 		}
 
 		// Ensure log indices are strictly increasing and contiguous
 		if lastIndex > 0 {
 			if entry.Index <= lastIndex {
 				reason := fmt.Sprintf("out-of-order index (current=%d, last=%d)", entry.Index, lastIndex)
-				return s.buildCorruptionResult(indexMap, lastIndex,
-					s.handleCorruption(logPath, entryOffset, reason, nil))
+				return is.buildCorruptionResult(indexMap, lastIndex,
+					is.handleCorruption(logPath, entryOffset, reason, nil))
 			}
 			if entry.Index > lastIndex+1 {
 				reason := fmt.Sprintf("index gap (expected=%d, found=%d)", lastIndex+1, entry.Index)
-				return s.buildCorruptionResult(indexMap, lastIndex,
-					s.handleCorruption(logPath, entryOffset, reason, nil))
+				return is.buildCorruptionResult(indexMap, lastIndex,
+					is.handleCorruption(logPath, entryOffset, reason, nil))
 			}
 		}
 
@@ -158,7 +164,7 @@ func (s *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, e
 }
 
 // buildCorruptionResult centralizes returning a truncated result with error.
-func (s *defaultIndexService) buildCorruptionResult(
+func (is *defaultIndexService) buildCorruptionResult(
 	indexMap []types.IndexOffsetPair,
 	lastIndex types.Index,
 	corruptionErr error,
@@ -171,7 +177,7 @@ func (s *defaultIndexService) buildCorruptionResult(
 }
 
 // handleCorruption logs the corruption details and attempts to truncate the log at the given offset.
-func (s *defaultIndexService) handleCorruption(path string, offset int64, reason string, err error) error {
+func (is *defaultIndexService) handleCorruption(path string, offset int64, reason string, err error) error {
 	logFields := []any{
 		"logPath", path,
 		"offset", offset,
@@ -181,11 +187,11 @@ func (s *defaultIndexService) handleCorruption(path string, offset int64, reason
 		logFields = append(logFields, "error", err)
 	}
 
-	s.logger.Warnw("Corruption detected during log scan", logFields...)
+	is.logger.Warnw("Corruption detected during log scan", logFields...)
 
-	truncErr := s.truncateLogAt(path, offset)
+	truncErr := is.truncateLogAt(path, offset)
 	if truncErr != nil {
-		s.logger.Errorw("Failed to truncate log after corruption",
+		is.logger.Errorw("Failed to truncate log after corruption",
 			"logPath", path,
 			"offset", offset,
 			"error", truncErr,
@@ -193,7 +199,7 @@ func (s *defaultIndexService) handleCorruption(path string, offset int64, reason
 		return fmt.Errorf("corruption at offset %d: %w", offset, truncErr)
 	}
 
-	s.logger.Infow("Corrupted log successfully truncated",
+	is.logger.Infow("Corrupted log successfully truncated",
 		"logPath", path,
 		"offset", offset,
 	)
@@ -201,14 +207,115 @@ func (s *defaultIndexService) handleCorruption(path string, offset int64, reason
 }
 
 // truncateLogAt cuts the log file at the specified offset.
-func (s *defaultIndexService) truncateLogAt(path string, offset int64) error {
+func (is *defaultIndexService) truncateLogAt(path string, offset int64) error {
 	if offset < 0 {
 		return fmt.Errorf("invalid negative offset (%d) for truncation", offset)
 	}
-	return s.fs.Truncate(path, offset)
+	return is.fs.Truncate(path, offset)
 }
 
-// VerifyConsistency checks that the index map contains strictly increasing and contiguous indices.
+// ReadInRange extracts log entries between the given start and end indices (exclusive).
+// Seeks directly to byte offsets using the index map for efficient access.
+// Returns the entries, total bytes read, or an error.
+func (is *defaultIndexService) ReadInRange(
+	ctx context.Context,
+	logPath string,
+	indexMap []types.IndexOffsetPair,
+	start, end types.Index,
+) ([]types.LogEntry, int64, error) {
+	if start >= end {
+		is.logger.Debugw("Start index is greater than or equal to end index", "start", start, "end", end)
+		return nil, 0, nil // Or return an error: fmt.Errorf("invalid index range: start (%d) >= end (%d)", start, end)
+	}
+
+	if len(indexMap) == 0 {
+		is.logger.Debugw("Index map is empty", "start", start, "end", end)
+		return nil, 0, nil
+	}
+
+	file, err := is.fs.Open(logPath)
+	if err != nil {
+		is.logger.Errorw("Failed to open log file for reading", "path", logPath, "error", err)
+		return nil, 0, fmt.Errorf("%w: failed to open log file: %v", ErrStorageIO, err)
+	}
+	defer file.Close()
+
+	startIdx := findStartIndexInMap(indexMap, start)
+	estimatedCap := estimateCapacity(indexMap, start, end)
+
+	entries, totalBytes, err := is.readEntriesInRange(ctx, file, indexMap, startIdx, end, estimatedCap)
+	if err != nil {
+		is.logger.Errorw("Failed to read entries in range", "start", start, "end", end, "error", err)
+		return entries, totalBytes, err
+	}
+
+	is.logger.Debugw("ReadInRange completed",
+		"logPath", logPath,
+		"start", start,
+		"end", end,
+		"entriesRead", len(entries),
+		"totalBytes", totalBytes,
+	)
+	return entries, totalBytes, nil
+}
+
+// findStartIndexInMap performs a binary search to locate the first index >= target.
+func findStartIndexInMap(indexMap []types.IndexOffsetPair, target types.Index) int {
+	return sort.Search(len(indexMap), func(i int) bool {
+		return indexMap[i].Index >= target
+	})
+}
+
+// estimateCapacity estimates the number of entries between start and end for slice preallocation.
+func estimateCapacity(indexMap []types.IndexOffsetPair, start, end types.Index) int {
+	startIdx := findStartIndexInMap(indexMap, start)
+	endIdx := findStartIndexInMap(indexMap, end)
+	capacity := endIdx - startIdx
+	if capacity < 0 {
+		return 0
+	}
+	return capacity
+}
+
+// readEntriesInRange reads and decodes log entries starting at startIdx up to (but not including) `end` index.
+// Respects cancellation via context. Returns entries and cumulative bytes read.
+func (is *defaultIndexService) readEntriesInRange(
+	ctx context.Context,
+	file file,
+	indexMap []types.IndexOffsetPair,
+	startIdx int,
+	end types.Index,
+	capacity int,
+) ([]types.LogEntry, int64, error) {
+	entries := make([]types.LogEntry, 0, capacity)
+	var totalBytes int64
+
+	for i := startIdx; i < len(indexMap); i++ {
+		pair := indexMap[i]
+		if pair.Index >= end {
+			break
+		}
+
+		if i%20 == 0 && ctx.Err() != nil {
+			is.logger.Warnw("Context canceled during ReadInRange", "cancelIndex", pair.Index, "error", ctx.Err())
+			return entries, totalBytes, ctx.Err()
+		}
+
+		entry, n, err := is.reader.ReadAtOffset(file, pair.Offset, pair.Index)
+		if err != nil {
+			is.logger.Errorw("Failed to read entry", "index", pair.Index, "offset", pair.Offset, "error", err)
+			return entries, totalBytes, err
+		}
+
+		entries = append(entries, entry)
+		totalBytes += n
+	}
+
+	return entries, totalBytes, nil
+}
+
+// VerifyConsistency checks that the index map has strictly increasing and gapless indices.
+// Returns an error if continuity is broken.
 func (is *defaultIndexService) VerifyConsistency(indexMap []types.IndexOffsetPair) error {
 	if len(indexMap) == 0 {
 		is.logger.Debugw("Index map empty — skipping consistency check")

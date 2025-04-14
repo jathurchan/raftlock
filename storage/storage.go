@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,7 @@ type FileStorage struct {
 	fileSystem  fileSystem
 	serializer  serializer
 	logAppender logAppender
+	logReader   logEntryReader
 	locker      rwOperationLocker
 	indexSvc    indexService
 	metadataSvc metadataService
@@ -112,7 +114,7 @@ func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, lo
 
 	fileSystem := newFileSystem()
 	serializer := getSerializer(options.Features.EnableBinaryFormat)
-	entryReader := newLogEntryReader(maxEntrySizeBytes, lengthPrefixSize, serializer, logger)
+	logReader := newLogEntryReader(maxEntrySizeBytes, lengthPrefixSize, serializer, logger)
 	logAppender := newLogAppender(
 		fileSystem.Path(cfg.Dir, logFilename),
 		fileSystem,
@@ -120,12 +122,12 @@ func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, lo
 		logger,
 		options.SyncOnAppend,
 	)
-	indexService := newIndexServiceWithReader(fileSystem, entryReader, logger)
+	indexService := newIndexServiceWithReader(fileSystem, logReader, logger)
 	metadataService := newMetadataServiceWithDeps(fileSystem, serializer, indexService, logger)
 	systemInfo := NewSystemInfo()
 	recoveryService := newRecoveryService(fileSystem, serializer, logger, cfg.Dir, normalMode, indexService, metadataService, systemInfo)
 
-	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, logAppender, indexService, metadataService, recoveryService, logger)
+	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, logAppender, logReader, indexService, metadataService, recoveryService, logger)
 }
 
 func getSerializer(enableBinary bool) serializer {
@@ -141,6 +143,7 @@ func newFileStorageWithDeps(
 	fileSystem fileSystem,
 	serializer serializer,
 	logAppender logAppender,
+	logReader logEntryReader,
 	indexService indexService,
 	metadataService metadataService,
 	recoveryService recoveryService,
@@ -158,6 +161,7 @@ func newFileStorageWithDeps(
 		fileSystem:  fileSystem,
 		serializer:  serializer,
 		logAppender: logAppender,
+		logReader:   logReader,
 		indexSvc:    indexService,
 		metadataSvc: metadataService,
 		recoverySvc: recoveryService,
@@ -541,7 +545,66 @@ func (s *FileStorage) commitAppendChangesLocked(
 //   - ErrIndexOutOfRange if the requested range includes missing or compacted entries.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
-	panic("not implemented")
+	if start >= end {
+		return nil, ErrInvalidLogRange
+	}
+
+	var entries []types.LogEntry
+	err := s.locker.DoRead(ctx, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		firstIdx := types.Index(s.firstLogIndex.Load())
+		lastIdx := types.Index(s.lastLogIndex.Load())
+		clampedStart, clampedEnd, validRange := clampLogRange(start, end, firstIdx, lastIdx)
+		if !validRange {
+			s.logger.Debugw("Requested range is outside log bounds", "start", start, "end", end, "first", firstIdx, "last", lastIdx)
+			entries = []types.LogEntry{}
+			return nil
+		}
+
+		var err error
+		if s.options.Features.EnableIndexMap {
+			entries, err = s.getEntriesViaIndexMap(ctx, clampedStart, clampedEnd)
+		} else {
+			entries, err = s.getEntriesViaScan(ctx, clampedStart, clampedEnd)
+		}
+		return err
+	})
+
+	return entries, err
+}
+
+func (s *FileStorage) getEntriesViaIndexMap(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+	logPath := s.fileSystem.Path(s.dir, logFilename)
+	entries, totalBytes, err := s.indexSvc.ReadInRange(ctx, logPath, s.indexToOffsetMap, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("index map read failed: %w", err)
+	}
+	s.trackMetrics(len(entries), totalBytes)
+	s.logger.Debugw("Read entries via index map", "start", start, "end", end, "count", len(entries), "bytes", totalBytes)
+	return entries, nil
+}
+
+func (s *FileStorage) getEntriesViaScan(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+	logPath := s.fileSystem.Path(s.dir, logFilename)
+	file, err := s.fileSystem.Open(logPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to open log for scanning: %v", ErrStorageIO, err)
+	}
+	defer file.Close()
+
+	entries, err := s.logReader.ScanRange(ctx, file, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("scan range failed: %w", err)
+	}
+
+	estimatedSize := int64(len(entries)) * int64(lengthPrefixSize+maxEntrySizeBytes)
+	s.trackMetrics(len(entries), estimatedSize)
+	s.logger.Debugw("Scanned log for entries", "start", start, "end", end, "count", len(entries), "bytes", estimatedSize)
+
+	return entries, nil
 }
 
 // GetLogEntry returns the log entry at the given index.
@@ -550,7 +613,86 @@ func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index)
 //   - ErrEntryNotFound if the entry is missing or compacted.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
-	panic("not implemented")
+	var entry types.LogEntry
+	err := s.locker.DoRead(ctx, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		first := types.Index(s.firstLogIndex.Load())
+		last := types.Index(s.lastLogIndex.Load())
+
+		if index < first || index > last {
+			return ErrEntryNotFound
+		}
+
+		var err error
+		if s.options.Features.EnableIndexMap {
+			entry, err = s.getEntryViaIndexMap(ctx, index)
+		} else {
+			entry, err = s.getEntryViaScan(ctx, index)
+		}
+		return err
+	})
+
+	return entry, err
+}
+
+func (s *FileStorage) getEntryViaIndexMap(ctx context.Context, index types.Index) (types.LogEntry, error) {
+	logPath := s.fileSystem.Path(s.dir, logFilename)
+	entries, totalBytes, err := s.indexSvc.ReadInRange(ctx, logPath, s.indexToOffsetMap, index, index+1)
+	if err != nil {
+		return types.LogEntry{}, fmt.Errorf("index map lookup failed: %w", err)
+	}
+	if len(entries) != 1 {
+		return types.LogEntry{}, ErrEntryNotFound
+	}
+	s.trackMetrics(1, totalBytes)
+	s.logger.Debugw("Read entry via index map", "index", index, "bytes", totalBytes)
+	return entries[0], nil
+}
+
+func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (types.LogEntry, error) {
+	logPath := s.fileSystem.Path(s.dir, logFilename)
+	file, err := s.fileSystem.Open(logPath)
+	if err != nil {
+		return types.LogEntry{}, fmt.Errorf("%w: could not open log file: %v", ErrStorageIO, err)
+	}
+	defer file.Close()
+
+	s.logger.Debugw("Scanning log for single entry", "index", index)
+
+	var (
+		totalBytes     int64
+		entriesScanned int
+	)
+
+	for {
+		entry, n, err := s.logReader.ReadNext(file)
+		totalBytes += n
+		entriesScanned++
+
+		switch {
+		case err == io.EOF:
+			s.trackMetrics(0, totalBytes)
+			s.logger.Debugw("Entry not found", "index", index, "bytesScanned", totalBytes, "entriesScanned", entriesScanned)
+			return types.LogEntry{}, ErrEntryNotFound
+
+		case err != nil:
+			s.logger.Warnw("Error reading log entry", "index", index, "error", err)
+			return types.LogEntry{}, fmt.Errorf("log scan error: %w", err)
+
+		case entry.Index == index:
+			s.trackMetrics(1, totalBytes)
+			s.logger.Debugw("Entry found", "index", index, "bytesScanned", totalBytes, "entriesScanned", entriesScanned)
+			return entry, nil
+
+		case entry.Index > index:
+			s.trackMetrics(0, totalBytes)
+			s.logger.Debugw("Entry index exceeded", "index", index, "bytesScanned", totalBytes, "entriesScanned", entriesScanned)
+			return types.LogEntry{}, ErrEntryNotFound
+		}
+	}
 }
 
 // TruncateLogSuffix deletes all log entries with indices >= the given index.
@@ -669,4 +811,11 @@ func (s *FileStorage) rollbackInMemoryState(previousLast types.Index, isFirstIni
 // If N exceeds the map size, the map is cleared entirely.
 func (s *FileStorage) rollbackIndexMapState(count int) {
 	s.indexToOffsetMap = s.indexSvc.TruncateLast(s.indexToOffsetMap, count)
+}
+
+func (fs *FileStorage) trackMetrics(count int, bytes int64) {
+	if fs.options.Features.EnableMetrics {
+		fs.metrics.readOps.Add(1)
+		fs.metrics.readBytes.Add(uint64(bytes))
+	}
 }

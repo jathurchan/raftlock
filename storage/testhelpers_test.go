@@ -2,8 +2,10 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -463,7 +465,7 @@ func (m *mockLogEntryReader) AddEntry(entry types.LogEntry, bytes int64) {
 func (m *mockLogEntryReader) AddError(err error, bytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// Add a dummy entry, it won't be used when error is non-nil
+
 	m.entries = append(m.entries, types.LogEntry{})
 	m.bytesRead = append(m.bytesRead, bytes)
 	m.readErrors = append(m.readErrors, err)
@@ -474,7 +476,6 @@ func (m *mockLogEntryReader) ReadNext(f file) (types.LogEntry, int64, error) {
 	defer m.mu.Unlock()
 
 	if m.readCallIdx >= len(m.entries) {
-		// If we've exhausted programmed entries/errors, assume EOF
 		return types.LogEntry{}, 0, io.EOF
 	}
 
@@ -484,13 +485,45 @@ func (m *mockLogEntryReader) ReadNext(f file) (types.LogEntry, int64, error) {
 
 	m.readCallIdx++
 
-	// If we return an actual error (not nil, not EOF), the entry data is usually ignored by caller
 	if err != nil && err != io.EOF {
 		return types.LogEntry{}, bytes, err
 	}
 
-	// Return the programmed entry/EOF
 	return entry, bytes, err
+}
+
+func (m *mockLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if offset < 0 || int(offset) >= len(m.entries) {
+		return types.LogEntry{}, 0, io.EOF
+	}
+
+	entry := m.entries[offset]
+	if expectedIndex != 0 && entry.Index != expectedIndex {
+		return types.LogEntry{}, m.bytesRead[offset], fmt.Errorf("%w: index mismatch (expected %d, got %d)", ErrCorruptedLog, expectedIndex, entry.Index)
+	}
+
+	return entry, m.bytesRead[offset], m.readErrors[offset]
+}
+
+func (m *mockLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []types.LogEntry
+	for _, entry := range m.entries {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		if entry.Index >= start && entry.Index < end {
+			result = append(result, entry)
+		}
+	}
+
+	return result, nil
 }
 
 func createTestData(entryData []byte, prefixSize int) []byte {
@@ -505,6 +538,10 @@ type mockIndexService struct {
 
 func (m *mockIndexService) Build(logPath string) (buildResult, error) {
 	panic("mockIndexService.Build not implemented")
+}
+
+func (m *mockIndexService) ReadInRange(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
+	panic("mockIndexService.ReadInRange not implemented")
 }
 
 func (m *mockIndexService) VerifyConsistency(indexMap []types.IndexOffsetPair) error {
