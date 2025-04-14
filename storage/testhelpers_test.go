@@ -560,6 +560,18 @@ func (m *mockIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count 
 	panic("mockIndexService.TruncateLastEntries not implemented")
 }
 
+func (m *mockIndexService) FindFirstIndexAtOrAfter(indexMap []types.IndexOffsetPair, target types.Index) int {
+	panic("mockIndexService.FindFirstIndexAtOrAfter not implemented")
+}
+
+func (m *mockIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+	panic("mockIndexService.TruncateAfter not implemented")
+}
+
+func (m *mockIndexService) TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+	panic("mockIndexService.TruncateBefore not implemented")
+}
+
 type mockMetadataService struct {
 	loadError        error
 	saveError        error

@@ -54,6 +54,22 @@ type indexService interface {
 	// If count is zero or less, the original map is returned.
 	// If count is greater than or equal to the length of the map, an empty slice is returned.
 	TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair
+
+	// FindFirstIndexAtOrAfter returns the index of the first entry in the index map
+	// whose log index is greater than or equal to the specified target.
+	// If all entries are less than the target, it returns len(indexMap).
+	// This is typically used for truncation and range scanning.
+	//
+	// The returned value can be used to slice or seek into the index map safely.
+	FindFirstIndexAtOrAfter(indexMap []types.IndexOffsetPair, target types.Index) int
+
+	// TruncateAfter returns a slice of the indexMap with all entries AFTER the specified index removed.
+	// Keeps entries with Index <= target.
+	TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair
+
+	// TruncateBefore returns a slice of the indexMap with all entries BEFORE the specified index removed.
+	// Keeps entries with Index >= target.
+	TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair
 }
 
 // defaultIndexService provides a filesystem-backed implementation of indexService.
@@ -404,4 +420,42 @@ func (s *defaultIndexService) TruncateLast(indexMap []types.IndexOffsetPair, cou
 	newLen := len(indexMap) - count
 	s.logger.Debugw("Truncating last entries", "originalLen", len(indexMap), "newLen", newLen)
 	return indexMap[:newLen]
+}
+
+// FindFirstIndexAtOrAfter performs a binary search on the provided index map,
+// returning the position of the first log index that is >= the target index.
+// If no such index exists, it returns len(indexMap). This is useful for truncation
+// operations, range lookups, and efficient seeking within the log.
+//
+// Example:
+//
+//	map = [{Index: 5}, {Index: 7}, {Index: 9}]
+//	target = 6 -> returns 1 (index 7)
+//	target = 10 -> returns 3 (past end)
+func (s *defaultIndexService) FindFirstIndexAtOrAfter(indexMap []types.IndexOffsetPair, target types.Index) int {
+	return sort.Search(len(indexMap), func(i int) bool {
+		return indexMap[i].Index >= target
+	})
+}
+
+func (s *defaultIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+	if len(indexMap) == 0 {
+		return nil
+	}
+	pos := sort.Search(len(indexMap), func(i int) bool {
+		return indexMap[i].Index > target
+	})
+	s.logger.Debugw("Truncating after index", "target", target, "originalLen", len(indexMap), "newLen", pos)
+	return indexMap[:pos]
+}
+
+func (s *defaultIndexService) TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+	if len(indexMap) == 0 {
+		return nil
+	}
+	pos := sort.Search(len(indexMap), func(i int) bool {
+		return indexMap[i].Index >= target
+	})
+	s.logger.Debugw("Truncating before index", "target", target, "originalLen", len(indexMap), "newLen", len(indexMap)-pos)
+	return indexMap[pos:]
 }
