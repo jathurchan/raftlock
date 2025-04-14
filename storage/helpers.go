@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/types"
 )
 
@@ -47,4 +48,30 @@ func clampLogRange(start, end, first, last types.Index) (types.Index, types.Inde
 		return 0, 0, false
 	}
 	return start, end, true
+}
+
+// FailAndRollback handles error cleanup by truncating the file at the given offset.
+// It logs a warning and returns a wrapped error with context.
+func FailAndRollback(
+	f file,
+	fs fileSystem,
+	path string,
+	startOffset int64,
+	log logger.Logger,
+	context string,
+	format string,
+	args ...any,
+) error {
+	_ = f.Close()
+
+	err := fs.Truncate(path, startOffset)
+	if err != nil {
+		log.Errorw("Rollback failed during truncate", "offset", startOffset, "error", err)
+	} else {
+		log.Warnw("Rollback performed to offset", "offset", startOffset)
+	}
+
+	wrapped := fmt.Errorf(format, args...)
+	log.Warnw(fmt.Sprintf("Failure during %s: %v (rollback to offset %d)", context, wrapped, startOffset))
+	return wrapped
 }

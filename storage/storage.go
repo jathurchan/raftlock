@@ -68,6 +68,7 @@ type FileStorage struct {
 	serializer  serializer
 	logAppender logAppender
 	logReader   logEntryReader
+	logRewriter logRewriter
 	locker      rwOperationLocker
 	indexSvc    indexService
 	metadataSvc metadataService
@@ -114,20 +115,22 @@ func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, lo
 
 	fileSystem := newFileSystem()
 	serializer := getSerializer(options.Features.EnableBinaryFormat)
+	writer := newLogWriter(serializer, logger)
 	logReader := newLogEntryReader(maxEntrySizeBytes, lengthPrefixSize, serializer, logger)
 	logAppender := newLogAppender(
 		fileSystem.Path(cfg.Dir, logFilename),
 		fileSystem,
-		serializer,
+		writer,
 		logger,
 		options.SyncOnAppend,
 	)
+	logRewriter := newLogRewriter(fileSystem.Path(cfg.Dir, logFilename), fileSystem, serializer, logger)
 	indexService := newIndexServiceWithReader(fileSystem, logReader, logger)
 	metadataService := newMetadataServiceWithDeps(fileSystem, serializer, indexService, logger)
 	systemInfo := NewSystemInfo()
 	recoveryService := newRecoveryService(fileSystem, serializer, logger, cfg.Dir, normalMode, indexService, metadataService, systemInfo)
 
-	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, logAppender, logReader, indexService, metadataService, recoveryService, logger)
+	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, logAppender, logReader, logRewriter, indexService, metadataService, recoveryService, logger)
 }
 
 func getSerializer(enableBinary bool) serializer {
@@ -144,6 +147,7 @@ func newFileStorageWithDeps(
 	serializer serializer,
 	logAppender logAppender,
 	logReader logEntryReader,
+	logRewriter logRewriter,
 	indexService indexService,
 	metadataService metadataService,
 	recoveryService recoveryService,
@@ -162,6 +166,7 @@ func newFileStorageWithDeps(
 		serializer:  serializer,
 		logAppender: logAppender,
 		logReader:   logReader,
+		logRewriter: logRewriter,
 		indexSvc:    indexService,
 		metadataSvc: metadataService,
 		recoverySvc: recoveryService,
@@ -311,8 +316,8 @@ func (s *FileStorage) loadMetadataLocked() error {
 // saveMetadataLocked assumes s.logMu is already held
 func (s *FileStorage) saveMetadataLocked() error {
 	metadata := logMetadata{
-		FirstIndex: types.Index(s.firstLogIndex.Load()),
-		LastIndex:  types.Index(s.lastLogIndex.Load()),
+		FirstIndex: s.FirstLogIndex(),
+		LastIndex:  s.LastLogIndex(),
 	}
 
 	metadataPath := s.fileSystem.Path(s.dir, metadataFilename)
@@ -361,9 +366,8 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 	if !s.options.Features.EnableIndexMap {
 		return nil // Skip if feature disabled
 	}
-
-	currentFirst := types.Index(s.firstLogIndex.Load())
-	currentLast := types.Index(s.lastLogIndex.Load())
+	currentFirst := s.FirstLogIndex()
+	currentLast := s.LastLogIndex()
 
 	metadataPath := s.fileSystem.Path(s.dir, metadataFilename)
 
@@ -555,8 +559,8 @@ func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index)
 			return err
 		}
 
-		firstIdx := types.Index(s.firstLogIndex.Load())
-		lastIdx := types.Index(s.lastLogIndex.Load())
+		firstIdx := s.FirstLogIndex()
+		lastIdx := s.LastLogIndex()
 		clampedStart, clampedEnd, validRange := clampLogRange(start, end, firstIdx, lastIdx)
 		if !validRange {
 			s.logger.Debugw("Requested range is outside log bounds", "start", start, "end", end, "first", firstIdx, "last", lastIdx)
@@ -619,8 +623,8 @@ func (s *FileStorage) GetLogEntry(ctx context.Context, index types.Index) (types
 			return err
 		}
 
-		first := types.Index(s.firstLogIndex.Load())
-		last := types.Index(s.lastLogIndex.Load())
+		first := s.FirstLogIndex()
+		last := s.LastLogIndex()
 
 		if index < first || index > last {
 			return ErrEntryNotFound
@@ -702,8 +706,30 @@ func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (t
 //   - ErrIndexOutOfRange if the index is beyond the last log index.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) error {
-	// TODO: Call updateLogBounds() during a truncate
-	panic("not implemented")
+	return s.locker.DoWrite(ctx, func() error {
+		first := s.FirstLogIndex()
+		last := s.LastLogIndex()
+
+		if index > last+1 {
+			return fmt.Errorf("%w: truncate suffix index %d beyond last log index %d", ErrIndexOutOfRange, index, last)
+		}
+		if index <= first {
+			// Entire log will be truncated
+			return s.truncateLogRange(ctx, 0, 0)
+		}
+
+		err := s.truncateLogRange(ctx, first, index)
+		if err != nil {
+			return err
+		}
+
+		if s.options.Features.EnableIndexMap {
+			s.indexToOffsetMap = s.indexSvc.TruncateAfter(s.indexToOffsetMap, index-1)
+		}
+
+		s.metrics.truncateSuffixOps.Add(1)
+		return nil
+	})
 }
 
 // TruncateLogPrefix deletes all log entries with indices < the given index.
@@ -713,9 +739,71 @@ func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) 
 //   - ErrIndexOutOfRange if the index is less than the first log index.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) TruncateLogPrefix(ctx context.Context, index types.Index) error {
-	// TODO: Trim indexToOffsetMap during TruncateLogPrefix to prevent unbounded growth.
-	// TODO: Call updateLogBounds() during a truncate
-	panic("not implemented")
+	return s.locker.DoWrite(ctx, func() error {
+		first := s.FirstLogIndex()
+		last := s.LastLogIndex()
+
+		if index <= first {
+			return nil // Nothing to truncate
+		}
+		if index > last+1 {
+			return fmt.Errorf("%w: truncate prefix index %d beyond last log index %d", ErrIndexOutOfRange, index, last)
+		}
+
+		err := s.truncateLogRange(ctx, index, last+1)
+		if err != nil {
+			return err
+		}
+
+		if s.options.Features.EnableIndexMap {
+			s.indexToOffsetMap = s.indexSvc.TruncateBefore(s.indexToOffsetMap, index)
+		}
+
+		s.metrics.truncatePrefixOps.Add(1)
+		return nil
+	})
+}
+
+func (s *FileStorage) truncateLogRange(ctx context.Context, keepStart, keepEnd types.Index) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	entries, err := s.GetLogEntries(ctx, keepStart, keepEnd)
+	if err != nil {
+		return fmt.Errorf("failed to load log entries for truncation: %w", err)
+	}
+	offsets, err := s.logRewriter.Rewrite(ctx, entries)
+	if err != nil {
+		return fmt.Errorf("failed to rewrite log file: %w", err)
+	}
+
+	if len(entries) == 0 {
+		s.setInMemoryLogBoundsLocked(0, 0)
+		s.indexToOffsetMap = nil
+	} else {
+		first := entries[0].Index
+		last := entries[len(entries)-1].Index
+		s.setInMemoryLogBoundsLocked(first, last)
+
+		if s.options.Features.EnableIndexMap {
+			s.indexToOffsetMap = offsets
+		}
+	}
+
+	if err := s.saveMetadataLocked(); err != nil {
+		return fmt.Errorf("truncate succeeded but failed to save metadata: %w", err)
+	}
+
+	s.logger.Infow("Log truncated",
+		"keepStart", keepStart,
+		"keepEnd", keepEnd,
+		"newFirst", s.FirstLogIndex(),
+		"newLast", s.LastLogIndex(),
+		"entryCount", len(entries),
+	)
+
+	return nil
 }
 
 // SaveSnapshot persists a snapshot and its metadata atomically.
@@ -768,7 +856,7 @@ func (s *FileStorage) setInMemoryLogBoundsLocked(first, last types.Index) {
 // maybeInitInMemoryLogBoundsLocked sets the in-memory log bounds if the first index is unset (zero).
 // It assumes s.logMu is already held and that range was validated using ValidateMetadataRange.
 func (s *FileStorage) maybeInitInMemoryLogBoundsLocked(first, last types.Index) {
-	currentFirst := types.Index(s.firstLogIndex.Load())
+	currentFirst := s.FirstLogIndex()
 	if currentFirst == 0 {
 		s.firstLogIndex.Store(uint64(first))
 	}
