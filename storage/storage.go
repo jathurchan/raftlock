@@ -108,7 +108,6 @@ func NewFileStorage(cfg StorageConfig, logger logger.Logger) (Storage, error) {
 
 // NewFileStorageWithOptions creates a new FileStorage with custom options.
 func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, logger logger.Logger) (Storage, error) {
-
 	if cfg.Dir == "" {
 		return nil, errors.New("storage directory must be specified")
 	}
@@ -672,6 +671,11 @@ func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (t
 	)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			s.logger.Warnw("Context cancelled during log scan", "index", index, "error", err)
+			return types.LogEntry{}, err
+		}
+
 		entry, n, err := s.logReader.ReadNext(file)
 		totalBytes += n
 		entriesScanned++
@@ -710,24 +714,31 @@ func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) 
 		first := s.FirstLogIndex()
 		last := s.LastLogIndex()
 
+		s.logger.Infow("Attempting to truncate log suffix", "index", index, "first", first, "last", last)
+
 		if index > last+1 {
-			return fmt.Errorf("%w: truncate suffix index %d beyond last log index %d", ErrIndexOutOfRange, index, last)
+			err := fmt.Errorf("%w: truncate suffix index %d beyond last log index %d", ErrIndexOutOfRange, index, last)
+			s.logger.Warnw("Truncate suffix index out of range", "error", err, "index", index, "last", last)
+			return err
 		}
 		if index <= first {
-			// Entire log will be truncated
+			s.logger.Infow("Truncating entire log (suffix)", "index", index, "first", first)
 			return s.truncateLogRange(ctx, 0, 0)
 		}
 
 		err := s.truncateLogRange(ctx, first, index)
 		if err != nil {
+			s.logger.Errorw("Failed to truncate log suffix", "error", err, "from", first, "to", index)
 			return err
 		}
 
 		if s.options.Features.EnableIndexMap {
 			s.indexToOffsetMap = s.indexSvc.TruncateAfter(s.indexToOffsetMap, index-1)
+			s.logger.Debugw("Truncated index-to-offset map after", "index", index-1)
 		}
 
 		s.metrics.truncateSuffixOps.Add(1)
+		s.logger.Infow("Successfully truncated log suffix", "newLast", index-1)
 		return nil
 	})
 }
@@ -743,20 +754,27 @@ func (s *FileStorage) TruncateLogPrefix(ctx context.Context, index types.Index) 
 		first := s.FirstLogIndex()
 		last := s.LastLogIndex()
 
+		s.logger.Infow("Attempting to truncate log prefix", "index", index, "first", first, "last", last)
+
 		if index <= first {
-			return nil // Nothing to truncate
+			s.logger.Debugw("No prefix truncation needed", "index", index, "first", first)
+			return nil
 		}
 		if index > last+1 {
-			return fmt.Errorf("%w: truncate prefix index %d beyond last log index %d", ErrIndexOutOfRange, index, last)
+			err := fmt.Errorf("%w: truncate prefix index %d beyond last log index %d", ErrIndexOutOfRange, index, last)
+			s.logger.Warnw("Truncate prefix index out of range", "error", err, "index", index, "last", last)
+			return err
 		}
 
 		err := s.truncateLogRange(ctx, index, last+1)
 		if err != nil {
+			s.logger.Errorw("Failed to truncate log prefix", "error", err, "from", index, "to", last+1)
 			return err
 		}
 
 		if s.options.Features.EnableIndexMap {
 			s.indexToOffsetMap = s.indexSvc.TruncateBefore(s.indexToOffsetMap, index)
+			s.logger.Debugw("Truncated index-to-offset map before", "index", index)
 		}
 
 		s.metrics.truncatePrefixOps.Add(1)
