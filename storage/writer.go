@@ -179,7 +179,7 @@ func (a *defaultLogAppender) Append(ctx context.Context, entries []types.LogEntr
 
 	offsets, _, err := a.writer.WriteEntriesToFile(ctx, file, startOffset, entries)
 	if err != nil {
-		a.failAndRollback(file, startOffset, "logWriter failed: %w", err)
+		a.failAndRollback(file, startOffset, ErrStorageIO, "logWriter failed")
 		return appendResult{}, err
 	}
 
@@ -234,19 +234,25 @@ func (a *defaultLogAppender) syncIfNeeded(f file, start int64) error {
 		return nil
 	}
 	if err := f.Sync(); err != nil {
-		return a.failAndRollback(f, start, "sync failed: %w", ErrStorageIO, err)
+		return a.failAndRollback(f, start, ErrStorageIO, "sync failed")
 	}
 	return nil
 }
 
 // failAndRollback truncates the file back to the start offset after failure.
-func (a *defaultLogAppender) failAndRollback(f file, start int64, format string, args ...any) error {
-	_ = f.Close()
-	err := a.fileSystem.Truncate(a.logFilePath, start)
-	if err != nil {
-		a.logger.Errorw("rollback failed during truncate",
+func (a *defaultLogAppender) failAndRollback(f file, start int64, cause error, msg string) error {
+	if err := f.Close(); err != nil {
+		a.logger.Errorw("failed to close file during rollback",
 			"offset", start,
 			"error", err,
+		)
+	}
+
+	truncErr := a.fileSystem.Truncate(a.logFilePath, start)
+	if truncErr != nil {
+		a.logger.Errorw("rollback failed during truncate",
+			"offset", start,
+			"error", truncErr,
 		)
 	} else {
 		a.logger.Warnw("rollback performed",
@@ -254,10 +260,10 @@ func (a *defaultLogAppender) failAndRollback(f file, start int64, format string,
 		)
 	}
 
-	msg := fmt.Sprintf("rollback to offset %d after failure: %s", start, fmt.Sprintf(format, args...))
-	a.logger.Warnw(msg)
+	fullMsg := fmt.Sprintf("rollback to offset %d after failure: %s", start, msg)
+	a.logger.Warnw(fullMsg)
 
-	return fmt.Errorf(format, args...)
+	return fmt.Errorf("%s: %w", fullMsg, cause)
 }
 
 // logRewriter defines an interface for replacing the entire log file with a new set of entries.
