@@ -1,5 +1,7 @@
 package storage
 
+import "time"
+
 // StorageFeatureFlags allows enabling/disabling specific optimizations
 type StorageFeatureFlags struct {
 	// EnableBinaryFormat uses efficient binary serialization instead of JSON
@@ -59,6 +61,10 @@ type FileStorageOptions struct {
 
 	// LockTimeout for lock acquisition in seconds
 	LockTimeout int
+
+	// TruncationTimeout specifies how long to wait for snapshot-triggered truncation.
+	// If zero, defaults to 30 seconds.
+	TruncationTimeout time.Duration
 }
 
 // DefaultFileStorageOptions returns optimal configuration values
