@@ -30,7 +30,6 @@ type fileSystem interface {
 	AtomicWrite(path string, data []byte, perm os.FileMode) error
 	WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error
 	AppendFile(name string) (file, error)
-	StatFunc             func(string) (os.FileInfo, error)
 }
 
 // file defines an interface for file-level operations.
