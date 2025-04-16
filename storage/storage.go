@@ -982,7 +982,42 @@ func (s *FileStorage) FirstLogIndex() types.Index {
 // Returns:
 //   - ErrStorageIO if cleanup fails.
 func (s *FileStorage) Close() error {
-	panic("not implemented")
+	currentStatus := s.status.Load().(storageStatus)
+	if currentStatus == storageStatusClosed {
+		s.logger.Warnw("Close called on already closed storage")
+		return nil
+	}
+
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
+
+	// Re-check status after acquiring locks to handle potential race conditions
+	// where status changed between the initial check and acquiring locks.
+	currentStatus = s.status.Load().(storageStatus)
+	if currentStatus == storageStatusClosed {
+		s.logger.Warnw("Storage was closed while acquiring locks for Close")
+		return nil
+	}
+
+	var closeErr error
+	if err := s.recoverySvc.RemoveRecoveryMarker(); err != nil {
+		s.logger.Errorw("Failed to remove recovery marker during close", "error", err)
+		closeErr = fmt.Errorf("%w: failed to remove recovery marker: %v", ErrStorageIO, err)
+	}
+
+	s.status.Store(storageStatusClosed)
+
+	s.logger.Infow("Storage closed",
+		"firstIndex", s.firstLogIndex.Load(),
+		"lastIndex", s.lastLogIndex.Load(),
+		"error", closeErr,
+	)
+
+	return closeErr
 }
 
 // setInMemoryLogBoundsLocked sets the in-memory first and last log indices atomically.
