@@ -12,6 +12,7 @@ type fileStatFunc func(name string) (os.FileInfo, error)
 // fileSystem defines an interface for file system operations.
 // It allows mocking during testing by abstracting underlying file I/O operations.
 type fileSystem interface {
+	Stat(name string) (os.FileInfo, error)
 	ReadFile(name string) ([]byte, error)
 	Open(name string) (file, error)
 	Exists(name string) (bool, error)
@@ -29,6 +30,7 @@ type fileSystem interface {
 	AtomicWrite(path string, data []byte, perm os.FileMode) error
 	WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error
 	AppendFile(name string) (file, error)
+	StatFunc             func(string) (os.FileInfo, error)
 }
 
 // file defines an interface for file-level operations.
@@ -62,6 +64,11 @@ func newFileSystemWithStat(stat fileStatFunc) fileSystem {
 	}
 	return defaultFileSystem{statFunc: stat}
 }
+
+func (fs defaultFileSystem) Stat(name string) (os.FileInfo, error) {
+	return fs.statFunc(name)
+}
+
 func (fs defaultFileSystem) Path(dirPath, name string) string { return fs.Join(dirPath, name) }
 func (fs defaultFileSystem) TempPath(path string) string {
 	return path + tmpSuffix

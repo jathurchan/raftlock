@@ -115,12 +115,20 @@ type mockFileSystem struct {
 	AtomicWriteFunc      func(path string, data []byte, perm os.FileMode) error
 	WriteMaybeAtomicFunc func(path string, data []byte, perm os.FileMode, atomic bool) error
 	AppendFileFunc       func(name string) (file, error)
+	StatFunc             func(string) (os.FileInfo, error)
 }
 
 func newMockFileSystem() *mockFileSystem {
 	return &mockFileSystem{
 		files: make(map[string][]byte),
 	}
+}
+
+func (mfs *mockFileSystem) Stat(name string) (os.FileInfo, error) {
+	if mfs.StatFunc != nil {
+		return mfs.StatFunc(name)
+	}
+	return nil, os.ErrNotExist
 }
 
 func (mfs *mockFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error {

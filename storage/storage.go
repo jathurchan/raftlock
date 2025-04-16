@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/types"
@@ -64,15 +65,18 @@ type FileStorage struct {
 	//   - storageStatusClosed
 	status atomic.Value // stores a storageStatus
 
-	fileSystem  fileSystem
-	serializer  serializer
-	logAppender logAppender
-	logReader   logEntryReader
-	logRewriter logRewriter
-	locker      rwOperationLocker
-	indexSvc    indexService
-	metadataSvc metadataService
-	recoverySvc recoveryService
+	fileSystem     fileSystem
+	serializer     serializer
+	logAppender    logAppender
+	logReader      logEntryReader
+	logRewriter    logRewriter
+	snapshotWriter snapshotWriter
+	snapshotReader snapshotReader
+	logLocker      rwOperationLocker
+	snapshotLocker rwOperationLocker
+	indexSvc       indexService
+	metadataSvc    metadataService
+	recoverySvc    recoveryService
 
 	// logger is the structured logger used for logging storage operations and events.
 	logger logger.Logger
@@ -172,11 +176,42 @@ func newFileStorageWithDeps(
 		logger:      logger,
 	}
 
-	s.locker = newRWOperationLocker(
+	s.logLocker = newRWOperationLocker(
 		&s.logMu,
 		logger,
 		options,
 		&s.metrics.slowOperations,
+	)
+
+	s.snapshotLocker = newRWOperationLocker(
+		&s.snapshotMu,
+		logger,
+		options,
+		&s.metrics.slowOperations,
+	)
+
+	s.snapshotWriter = newSnapshotWriter(
+		fileSystem,
+		serializer,
+		logger,
+		cfg.Dir,
+		&snapshotWriteHooks{
+			OnTempFilesWritten: func() {
+				_ = s.recoverySvc.UpdateSnapshotMarkerStatus("files_written")
+			},
+			OnMetadataCommitted: func() {
+				_ = s.recoverySvc.UpdateSnapshotMarkerStatus("meta_committed")
+			},
+		},
+		options.Features.EnableChunkedIO,
+		options.ChunkSize,
+	)
+
+	s.snapshotReader = newSnapshotReader(
+		fileSystem,
+		serializer,
+		logger,
+		cfg.Dir,
 	)
 
 	s.status.Store(storageStatusInitializing)
@@ -476,7 +511,7 @@ func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState
 func (s *FileStorage) AppendLogEntries(ctx context.Context, entries []types.LogEntry) error {
 	currentLastIndex := types.Index(s.lastLogIndex.Load())
 
-	return s.locker.DoWrite(ctx, func() error {
+	return s.logLocker.DoWrite(ctx, func() error {
 		result, err := s.logAppender.Append(ctx, entries, currentLastIndex)
 		if err != nil {
 			s.logger.Warnw("Failed to append log entries",
@@ -553,7 +588,7 @@ func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index)
 	}
 
 	var entries []types.LogEntry
-	err := s.locker.DoRead(ctx, func() error {
+	err := s.logLocker.DoRead(ctx, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -617,7 +652,7 @@ func (s *FileStorage) getEntriesViaScan(ctx context.Context, start, end types.In
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
 	var entry types.LogEntry
-	err := s.locker.DoRead(ctx, func() error {
+	err := s.logLocker.DoRead(ctx, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -710,7 +745,7 @@ func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (t
 //   - ErrIndexOutOfRange if the index is beyond the last log index.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) error {
-	return s.locker.DoWrite(ctx, func() error {
+	return s.logLocker.DoWrite(ctx, func() error {
 		first := s.FirstLogIndex()
 		last := s.LastLogIndex()
 
@@ -750,7 +785,7 @@ func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) 
 //   - ErrIndexOutOfRange if the index is less than the first log index.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) TruncateLogPrefix(ctx context.Context, index types.Index) error {
-	return s.locker.DoWrite(ctx, func() error {
+	return s.logLocker.DoWrite(ctx, func() error {
 		first := s.FirstLogIndex()
 		last := s.LastLogIndex()
 
@@ -831,7 +866,77 @@ func (s *FileStorage) truncateLogRange(ctx context.Context, keepStart, keepEnd t
 //   - ErrStorageIO on failure to persist the snapshot.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
-	panic("not implemented")
+	return s.snapshotLocker.DoWrite(ctx, func() error {
+		s.logger.Infow("Saving snapshot",
+			"lastIndex", metadata.LastIncludedIndex,
+			"lastTerm", metadata.LastIncludedTerm,
+			"size", len(data),
+		)
+
+		if err := s.recoverySvc.CreateSnapshotRecoveryMarker(metadata); err != nil {
+			return err
+		}
+		defer s.recoverySvc.RemoveSnapshotRecoveryMarker()
+
+		if err := s.snapshotWriter.Write(ctx, metadata, data); err != nil {
+			return err
+		}
+
+		s.metrics.snapshotSaveOps.Add(1)
+		s.maybeTruncateAfterSnapshot(ctx, metadata)
+		return nil
+	})
+}
+
+// maybeTruncateAfterSnapshot performs log prefix truncation after a snapshot is saved.
+// If AutoTruncateOnSnapshot is disabled, no truncation is performed.
+// If enabled, truncation is done either asynchronously or synchronously depending
+// on the EnableAsyncTruncation feature flag.
+//
+// This helps reduce log size and supports faster recovery while keeping the truncation
+// process non-blocking in most performance-sensitive environments.
+func (s *FileStorage) maybeTruncateAfterSnapshot(ctx context.Context, metadata types.SnapshotMetadata) {
+	if !s.options.AutoTruncateOnSnapshot {
+		return
+	}
+	if s.options.Features.EnableAsyncTruncation {
+		s.asyncTruncateLogPrefixFromSnapshot(metadata)
+	} else {
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, s.getTruncationTimeout())
+		defer cancel()
+
+		if err := s.TruncateLogPrefix(ctxWithTimeout, metadata.LastIncludedIndex+1); err != nil {
+			s.logger.Warnw("Synchronous log truncation after snapshot failed", "error", err)
+		}
+	}
+}
+
+// asyncTruncateLogPrefixFromSnapshot launches a background goroutine to truncate
+// the Raft log prefix based on the snapshot metadata. It uses a timeout defined
+// by TruncationTimeout in the storage options, defaulting to 30 seconds if unset.
+func (s *FileStorage) asyncTruncateLogPrefixFromSnapshot(metadata types.SnapshotMetadata) {
+	go func() {
+		timeout := s.options.TruncationTimeout
+		if timeout == 0 {
+			timeout = 30 * time.Second
+		}
+
+		tCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		if err := s.TruncateLogPrefix(tCtx, metadata.LastIncludedIndex+1); err != nil {
+			s.logger.Warnw("Async log truncation failed", "error", err)
+		}
+	}()
+}
+
+// getTruncationTimeout returns the configured timeout duration for log truncation
+// after a snapshot. If no custom timeout is specified, it defaults to 30 seconds.
+func (s *FileStorage) getTruncationTimeout() time.Duration {
+	if s.options.TruncationTimeout > 0 {
+		return s.options.TruncationTimeout
+	}
+	return 30 * time.Second
 }
 
 // LoadSnapshot retrieves the latest snapshot and its metadata.
@@ -841,7 +946,23 @@ func (s *FileStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotM
 //   - ErrCorruptedSnapshot if the snapshot is unreadable or invalid.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
-	panic("not implemented")
+	var metadata types.SnapshotMetadata
+	var data []byte
+
+	err := s.snapshotLocker.DoRead(ctx, func() error {
+		m, d, err := s.snapshotReader.Read(ctx)
+		if err != nil {
+			return err
+		}
+		metadata = m
+		data = d
+
+		s.metrics.snapshotLoadOps.Add(1)
+		s.metrics.readBytes.Add(uint64(len(data)))
+		return nil
+	})
+
+	return metadata, data, err
 }
 
 // LastLogIndex returns the highest index currently stored in the log.

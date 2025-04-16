@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jathurchan/raftlock/logger"
+	"github.com/jathurchan/raftlock/types"
 )
 
 // recoveryMode defines the level of strictness to apply during recovery.
@@ -21,6 +22,19 @@ const (
 	// aggressiveMode prioritizes availability, tolerating some data loss.
 	aggressiveMode
 )
+
+func (m recoveryMode) String() string {
+	switch m {
+	case conservativeMode:
+		return "conservative"
+	case normalMode:
+		return "normal"
+	case aggressiveMode:
+		return "aggressive"
+	default:
+		return "unknown"
+	}
+}
 
 // snapshotRecoveryState defines possible states during snapshot recovery.
 type snapshotRecoveryState int
@@ -39,6 +53,9 @@ type recoveryService interface {
 	CreateRecoveryMarker() error
 	CleanupTempFiles() error
 	RemoveRecoveryMarker() error
+	CreateSnapshotRecoveryMarker(metadata types.SnapshotMetadata) error
+	UpdateSnapshotMarkerStatus(status string) error
+	RemoveSnapshotRecoveryMarker() error
 }
 
 // defaultRecoveryService is the default implementation of recoveryService.
@@ -103,9 +120,11 @@ func (r *defaultRecoveryService) CheckForRecoveryMarkers() (bool, error) {
 // PerformRecovery orchestrates all necessary recovery operations.
 func (r *defaultRecoveryService) PerformRecovery() error {
 	if err := r.recoverFromSnapshotOperation(); err != nil {
+		r.logger.Errorw("Snapshot recovery failed", "error", err)
 		return fmt.Errorf("snapshot recovery failed: %w", err)
 	}
 	if err := r.checkAndRepairConsistency(); err != nil {
+		r.logger.Errorw("Consistency repair failed", "error", err)
 		return fmt.Errorf("consistency repair failed: %w", err)
 	}
 	r.logger.Infow("Recovery completed successfully")
@@ -234,6 +253,15 @@ func (r *defaultRecoveryService) completeSnapshotDataCommit() error {
 	tmpData := r.tmpPath(dataFile)
 
 	if err := r.fs.Rename(tmpData, dataFile); err != nil {
+		if r.mode == normalMode {
+			removeErr := r.fs.Remove(metaFile)
+			if removeErr != nil {
+				r.logger.Errorw("Failed to rollback metadata after data commit failure", "metadataFile", metaFile, "error", removeErr)
+				return fmt.Errorf("%w: failed to complete snapshot commit and rollback metadata: data rename error (%v), metadata rollback error (%v)", ErrStorageIO, err, removeErr)
+			}
+			r.logger.Warnw("Rolled back metadata due to failed data commit (normal mode)")
+			return fmt.Errorf("%w: failed to complete snapshot commit: %w", ErrStorageIO, err)
+		}
 		if r.mode == aggressiveMode {
 			_ = r.fs.Remove(metaFile)
 			r.logger.Warnw("Removed metadata due to failed data commit (aggressive mode)")
@@ -336,4 +364,42 @@ func (r *defaultRecoveryService) CleanupTempFiles() error {
 // RemoveRecoveryMarker deletes the recovery marker file.
 func (r *defaultRecoveryService) RemoveRecoveryMarker() error {
 	return r.fs.Remove(r.path(recoveryMarkerFilename))
+}
+
+// CreateSnapshotRecoveryMarker writes a snapshot marker for crash recovery purposes.
+func (r *defaultRecoveryService) CreateSnapshotRecoveryMarker(metadata types.SnapshotMetadata) error {
+	markerPath := r.path(snapshotMarkerFilename)
+	markerData := fmt.Sprintf(
+		"pid=%d,time=%d,last_idx=%d,last_term=%d",
+		r.proc.PID(),
+		r.proc.NowUnixMilli(),
+		metadata.LastIncludedIndex,
+		metadata.LastIncludedTerm,
+	)
+	if err := r.fs.WriteFile(markerPath, []byte(markerData), ownRWOthR); err != nil {
+		return fmt.Errorf("%w: failed to write snapshot marker: %v", ErrStorageIO, err)
+	}
+	return nil
+}
+
+// UpdateSnapshotMarkerStatus appends status information to the snapshot marker file.
+func (r *defaultRecoveryService) UpdateSnapshotMarkerStatus(status string) error {
+	markerPath := r.path(snapshotMarkerFilename)
+
+	data, err := r.fs.ReadFile(markerPath)
+	if err != nil {
+		return fmt.Errorf("%w: failed to read snapshot marker: %v", ErrStorageIO, err)
+	}
+
+	updated := string(data) + "," + status
+	if err := r.fs.WriteFile(markerPath, []byte(updated), ownRWOthR); err != nil {
+		return fmt.Errorf("%w: failed to update snapshot marker: %v", ErrStorageIO, err)
+	}
+
+	return nil
+}
+
+// RemoveSnapshotRecoveryMarker deletes the snapshot marker file.
+func (r *defaultRecoveryService) RemoveSnapshotRecoveryMarker() error {
+	return r.fs.Remove(r.path(snapshotMarkerFilename))
 }
