@@ -11,12 +11,19 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-// logEntryReader defines the interface for reading and decoding log entries
-// from a binary stream such as a Raft log file. It returns the parsed entry,
-// number of bytes read, or an error.
+// logEntryReader abstracts reading and decoding Raft log entries
+// from a binary stream (e.g., a log file).
 type logEntryReader interface {
+	// ReadNext reads the next complete log entry from the current file offset.
+	// Returns the parsed entry, number of bytes read, or an error (including io.EOF).
 	ReadNext(file file) (types.LogEntry, int64, error)
+
+	// ReadAtOffset seeks to a specific offset and reads a single log entry.
+	// Optionally verifies the entry index against expectedIndex (if non-zero).
 	ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error)
+
+	// ScanRange reads all entries within [start, end) index range.
+	// Returns an error if the context is canceled or if reading fails.
 	ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error)
 }
 
@@ -90,6 +97,13 @@ func (r *defaultLogEntryReader) ReadNext(file file) (types.LogEntry, int64, erro
 	return entry, bytesRead, nil
 }
 
+// ReadAtOffset seeks to the given offset and reads a log entry.
+// If expectedIndex is non-zero, it verifies the entry’s index.
+//
+// Returns:
+//   - Parsed LogEntry
+//   - Total bytes read
+//   - Error (including index mismatch or deserialization failure)
 func (r *defaultLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error) {
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return types.LogEntry{}, 0, fmt.Errorf("%w: failed to seek to offset: %v", ErrStorageIO, err)
@@ -107,18 +121,22 @@ func (r *defaultLogEntryReader) ReadAtOffset(file file, offset int64, expectedIn
 	return entry, bytesRead, nil
 }
 
+// ScanRange reads log entries from the file sequentially,
+// returning only those within the [start, end) index range.
+// Stops reading on EOF or when an entry exceeds the end index.
 func (r *defaultLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
-	var (
-		entries    []types.LogEntry
-		totalBytes int64
-	)
+	if start >= end {
+		return []types.LogEntry{}, nil
+	}
+
+	entries := []types.LogEntry{}
 
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		entry, n, err := r.ReadNext(file)
+		entry, _, err := r.ReadNext(file)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -135,7 +153,6 @@ func (r *defaultLogEntryReader) ScanRange(ctx context.Context, file file, start,
 		}
 
 		entries = append(entries, entry)
-		totalBytes += n
 	}
 
 	return entries, nil
