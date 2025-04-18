@@ -54,7 +54,7 @@ func TestReadNext(t *testing.T) {
 				Reader: bytes.NewReader(createTestData(serializedTestEntry, testPrefixSize)),
 			},
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					if !bytes.Equal(data, serializedTestEntry) {
 						return types.LogEntry{}, errors.New("unexpected serialized data")
 					}
@@ -153,7 +153,7 @@ func TestReadNext(t *testing.T) {
 				Reader: bytes.NewReader(createTestData(serializedTestEntry, testPrefixSize)),
 			},
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					return types.LogEntry{}, errors.New("deserialization error")
 				},
 			},
@@ -223,7 +223,7 @@ func TestReadAtOffset(t *testing.T) {
 			expectedIndex: 10,
 			fileContents:  createTestData(serializedTestEntry, testPrefixSize),
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					return testEntry, nil
 				},
 			},
@@ -261,7 +261,7 @@ func TestReadAtOffset(t *testing.T) {
 			expectedIndex: 20, // Different from actual index (10)
 			fileContents:  createTestData(serializedTestEntry, testPrefixSize),
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					return testEntry, nil
 				},
 			},
@@ -276,7 +276,7 @@ func TestReadAtOffset(t *testing.T) {
 			expectedIndex: 0, // Should not check index
 			fileContents:  createTestData(serializedTestEntry, testPrefixSize),
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					return testEntry, nil
 				},
 			},
@@ -367,7 +367,7 @@ func TestScanRange(t *testing.T) {
 			start:        5,
 			end:          9,
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					switch {
 					case bytes.Equal(data, serializedEntry1):
 						return entry1, nil
@@ -392,7 +392,7 @@ func TestScanRange(t *testing.T) {
 			start:        6,
 			end:          8,
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					switch {
 					case bytes.Equal(data, serializedEntry1):
 						return entry1, nil
@@ -417,7 +417,7 @@ func TestScanRange(t *testing.T) {
 			start:        9,
 			end:          10,
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					// Return valid entries but with indices outside the requested range
 					if bytes.Equal(data, serializedEntry1) {
 						return entry1, nil // Index 5
@@ -442,7 +442,7 @@ func TestScanRange(t *testing.T) {
 			end:          9,
 			ctxTimeout:   1 * time.Nanosecond, // Extremely short timeout
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					time.Sleep(5 * time.Millisecond) // Ensure context expires
 					return types.LogEntry{}, nil
 				},
@@ -457,7 +457,7 @@ func TestScanRange(t *testing.T) {
 			start:        5,
 			end:          9,
 			serializer: &mockSerializer{
-				unmarshalFunc: func(data []byte) (types.LogEntry, error) {
+				unmarshalLogEntryFunc: func(data []byte) (types.LogEntry, error) {
 					return types.LogEntry{}, errors.New("deserialization error")
 				},
 			},

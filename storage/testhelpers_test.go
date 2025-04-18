@@ -47,6 +47,7 @@ type mockFile struct {
 	SyncFunc    func() error
 	ReadFunc    func([]byte) (int, error)
 	SeekFunc    func(int64, int) (int64, error)
+	CloseFunc   func() error
 }
 
 func (r *mockFile) Read(p []byte) (int, error) {
@@ -76,6 +77,9 @@ func (r *mockFile) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (r *mockFile) Close() error {
+	if r.CloseFunc != nil {
+		return r.CloseFunc()
+	}
 	return nil
 }
 
@@ -429,17 +433,25 @@ func (r *failingReader) Sync() error {
 }
 
 type mockSerializer struct {
-	unmarshalFunc       func([]byte) (types.LogEntry, error)
-	marshalMetadataFunc func(logMetadata) ([]byte, error)
-	calledWith          []byte
+	marshalLogEntryFunc   func(types.LogEntry) ([]byte, error)
+	unmarshalLogEntryFunc func([]byte) (types.LogEntry, error)
+	marshalMetadataFunc   func(logMetadata) ([]byte, error)
+	calledWith            []byte
+}
+
+func (m *mockSerializer) MarshalLogEntry(entry types.LogEntry) ([]byte, error) {
+	if m.marshalLogEntryFunc != nil {
+		return m.marshalLogEntryFunc(entry)
+	}
+	return nil, nil
 }
 
 func (m *mockSerializer) UnmarshalLogEntry(data []byte) (types.LogEntry, error) {
 	m.calledWith = data
-	if m.unmarshalFunc != nil {
-		return m.unmarshalFunc(data)
+	if m.unmarshalLogEntryFunc != nil {
+		return m.unmarshalLogEntryFunc(data)
 	}
-	return types.LogEntry{}, errors.New("mockSerializer: unmarshalFunc not set")
+	return types.LogEntry{}, errors.New("mockSerializer: unmarshalLogEntryFunc not set")
 }
 
 func (m *mockSerializer) MarshalMetadata(metadata logMetadata) ([]byte, error) {
@@ -450,15 +462,22 @@ func (m *mockSerializer) MarshalMetadata(metadata logMetadata) ([]byte, error) {
 }
 
 // All unused methods stubbed
-func (m *mockSerializer) MarshalLogEntry(types.LogEntry) ([]byte, error)     { return nil, nil }
-func (m *mockSerializer) UnmarshalMetadata([]byte) (logMetadata, error)      { return logMetadata{}, nil }
-func (m *mockSerializer) MarshalState(types.PersistentState) ([]byte, error) { return nil, nil }
+func (m *mockSerializer) UnmarshalMetadata([]byte) (logMetadata, error) {
+	return logMetadata{}, nil
+}
+
+func (m *mockSerializer) MarshalState(types.PersistentState) ([]byte, error) {
+	return nil, nil
+}
+
 func (m *mockSerializer) UnmarshalState([]byte) (types.PersistentState, error) {
 	return types.PersistentState{}, nil
 }
+
 func (m *mockSerializer) MarshalSnapshotMetadata(types.SnapshotMetadata) ([]byte, error) {
 	return nil, nil
 }
+
 func (m *mockSerializer) UnmarshalSnapshotMetadata([]byte) (types.SnapshotMetadata, error) {
 	return types.SnapshotMetadata{}, nil
 }
