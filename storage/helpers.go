@@ -142,19 +142,21 @@ func readChunks(ctx context.Context, file file, size int64, chunkSize int) ([]by
 		toRead := min(remaining, int64(chunkSize))
 
 		n, err := file.Read(data[bytesRead : bytesRead+toRead])
+		if n == 0 && err == nil {
+			return nil, fmt.Errorf("%w: read returned 0 bytes with no error", ErrCorruptedSnapshot)
+		}
 		if n > 0 {
 			bytesRead += int64(n)
 		}
 		if err != nil {
-			if err == io.EOF && bytesRead == size {
-				break
+			if err == io.EOF {
+				if bytesRead == size {
+					break
+				}
+				return nil, fmt.Errorf("%w: unexpected EOF before reading all data", ErrCorruptedSnapshot)
 			}
 			return nil, fmt.Errorf("%w: failed to read snapshot chunk", ErrStorageIO)
 		}
-	}
-
-	if bytesRead != size {
-		return nil, fmt.Errorf("%w: incomplete snapshot read (%d/%d bytes)", ErrCorruptedSnapshot, bytesRead, size)
 	}
 
 	return data, nil
