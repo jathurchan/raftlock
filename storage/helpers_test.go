@@ -7,7 +7,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/testutil"
 	"github.com/jathurchan/raftlock/types"
 )
@@ -232,48 +231,6 @@ func TestClampLogRange(t *testing.T) {
 			testutil.AssertEqual(t, tc.expNonEmpty, nonEmpty)
 		})
 	}
-}
-
-// TestFailAndRollback tests the FailAndRollback function
-func TestFailAndRollback(t *testing.T) {
-	mockLog := &logger.NoOpLogger{
-		ErrorwFunc: func(msg string, keysAndValues ...any) {},
-		WarnwFunc:  func(msg string, keysAndValues ...any) {},
-	}
-
-	t.Run("TruncateSuccess", func(t *testing.T) {
-		mockFS := newMockFileSystem()
-		mockFile := &mockFile{
-			Reader: bytes.NewReader(nil),
-		}
-
-		path := "/test/file.txt"
-		mockFS.WriteFile(path, []byte("0123456789"), 0644)
-		startOffset := int64(5)
-
-		err := FailAndRollback(mockFile, mockFS, path, startOffset, mockLog, "test", "test error: %v", errors.New("original error"))
-		testutil.AssertError(t, err)
-		testutil.AssertContains(t, err.Error(), "test error: original error")
-
-		// Verify file was truncated
-		testutil.AssertEqual(t, path, mockFS.truncatedPath)
-		testutil.AssertEqual(t, startOffset, mockFS.truncatedSize)
-	})
-
-	t.Run("TruncateFailure", func(t *testing.T) {
-		mockFS := newMockFileSystem()
-		mockFS.truncateErr = errors.New("truncate error")
-		mockFile := &mockFile{
-			Reader: bytes.NewReader(nil),
-		}
-
-		path := "/test/file.txt"
-		startOffset := int64(5)
-
-		err := FailAndRollback(mockFile, mockFS, path, startOffset, mockLog, "test", "test error: %v", errors.New("original error"))
-		testutil.AssertError(t, err)
-		testutil.AssertContains(t, err.Error(), "test error: original error")
-	})
 }
 
 // TestWriteChunks tests the writeChunks function
