@@ -46,6 +46,7 @@ type mockFile struct {
 	WriteFunc   func([]byte) (int, error)
 	SyncFunc    func() error
 	ReadFunc    func([]byte) (int, error)
+	SeekFunc    func(int64, int) (int64, error)
 }
 
 func (r *mockFile) Read(p []byte) (int, error) {
@@ -68,6 +69,9 @@ func (r *mockFile) ReadAll() ([]byte, error) {
 }
 
 func (r *mockFile) Seek(offset int64, whence int) (int64, error) {
+	if r.SeekFunc != nil {
+		return r.SeekFunc(offset, whence)
+	}
 	return r.Reader.Seek(offset, whence)
 }
 
