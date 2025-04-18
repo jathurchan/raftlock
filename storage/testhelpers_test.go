@@ -45,6 +45,14 @@ type mockFile struct {
 	ReadAllFunc func() ([]byte, error)
 	WriteFunc   func([]byte) (int, error)
 	SyncFunc    func() error
+	ReadFunc    func([]byte) (int, error)
+}
+
+func (r *mockFile) Read(p []byte) (int, error) {
+	if r.ReadFunc != nil {
+		return r.ReadFunc(p)
+	}
+	return r.Reader.Read(p)
 }
 
 func (r *mockFile) ReadFull(buf []byte) (int, error) {
@@ -103,7 +111,7 @@ type mockFileSystem struct {
 	ExistsFunc           func(string) (bool, error)
 	OpenFunc             func(string) (file, error)
 	ReadFileFunc         func(string) ([]byte, error)
-	TruncateFunc         func(name string, size int64) error
+	TruncateFunc         func(string, int64) error
 	WriteFileFunc        func(string, []byte, os.FileMode) error
 	RemoveFunc           func(string) error
 	RenameFunc           func(string, string) error
@@ -112,10 +120,11 @@ type mockFileSystem struct {
 	IsNotExistFunc       func(error) bool
 	GlobFunc             func(string) ([]string, error)
 	TempPathFunc         func(string) string
-	AtomicWriteFunc      func(path string, data []byte, perm os.FileMode) error
-	WriteMaybeAtomicFunc func(path string, data []byte, perm os.FileMode, atomic bool) error
-	AppendFileFunc       func(name string) (file, error)
+	AtomicWriteFunc      func(string, []byte, os.FileMode) error
+	WriteMaybeAtomicFunc func(string, []byte, os.FileMode, bool) error
+	AppendFileFunc       func(string) (file, error)
 	StatFunc             func(string) (os.FileInfo, error)
+	DirFunc              func(string) string
 }
 
 func newMockFileSystem() *mockFileSystem {
@@ -298,7 +307,12 @@ func (mfs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	return mfs.mkdirAllErr
 }
 
-func (mfs *mockFileSystem) Dir(path string) string { return path }
+func (mfs *mockFileSystem) Dir(path string) string {
+	if mfs.DirFunc != nil {
+		return mfs.DirFunc(path)
+	}
+	return path
+}
 
 func (mfs *mockFileSystem) IsNotExist(err error) bool {
 	if mfs.IsNotExistFunc != nil {
