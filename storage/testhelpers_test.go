@@ -486,9 +486,10 @@ func (m *mockSerializer) UnmarshalSnapshotMetadata([]byte) (types.SnapshotMetada
 type mockLogEntryReader struct {
 	mu          sync.Mutex
 	entries     []types.LogEntry
-	readErrors  []error // Errors to return after corresponding entry/EOF
-	bytesRead   []int64 // Bytes read for each corresponding entry
-	readCallIdx int     // Tracks which entry/error to return next
+	offsets     []int64
+	readErrors  []error
+	bytesRead   []int64
+	readCallIdx int
 }
 
 func newMockLogEntryReader() *mockLogEntryReader {
@@ -497,16 +498,23 @@ func newMockLogEntryReader() *mockLogEntryReader {
 	}
 }
 
-// AddEntry adds a successful entry read simulation
 func (m *mockLogEntryReader) AddEntry(entry types.LogEntry, bytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries = append(m.entries, entry)
 	m.bytesRead = append(m.bytesRead, bytes)
-	m.readErrors = append(m.readErrors, nil) // nil error for success
+	m.readErrors = append(m.readErrors, nil)
 }
 
-// AddError adds an error simulation for a read attempt
+func (m *mockLogEntryReader) AddEntryWithOffset(entry types.LogEntry, bytes int64, offset int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = append(m.entries, entry)
+	m.bytesRead = append(m.bytesRead, bytes)
+	m.readErrors = append(m.readErrors, nil)
+	m.offsets = append(m.offsets, offset)
+}
+
 func (m *mockLogEntryReader) AddError(err error, bytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -514,6 +522,25 @@ func (m *mockLogEntryReader) AddError(err error, bytes int64) {
 	m.entries = append(m.entries, types.LogEntry{})
 	m.bytesRead = append(m.bytesRead, bytes)
 	m.readErrors = append(m.readErrors, err)
+}
+
+func (m *mockLogEntryReader) AddErrorAtOffset(err error, bytes int64, offset int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = append(m.entries, types.LogEntry{})
+	m.bytesRead = append(m.bytesRead, bytes)
+	m.readErrors = append(m.readErrors, err)
+	m.offsets = append(m.offsets, offset)
+}
+
+func (m *mockLogEntryReader) AddEOF(entry types.LogEntry, bytes int64, offset int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.entries = append(m.entries, entry)
+	m.bytesRead = append(m.bytesRead, bytes)
+	m.readErrors = append(m.readErrors, io.EOF)
+	m.offsets = append(m.offsets, offset)
 }
 
 func (m *mockLogEntryReader) ReadNext(f file) (types.LogEntry, int64, error) {
@@ -541,16 +568,17 @@ func (m *mockLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if offset < 0 || int(offset) >= len(m.entries) {
-		return types.LogEntry{}, 0, io.EOF
+	for i, off := range m.offsets {
+		if off == offset {
+			entry := m.entries[i]
+			if expectedIndex != 0 && entry.Index != expectedIndex {
+				return types.LogEntry{}, m.bytesRead[i], fmt.Errorf("%w: index mismatch (expected %d, got %d)", ErrCorruptedLog, expectedIndex, entry.Index)
+			}
+			return entry, m.bytesRead[i], m.readErrors[i]
+		}
 	}
 
-	entry := m.entries[offset]
-	if expectedIndex != 0 && entry.Index != expectedIndex {
-		return types.LogEntry{}, m.bytesRead[offset], fmt.Errorf("%w: index mismatch (expected %d, got %d)", ErrCorruptedLog, expectedIndex, entry.Index)
-	}
-
-	return entry, m.bytesRead[offset], m.readErrors[offset]
+	return types.LogEntry{}, 0, io.EOF // simulate missing offset
 }
 
 func (m *mockLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
