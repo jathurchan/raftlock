@@ -1,3 +1,5 @@
+//go:build !production
+
 package storage
 
 import (
@@ -35,6 +37,9 @@ type defaultRWOperationLocker struct {
 	lockTimeout     time.Duration
 	useTimeout      bool
 	slowOpThreshold time.Duration
+
+	// test-only: hook to trigger behavior after lock acquisition
+	afterLock func() // called only in tests to sync cancellation after lock is acquired
 }
 
 func newRWOperationLocker(
@@ -111,6 +116,11 @@ func (ol *defaultRWOperationLocker) withTimeout(
 	select {
 	case <-acquired:
 		defer unlockFn()
+
+		// test-only hook
+		if ol.afterLock != nil {
+			ol.afterLock()
+		}
 
 		if err := ctx.Err(); err != nil {
 			return err
