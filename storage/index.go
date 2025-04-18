@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -41,9 +42,20 @@ type indexService interface {
 	// entry is found, it returns an error indicating log corruption.
 	VerifyConsistency(indexMap []types.IndexOffsetPair) error
 
-	// GetBounds analyzes the given index map and compares it against the current metadata range.
-	// It returns a boundsResult indicating the new first and last indices, whether the metadata has changed,
-	// and whether the change represents a full reset (i.e., the index map is empty).
+	// GetBounds determines whether the index map indicates a change in the metadata bounds (first and last indices).
+	//
+	// It assumes the provided indexMap is sorted by ascending index and free of gaps or duplicates.
+	// The function compares the new computed bounds (based on indexMap) with the existing metadata
+	// bounds (currentFirst, currentLast), and returns a `boundsResult` with the following:
+	//
+	// - NewFirst: The first index in the indexMap (or 0 if indexMap is empty)
+	// - NewLast: The last index in the indexMap (or 0 if indexMap is empty)
+	// - Changed: True if the computed bounds differ from the current ones
+	// - WasReset: True if the indexMap is empty and the metadata was previously non-zero,
+	//             indicating a full reset of log tracking
+	//
+	// This method is typically used during recovery or reconciliation to determine whether metadata
+	// should be updated, and whether such an update represents a reset due to log truncation or corruption.
 	GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult
 
 	// Append appends new index-offset entries to the given base map.
@@ -241,18 +253,26 @@ func (is *defaultIndexService) ReadInRange(
 ) ([]types.LogEntry, int64, error) {
 	if start >= end {
 		is.logger.Debugw("Start index is greater than or equal to end index", "start", start, "end", end)
-		return nil, 0, nil // Or return an error: fmt.Errorf("invalid index range: start (%d) >= end (%d)", start, end)
+		return []types.LogEntry{}, 0, ErrInvalidLogRange
 	}
 
 	if len(indexMap) == 0 {
 		is.logger.Debugw("Index map is empty", "start", start, "end", end)
-		return nil, 0, nil
+		return []types.LogEntry{}, 0, ErrIndexOutOfRange
+	}
+
+	first := indexMap[0].Index
+	last := indexMap[len(indexMap)-1].Index
+
+	if start < first || end > last+1 {
+		is.logger.Debugw("Requested range is out of bounds", "start", start, "end", end, "mapFirst", first, "mapLast", last)
+		return []types.LogEntry{}, 0, ErrIndexOutOfRange
 	}
 
 	file, err := is.fs.Open(logPath)
 	if err != nil {
 		is.logger.Errorw("Failed to open log file for reading", "path", logPath, "error", err)
-		return nil, 0, fmt.Errorf("%w: failed to open log file: %v", ErrStorageIO, err)
+		return []types.LogEntry{}, 0, fmt.Errorf("%w: failed to open log file: %v", ErrStorageIO, err)
 	}
 	defer file.Close()
 
@@ -318,6 +338,16 @@ func (is *defaultIndexService) readEntriesInRange(
 		}
 
 		entry, n, err := is.reader.ReadAtOffset(file, pair.Offset, pair.Index)
+
+		if errors.Is(err, io.EOF) {
+			if n > 0 {
+				entries = append(entries, entry)
+				totalBytes += n
+			}
+			is.logger.Infow("Reached EOF during ReadInRange", "lastIndex", pair.Index)
+			break
+		}
+
 		if err != nil {
 			is.logger.Errorw("Failed to read entry", "index", pair.Index, "offset", pair.Offset, "error", err)
 			return entries, totalBytes, err
@@ -355,9 +385,22 @@ func (is *defaultIndexService) VerifyConsistency(indexMap []types.IndexOffsetPai
 	return nil
 }
 
-// GetBounds computes the desired metadata bounds based on the contents of the index map,
-// and compares them to the currently stored first and last indices.
+// GetBounds determines whether the index map indicates a change in the metadata bounds (first and last indices).
+//
+// It assumes the provided indexMap is sorted by ascending index and free of gaps or duplicates.
+// The function compares the new computed bounds (based on indexMap) with the existing metadata
+// bounds (currentFirst, currentLast), and returns a `boundsResult` with the following:
+//
+//   - NewFirst: The first index in the indexMap (or 0 if indexMap is empty)
+//   - NewLast: The last index in the indexMap (or 0 if indexMap is empty)
+//   - Changed: True if the computed bounds differ from the current ones
+//   - WasReset: True if the indexMap is empty and the metadata was previously non-zero,
+//     indicating a full reset of log tracking
+//
+// This method is typically used during recovery or reconciliation to determine whether metadata
+// should be updated, and whether such an update represents a reset due to log truncation or corruption.
 func (s *defaultIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
+
 	s.logger.Debugw("Calculating bounds",
 		"currentFirst", currentFirst,
 		"currentLast", currentLast,
@@ -414,7 +457,7 @@ func (s *defaultIndexService) TruncateLast(indexMap []types.IndexOffsetPair, cou
 
 	if count >= len(indexMap) {
 		s.logger.Warnw("Truncation count exceeds or matches map size — returning empty", "count", count, "mapSize", len(indexMap))
-		return nil
+		return []types.IndexOffsetPair{}
 	}
 
 	newLen := len(indexMap) - count
@@ -440,7 +483,7 @@ func (s *defaultIndexService) FindFirstIndexAtOrAfter(indexMap []types.IndexOffs
 
 func (s *defaultIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
 	if len(indexMap) == 0 {
-		return nil
+		return []types.IndexOffsetPair{}
 	}
 	pos := sort.Search(len(indexMap), func(i int) bool {
 		return indexMap[i].Index > target
@@ -451,7 +494,7 @@ func (s *defaultIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, ta
 
 func (s *defaultIndexService) TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
 	if len(indexMap) == 0 {
-		return nil
+		return []types.IndexOffsetPair{}
 	}
 	pos := sort.Search(len(indexMap), func(i int) bool {
 		return indexMap[i].Index >= target

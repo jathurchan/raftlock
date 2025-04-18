@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -8,6 +9,8 @@ import (
 	"github.com/jathurchan/raftlock/testutil"
 	"github.com/jathurchan/raftlock/types"
 )
+
+var errForcedReadFailure = errors.New("forced read failure")
 
 func setupTestIndexService() (indexService, *mockFileSystem, *mockLogEntryReader) {
 	mockFs := newMockFileSystem()
@@ -544,6 +547,756 @@ func TestIndexService_GetBounds(t *testing.T) {
 			is, _, _ := setupTestIndexService()
 			result := is.GetBounds(tt.indexMap, tt.currentFirst, tt.currentLast)
 			testutil.AssertEqual(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIndexService_Append tests the Append method of the indexService
+func TestIndexService_Append(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      []types.IndexOffsetPair
+		additions []types.IndexOffsetPair
+		expected  []types.IndexOffsetPair
+	}{
+		{
+			name: "Append to empty base",
+			base: []types.IndexOffsetPair{},
+			additions: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+		},
+		{
+			name: "Append to non-empty base",
+			base: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			additions: []types.IndexOffsetPair{
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+		},
+		{
+			name: "Append empty additions",
+			base: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			additions: []types.IndexOffsetPair{},
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+		},
+		{
+			name:      "Both empty",
+			base:      []types.IndexOffsetPair{},
+			additions: []types.IndexOffsetPair{},
+			expected:  []types.IndexOffsetPair{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, _, _ := setupTestIndexService()
+			result := is.Append(tt.base, tt.additions)
+			testutil.AssertEqual(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIndexService_TruncateLast tests the TruncateLast method of the indexService
+func TestIndexService_TruncateLast(t *testing.T) {
+	tests := []struct {
+		name     string
+		indexMap []types.IndexOffsetPair
+		count    int
+		expected []types.IndexOffsetPair
+	}{
+		{
+			name: "Truncate zero entries",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			count: 0,
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+		},
+		{
+			name: "Truncate some entries",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+			count: 2,
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+		},
+		{
+			name: "Truncate all entries",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			count:    2,
+			expected: []types.IndexOffsetPair{},
+		},
+		{
+			name: "Truncate more than available",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			count:    5,
+			expected: []types.IndexOffsetPair{},
+		},
+		{
+			name:     "Truncate empty map",
+			indexMap: []types.IndexOffsetPair{},
+			count:    1,
+			expected: []types.IndexOffsetPair{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, _, _ := setupTestIndexService()
+			result := is.TruncateLast(tt.indexMap, tt.count)
+			testutil.AssertEqual(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIndexService_FindFirstIndexAtOrAfter tests the FindFirstIndexAtOrAfter method
+func TestIndexService_FindFirstIndexAtOrAfter(t *testing.T) {
+	tests := []struct {
+		name        string
+		indexMap    []types.IndexOffsetPair
+		target      types.Index
+		expectedPos int
+	}{
+		{
+			name: "Find exact match at beginning",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target:      1,
+			expectedPos: 0,
+		},
+		{
+			name: "Find exact match in middle",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target:      2,
+			expectedPos: 1,
+		},
+		{
+			name: "Find exact match at end",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target:      3,
+			expectedPos: 2,
+		},
+		{
+			name: "Find next higher when no exact match",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target:      7,
+			expectedPos: 1, // Should return position of Index 10
+		},
+		{
+			name: "Target is lower than all indices",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target:      1,
+			expectedPos: 0, // Should return the first position
+		},
+		{
+			name: "Target is higher than all indices",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target:      20,
+			expectedPos: 3, // Should return len(indexMap)
+		},
+		{
+			name:        "Empty index map",
+			indexMap:    []types.IndexOffsetPair{},
+			target:      5,
+			expectedPos: 0, // Should return 0 for empty map
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, _, _ := setupTestIndexService()
+			result := is.FindFirstIndexAtOrAfter(tt.indexMap, tt.target)
+			testutil.AssertEqual(t, tt.expectedPos, result)
+		})
+	}
+}
+
+// TestIndexService_TruncateAfter tests the TruncateAfter method
+func TestIndexService_TruncateAfter(t *testing.T) {
+	tests := []struct {
+		name     string
+		indexMap []types.IndexOffsetPair
+		target   types.Index
+		expected []types.IndexOffsetPair
+	}{
+		{
+			name: "Truncate after exact match",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+			target: 2,
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+		},
+		{
+			name: "Target is first index",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target: 1,
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+			},
+		},
+		{
+			name: "Target is last index",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target: 3,
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+		},
+		{
+			name: "Target not found, truncate after closest below",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target: 7,
+			expected: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+			},
+		},
+		{
+			name: "Target lower than all indices",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target:   1,
+			expected: []types.IndexOffsetPair{},
+		},
+		{
+			name: "Target higher than all indices",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target: 20,
+			expected: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+		},
+		{
+			name:     "Empty index map",
+			indexMap: []types.IndexOffsetPair{},
+			target:   5,
+			expected: []types.IndexOffsetPair{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, _, _ := setupTestIndexService()
+			result := is.TruncateAfter(tt.indexMap, tt.target)
+			testutil.AssertEqual(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIndexService_TruncateBefore tests the TruncateBefore method
+func TestIndexService_TruncateBefore(t *testing.T) {
+	tests := []struct {
+		name     string
+		indexMap []types.IndexOffsetPair
+		target   types.Index
+		expected []types.IndexOffsetPair
+	}{
+		{
+			name: "Truncate before exact match",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+			target: 3,
+			expected: []types.IndexOffsetPair{
+				{Index: 3, Offset: 20},
+				{Index: 4, Offset: 30},
+			},
+		},
+		{
+			name: "Target is first index",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target: 1,
+			expected: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+		},
+		{
+			name: "Target is last index",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			target: 3,
+			expected: []types.IndexOffsetPair{
+				{Index: 3, Offset: 20},
+			},
+		},
+		{
+			name: "Target not found, truncate before closest above",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target: 7,
+			expected: []types.IndexOffsetPair{
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+		},
+		{
+			name: "Target lower than all indices",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target: 1,
+			expected: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+		},
+		{
+			name: "Target higher than all indices",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+				{Index: 15, Offset: 20},
+			},
+			target:   20,
+			expected: []types.IndexOffsetPair{},
+		},
+		{
+			name:     "Empty index map",
+			indexMap: []types.IndexOffsetPair{},
+			target:   5,
+			expected: []types.IndexOffsetPair{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, _, _ := setupTestIndexService()
+			result := is.TruncateBefore(tt.indexMap, tt.target)
+			testutil.AssertEqual(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIndexService_ReadInRange tests the ReadInRange method
+func TestIndexService_ReadInRange(t *testing.T) {
+	logPath := "test.log"
+
+	tests := []struct {
+		name              string
+		setupMocks        func(*mockFileSystem, *mockLogEntryReader)
+		indexMap          []types.IndexOffsetPair
+		start             types.Index
+		end               types.Index
+		expected          []types.LogEntry
+		expectedBytesRead int64
+		expectError       bool
+		errorType         error
+	}{
+		{
+			name: "Read full range",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10, 0)
+				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")}, 15, 10)
+				r.AddEntryWithOffset(types.LogEntry{Term: 2, Index: 3, Command: []byte("cmd3")}, 20, 25)
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start: 1,
+			end:   4,
+			expected: []types.LogEntry{
+				{Term: 1, Index: 1, Command: []byte("cmd1")},
+				{Term: 1, Index: 2, Command: []byte("cmd2")},
+				{Term: 2, Index: 3, Command: []byte("cmd3")},
+			},
+			expectedBytesRead: 45,
+			expectError:       false,
+		},
+		{
+			name: "Read partial range",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")}, 15, 10)
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start: 2,
+			end:   3,
+			expected: []types.LogEntry{
+				{Term: 1, Index: 2, Command: []byte("cmd2")},
+			},
+			expectedBytesRead: 15,
+			expectError:       false,
+		},
+		{
+			name: "Empty range",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start:             2,
+			end:               2,
+			expected:          nil,
+			expectedBytesRead: 0,
+			expectError:       true,
+		},
+		{
+			name: "Start greater than end",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start:             3,
+			end:               2,
+			expected:          []types.LogEntry{},
+			expectedBytesRead: 0,
+			expectError:       true,
+			errorType:         ErrInvalidLogRange,
+		},
+		{
+			name: "Empty index map",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+			},
+			indexMap:          []types.IndexOffsetPair{},
+			start:             1,
+			end:               3,
+			expected:          []types.LogEntry{},
+			expectedBytesRead: 0,
+			expectError:       true,
+			errorType:         ErrIndexOutOfRange,
+		},
+		{
+			name: "Range out of bounds",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start:             4,
+			end:               6,
+			expected:          []types.LogEntry{},
+			expectedBytesRead: 0,
+			expectError:       true,
+			errorType:         ErrIndexOutOfRange,
+		},
+		{
+			name: "File open error",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.openErr = errors.New("file open error")
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start:       1,
+			end:         4,
+			expected:    []types.LogEntry{},
+			expectError: true,
+			errorType:   ErrStorageIO,
+		},
+		{
+			name: "Context cancelled",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				// Setup that will trigger context cancellation in ScanRange
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+				// ScanRange detects context cancellation
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 25},
+			},
+			start:       1,
+			end:         4,
+			expected:    nil,
+			expectError: true,
+			errorType:   context.Canceled,
+		},
+		{
+			name: "ReadAtOffset returns EOF with partial entry",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01}
+				r.AddEOF(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10, 0)
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+			},
+			start: 1,
+			end:   2,
+			expected: []types.LogEntry{
+				{Term: 1, Index: 1, Command: []byte("cmd1")},
+			},
+			expectedBytesRead: 10,
+			expectError:       false,
+		},
+		{
+			name: "ReadAtOffset returns non-EOF error",
+			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
+				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
+				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10, 0)
+				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 2, Command: nil}, 0, 10)
+				r.readErrors[1] = errForcedReadFailure
+			},
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+			},
+			start:             1,
+			end:               3,
+			expected:          []types.LogEntry{{Term: 1, Index: 1, Command: []byte("cmd1")}},
+			expectedBytesRead: 10,
+			expectError:       true,
+			errorType:         errForcedReadFailure,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is, mfs, mr := setupTestIndexService()
+
+			// Setup mocks
+			tt.setupMocks(mfs, mr)
+
+			// Create a context that might be cancelled
+			ctx := context.Background()
+			if tt.errorType == context.Canceled {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(context.Background())
+				cancel() // Cancel immediately to simulate cancellation
+			}
+
+			entries, bytesRead, err := is.ReadInRange(ctx, logPath, tt.indexMap, tt.start, tt.end)
+
+			// Verify error behavior
+			if tt.expectError {
+				testutil.AssertError(t, err)
+				if tt.errorType != nil {
+					testutil.AssertErrorIs(t, err, tt.errorType)
+				}
+			} else {
+				testutil.AssertNoError(t, err)
+				testutil.AssertEqual(t, tt.expected, entries)
+				if tt.expectedBytesRead > 0 {
+					testutil.AssertEqual(t, tt.expectedBytesRead, bytesRead)
+				}
+			}
+		})
+	}
+}
+
+// TestIndexServiceEdgeCases tests edge cases not covered in other tests
+func TestIndexServiceEdgeCases(t *testing.T) {
+	t.Run("Build with reader returning invalid entries", func(t *testing.T) {
+		is, mfs, mr := setupTestIndexService()
+		logPath := "test.log"
+
+		// Setup mocks: add entries with duplicate indices
+		mfs.files[logPath] = []byte{0x01, 0x02, 0x03}
+		mr.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10)
+		mr.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1-duplicate")}, 15) // Duplicate index
+
+		result, err := is.Build(logPath)
+		testutil.AssertNoError(t, err) // Should not error, but truncate
+		testutil.AssertEqual(t, 1, len(result.IndexMap))
+		testutil.AssertTrue(t, result.Truncated)
+		testutil.AssertEqual(t, types.Index(1), result.LastValidIndex)
+	})
+
+	t.Run("ReadInRange with zero entries between indices", func(t *testing.T) {
+		is, mfs, mr := setupTestIndexService()
+		logPath := "test.log"
+
+		// Setup an index map with a gap (missing entry for index 2)
+		indexMap := []types.IndexOffsetPair{
+			{Index: 1, Offset: 0},
+			{Index: 3, Offset: 20}, // Note: Index 2 is missing
+		}
+
+		// Setup the file and reader
+		mfs.files[logPath] = []byte{0x01, 0x02}
+		mr.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10, 0)
+		mr.AddEntryWithOffset(types.LogEntry{Term: 2, Index: 3, Command: []byte("cmd3")}, 15, 20)
+
+		// Try to read a range that includes the missing index
+		entries, _, err := is.ReadInRange(context.Background(), logPath, indexMap, 1, 4)
+
+		// This should not error, but should skip the missing index
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 2, len(entries))
+		testutil.AssertEqual(t, types.Index(1), entries[0].Index)
+		testutil.AssertEqual(t, types.Index(3), entries[1].Index)
+	})
+
+	t.Run("VerifyConsistency with extremely large indices", func(t *testing.T) {
+		is, _, _ := setupTestIndexService()
+
+		// Create an index map with extremely large, but valid indices
+		indexMap := []types.IndexOffsetPair{
+			{Index: 1000000, Offset: 0},
+			{Index: 1000001, Offset: 10},
+			{Index: 1000002, Offset: 20},
+		}
+
+		err := is.VerifyConsistency(indexMap)
+		testutil.AssertNoError(t, err)
+	})
+}
+
+func TestEstimateCapacity(t *testing.T) {
+	tests := []struct {
+		name     string
+		indexMap []types.IndexOffsetPair
+		start    types.Index
+		end      types.Index
+		wantCap  int
+	}{
+		{
+			name: "Normal increasing range",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 1, Offset: 0},
+				{Index: 2, Offset: 10},
+				{Index: 3, Offset: 20},
+			},
+			start:   2,
+			end:     4,
+			wantCap: 2, // entries with index 2, 3
+		},
+		{
+			name: "endIdx < startIdx (capacity < 0)",
+			indexMap: []types.IndexOffsetPair{
+				{Index: 5, Offset: 0},
+				{Index: 10, Offset: 10},
+			},
+			start:   11, // startIdx = 2 (not found)
+			end:     7,  // endIdx = 1 (points to 10)
+			wantCap: 0,  // because capacity = -1 → clamp to 0
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateCapacity(tt.indexMap, tt.start, tt.end)
+			if got != tt.wantCap {
+				t.Errorf("estimateCapacity() = %d, want %d", got, tt.wantCap)
+			}
 		})
 	}
 }
