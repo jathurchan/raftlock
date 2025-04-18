@@ -217,13 +217,13 @@ func (a *defaultLogAppender) validateEntries(entries []types.LogEntry, currentLa
 func (a *defaultLogAppender) openLogFile() (file, int64, error) {
 	f, err := a.fileSystem.AppendFile(a.logFilePath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: open log file: %v", ErrStorageIO, err)
+		return nil, 0, fmt.Errorf("%w: open log file: %w", ErrStorageIO, err)
 	}
 	pos, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
 		_ = f.Close()
-		a.logger.Errorw("seek failed on log file: %v", err)
-		return nil, 0, fmt.Errorf("%w: seek log file: %v", ErrStorageIO, err)
+		a.logger.Errorw("seek failed on log file: %w", err)
+		return nil, 0, fmt.Errorf("%w: seek log file: %w", ErrStorageIO, err)
 	}
 	return f, pos, nil
 }
@@ -341,13 +341,13 @@ func (r *defaultLogRewriter) Rewrite(ctx context.Context, entries []types.LogEnt
 // It sets up the file with appropriate permissions and returns an opened file handle.
 func (r *defaultLogRewriter) prepareTempFile(tmpPath string) (file, error) {
 	if err := r.fs.WriteMaybeAtomic(tmpPath, nil, ownRWOthR, false); err != nil {
-		return nil, fmt.Errorf("%w: failed to create temporary log file: %v", ErrStorageIO, err)
+		return nil, fmt.Errorf("%w: failed to create temporary log file: %w", ErrStorageIO, err)
 	}
 
 	tmpFile, err := r.fs.AppendFile(tmpPath)
 	if err != nil {
 		_ = r.fs.Remove(tmpPath)
-		return nil, fmt.Errorf("%w: failed to open temporary log file: %v", ErrStorageIO, err)
+		return nil, fmt.Errorf("%w: failed to open temporary log file: %w", ErrStorageIO, err)
 	}
 
 	return tmpFile, nil
@@ -358,20 +358,20 @@ func (r *defaultLogRewriter) prepareTempFile(tmpPath string) (file, error) {
 func (r *defaultLogRewriter) writeAndSyncEntries(ctx context.Context, f file, entries []types.LogEntry) ([]types.IndexOffsetPair, int64, error) {
 	_, err := f.Seek(0, io.SeekStart)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: failed to seek to start of temp file: %v", ErrStorageIO, err)
+		return nil, 0, fmt.Errorf("%w: failed to seek to start of temp file: %w", ErrStorageIO, err)
 	}
 
 	offsets, finalOffset, err := r.writer.WriteEntriesToFile(ctx, f, 0, entries)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: failed writing entries to temp file: %v", ErrStorageIO, err)
+		return nil, 0, fmt.Errorf("%w: failed writing entries to temp file: %w", ErrStorageIO, err)
 	}
 
 	if err := f.Sync(); err != nil {
-		return nil, 0, fmt.Errorf("%w: failed to sync temp log file: %v", ErrStorageIO, err)
+		return nil, 0, fmt.Errorf("%w: failed to sync temp log file: %w", ErrStorageIO, err)
 	}
 
 	if err := f.Close(); err != nil {
-		return nil, 0, fmt.Errorf("%w: failed to close temp log file: %v", ErrStorageIO, err)
+		return nil, 0, fmt.Errorf("%w: failed to close temp log file: %w", ErrStorageIO, err)
 	}
 
 	return offsets, finalOffset, nil
@@ -384,7 +384,7 @@ func (r *defaultLogRewriter) writeAndSyncEntries(ctx context.Context, f file, en
 func (r *defaultLogRewriter) replaceLogFile(tmpPath string) error {
 	if err := r.fs.Rename(tmpPath, r.logPath); err != nil {
 		_ = r.fs.Remove(tmpPath)
-		return fmt.Errorf("%w: failed to rename temp file to %s: %v", ErrStorageIO, r.logPath, err)
+		return fmt.Errorf("%w: failed to rename temp file to %s: %w", ErrStorageIO, r.logPath, err)
 	}
 	return nil
 }
