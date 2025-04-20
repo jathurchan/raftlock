@@ -184,10 +184,6 @@ func (sr *defaultSnapshotReader) Read(ctx context.Context) (types.SnapshotMetada
 		return types.SnapshotMetadata{}, nil, err
 	}
 
-	if err := ctx.Err(); err != nil {
-		return types.SnapshotMetadata{}, nil, err
-	}
-
 	snapshotPath := sr.fs.Path(sr.dir, snapshotDataFilename)
 
 	data, err := sr.readSnapshotData(ctx, snapshotPath)

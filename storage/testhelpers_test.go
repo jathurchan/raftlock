@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jathurchan/raftlock/types"
 )
@@ -41,23 +42,30 @@ var _ systemInfo = (*mockSystemInfo)(nil)
 
 type mockFile struct {
 	*bytes.Reader
-
-	ReadAllFunc func() ([]byte, error)
-	WriteFunc   func([]byte) (int, error)
-	SyncFunc    func() error
-	ReadFunc    func([]byte) (int, error)
-	SeekFunc    func(int64, int) (int64, error)
-	CloseFunc   func() error
+	reader       io.Reader
+	WriteFunc    func([]byte) (int, error)
+	SyncFunc     func() error
+	ReadFunc     func([]byte) (int, error)
+	SeekFunc     func(int64, int) (int64, error)
+	CloseFunc    func() error
+	ReadFullFunc func([]byte) (int, error)
+	ReadAllFunc  func() ([]byte, error)
 }
 
 func (r *mockFile) Read(p []byte) (int, error) {
 	if r.ReadFunc != nil {
 		return r.ReadFunc(p)
 	}
-	return r.Reader.Read(p)
+	if r.Reader != nil {
+		return r.Reader.Read(p)
+	}
+	return 0, errors.New("mockFile: no reader available")
 }
 
 func (r *mockFile) ReadFull(buf []byte) (int, error) {
+	if r.ReadFullFunc != nil {
+		return r.ReadFullFunc(buf)
+	}
 	return io.ReadFull(r.Reader, buf)
 }
 
@@ -73,7 +81,10 @@ func (r *mockFile) Seek(offset int64, whence int) (int64, error) {
 	if r.SeekFunc != nil {
 		return r.SeekFunc(offset, whence)
 	}
-	return r.Reader.Seek(offset, whence)
+	if r.Reader != nil {
+		return r.Reader.Seek(offset, whence)
+	}
+	return 0, errors.New("mockFile: no seeker available")
 }
 
 func (r *mockFile) Close() error {
@@ -101,6 +112,7 @@ func (r *mockFile) Sync() error {
 // mockFileSystem implements fileSystem for testing
 type mockFileSystem struct {
 	mu             sync.Mutex
+	dir            string
 	files          map[string][]byte
 	openErr        error
 	existsErr      error
@@ -141,11 +153,38 @@ func newMockFileSystem() *mockFileSystem {
 	}
 }
 
+// defaultStat provides a basic Stat implementation for the mock.
+func (mfs *mockFileSystem) defaultStat(name string) (os.FileInfo, error) {
+	mfs.mu.Lock()
+	defer mfs.mu.Unlock()
+
+	if name == mfs.dir {
+		return &mockFileInfo{nameVal: filepath.Base(name), isDir: true}, nil
+	}
+
+	data, ok := mfs.files[name]
+	if ok {
+		return &mockFileInfo{nameVal: filepath.Base(name), sizeVal: int64(len(data)), isDir: false}, nil
+	}
+
+	dirPrefix := name
+	if !strings.HasSuffix(dirPrefix, string(filepath.Separator)) {
+		dirPrefix += string(filepath.Separator)
+	}
+	for p := range mfs.files {
+		if strings.HasPrefix(p, dirPrefix) {
+			return &mockFileInfo{nameVal: filepath.Base(name), isDir: true}, nil
+		}
+	}
+
+	return nil, os.ErrNotExist
+}
+
 func (mfs *mockFileSystem) Stat(name string) (os.FileInfo, error) {
 	if mfs.StatFunc != nil {
 		return mfs.StatFunc(name)
 	}
-	return nil, os.ErrNotExist
+	return mfs.defaultStat(name)
 }
 
 func (mfs *mockFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error {
@@ -195,13 +234,14 @@ func (mfs *mockFileSystem) ReadFile(name string) ([]byte, error) {
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	return data, nil
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	return dataCopy, nil
 }
 
-func (mfs *mockFileSystem) Open(name string) (file, error) {
-	if mfs.OpenFunc != nil {
-		return mfs.OpenFunc(name)
-	}
+// defaultOpen provides a basic Open implementation for the mock.
+// It creates the file in the map if it doesn't exist.
+func (mfs *mockFileSystem) defaultOpen(name string) (file, error) {
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	if mfs.openErr != nil {
@@ -209,9 +249,38 @@ func (mfs *mockFileSystem) Open(name string) (file, error) {
 	}
 	data, ok := mfs.files[name]
 	if !ok {
-		return nil, os.ErrNotExist
+		mfs.files[name] = []byte{}
+		data = mfs.files[name]
+		ok = true
 	}
-	return &mockFile{Reader: bytes.NewReader(data)}, nil
+
+	reader := bytes.NewReader(data)
+	return &mockFile{
+		Reader: reader,
+		reader: reader,
+		WriteFunc: func(p []byte) (int, error) {
+			currentData := mfs.files[name]
+			newData := append(currentData, p...)
+			mfs.files[name] = newData
+			n := len(p)
+			return n, nil
+		},
+		ReadFunc: func(p []byte) (int, error) {
+			return reader.Read(p)
+		},
+		SeekFunc: func(offset int64, whence int) (int64, error) {
+			return reader.Seek(offset, whence)
+		},
+		SyncFunc:  func() error { return nil },
+		CloseFunc: func() error { return nil },
+	}, nil
+}
+
+func (mfs *mockFileSystem) Open(name string) (file, error) {
+	if mfs.OpenFunc != nil {
+		return mfs.OpenFunc(name)
+	}
+	return mfs.defaultOpen(name)
 }
 
 func (mfs *mockFileSystem) Exists(name string) (bool, error) {
@@ -269,7 +338,9 @@ func (mfs *mockFileSystem) WriteFile(name string, data []byte, perm os.FileMode)
 	if mfs.files == nil {
 		return errors.New("mockFileSystem.files map is nil — use newMockFileSystem()")
 	}
-	mfs.files[name] = data
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	mfs.files[name] = dataCopy
 	return nil
 }
 
@@ -284,16 +355,32 @@ func (mfs *mockFileSystem) Remove(name string) error {
 	}
 	_, exists := mfs.files[name]
 	if !exists {
-		return os.ErrNotExist
+		isDir := false
+		dirPrefix := name
+		if !strings.HasSuffix(dirPrefix, string(filepath.Separator)) {
+			dirPrefix += string(filepath.Separator)
+		}
+		filesToRemove := []string{}
+		for p := range mfs.files {
+			if strings.HasPrefix(p, dirPrefix) {
+				isDir = true
+				filesToRemove = append(filesToRemove, p)
+			}
+		}
+		if !isDir {
+			return os.ErrNotExist
+		}
+		for _, f := range filesToRemove {
+			delete(mfs.files, f)
+		}
+	} else {
+		delete(mfs.files, name)
 	}
-	delete(mfs.files, name)
 	return nil
 }
 
-func (mfs *mockFileSystem) Rename(oldPath, newPath string) error {
-	if mfs.RenameFunc != nil {
-		return mfs.RenameFunc(oldPath, newPath)
-	}
+// defaultRename provides a basic Rename implementation for the mock.
+func (mfs *mockFileSystem) defaultRename(oldPath, newPath string) error {
 	mfs.mu.Lock()
 	defer mfs.mu.Unlock()
 	if mfs.renameErr != nil {
@@ -306,6 +393,13 @@ func (mfs *mockFileSystem) Rename(oldPath, newPath string) error {
 	mfs.files[newPath] = data
 	delete(mfs.files, oldPath)
 	return nil
+}
+
+func (mfs *mockFileSystem) Rename(oldPath, newPath string) error {
+	if mfs.RenameFunc != nil {
+		return mfs.RenameFunc(oldPath, newPath)
+	}
+	return mfs.defaultRename(oldPath, newPath)
 }
 
 func (mfs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
@@ -433,17 +527,22 @@ func (r *failingReader) Sync() error {
 }
 
 type mockSerializer struct {
-	marshalLogEntryFunc   func(types.LogEntry) ([]byte, error)
-	unmarshalLogEntryFunc func([]byte) (types.LogEntry, error)
-	marshalMetadataFunc   func(logMetadata) ([]byte, error)
-	calledWith            []byte
+	marshalLogEntryFunc           func(types.LogEntry) ([]byte, error)
+	unmarshalLogEntryFunc         func([]byte) (types.LogEntry, error)
+	marshalMetadataFunc           func(logMetadata) ([]byte, error)
+	unmarshalMetadataFunc         func([]byte) (logMetadata, error)
+	marshalStateFunc              func(types.PersistentState) ([]byte, error)
+	unmarshalStateFunc            func([]byte) (types.PersistentState, error)
+	marshalSnapshotMetadataFunc   func(types.SnapshotMetadata) ([]byte, error)
+	unmarshalSnapshotMetadataFunc func([]byte) (types.SnapshotMetadata, error)
+	calledWith                    []byte
 }
 
 func (m *mockSerializer) MarshalLogEntry(entry types.LogEntry) ([]byte, error) {
 	if m.marshalLogEntryFunc != nil {
 		return m.marshalLogEntryFunc(entry)
 	}
-	return nil, nil
+	return nil, errors.New("mockSerializer: marshalLogEntryFunc not set")
 }
 
 func (m *mockSerializer) UnmarshalLogEntry(data []byte) (types.LogEntry, error) {
@@ -461,25 +560,39 @@ func (m *mockSerializer) MarshalMetadata(metadata logMetadata) ([]byte, error) {
 	return newJsonSerializer().MarshalMetadata(metadata)
 }
 
-// All unused methods stubbed
-func (m *mockSerializer) UnmarshalMetadata([]byte) (logMetadata, error) {
-	return logMetadata{}, nil
+func (m *mockSerializer) UnmarshalMetadata(data []byte) (logMetadata, error) {
+	if m.unmarshalMetadataFunc != nil {
+		return m.unmarshalMetadataFunc(data)
+	}
+	return logMetadata{}, errors.New("mockSerializer: unmarshalMetadataFunc not set")
 }
 
-func (m *mockSerializer) MarshalState(types.PersistentState) ([]byte, error) {
-	return nil, nil
+func (m *mockSerializer) MarshalState(state types.PersistentState) ([]byte, error) {
+	if m.marshalStateFunc != nil {
+		return m.marshalStateFunc(state)
+	}
+	return nil, errors.New("mockSerializer: marshalStateFunc not set")
 }
 
-func (m *mockSerializer) UnmarshalState([]byte) (types.PersistentState, error) {
-	return types.PersistentState{}, nil
+func (m *mockSerializer) UnmarshalState(data []byte) (types.PersistentState, error) {
+	if m.unmarshalStateFunc != nil {
+		return m.unmarshalStateFunc(data)
+	}
+	return types.PersistentState{}, errors.New("mockSerializer: unmarshalStateFunc not set")
 }
 
-func (m *mockSerializer) MarshalSnapshotMetadata(types.SnapshotMetadata) ([]byte, error) {
-	return nil, nil
+func (m *mockSerializer) MarshalSnapshotMetadata(metadata types.SnapshotMetadata) ([]byte, error) {
+	if m.marshalSnapshotMetadataFunc != nil {
+		return m.marshalSnapshotMetadataFunc(metadata)
+	}
+	return nil, errors.New("mockSerializer: marshalSnapshotMetadataFunc not set")
 }
 
-func (m *mockSerializer) UnmarshalSnapshotMetadata([]byte) (types.SnapshotMetadata, error) {
-	return types.SnapshotMetadata{}, nil
+func (m *mockSerializer) UnmarshalSnapshotMetadata(data []byte) (types.SnapshotMetadata, error) {
+	if m.unmarshalSnapshotMetadataFunc != nil {
+		return m.unmarshalSnapshotMetadataFunc(data)
+	}
+	return types.SnapshotMetadata{}, errors.New("mockSerializer: unmarshalSnapshotMetadataFunc not set")
 }
 
 // mockLogEntryReader implements logEntryReader for testing
@@ -487,8 +600,8 @@ type mockLogEntryReader struct {
 	mu          sync.Mutex
 	entries     []types.LogEntry
 	offsets     []int64
-	readErrors  []error
 	bytesRead   []int64
+	readErrors  []error
 	readCallIdx int
 }
 
@@ -605,46 +718,91 @@ func createTestData(entryData []byte, prefixSize int) []byte {
 	return append(prefix, entryData...)
 }
 
+// mockIndexService implements indexService for testing.
 type mockIndexService struct {
+	BuildFunc             func(string) (buildResult, error)
+	ReadInRangeFunc       func(context.Context, string, []types.IndexOffsetPair, types.Index, types.Index) ([]types.LogEntry, int64, error)
+	VerifyConsistencyFunc func([]types.IndexOffsetPair) error
+	GetBoundsFunc         func([]types.IndexOffsetPair, types.Index, types.Index) boundsResult
+	AppendFunc            func([]types.IndexOffsetPair, []types.IndexOffsetPair) []types.IndexOffsetPair
+	TruncateLastFunc      func([]types.IndexOffsetPair, int) []types.IndexOffsetPair
+	FindFirstIndexFunc    func([]types.IndexOffsetPair, types.Index) int
+	TruncateAfterFunc     func([]types.IndexOffsetPair, types.Index) []types.IndexOffsetPair
+	TruncateBeforeFunc    func([]types.IndexOffsetPair, types.Index) []types.IndexOffsetPair
+
 	getBoundsResult boundsResult
 }
 
 func (m *mockIndexService) Build(logPath string) (buildResult, error) {
+	if m.BuildFunc != nil {
+		return m.BuildFunc(logPath)
+	}
 	panic("mockIndexService.Build not implemented")
 }
 
 func (m *mockIndexService) ReadInRange(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
+	if m.ReadInRangeFunc != nil {
+		return m.ReadInRangeFunc(ctx, logPath, indexMap, start, end)
+	}
 	panic("mockIndexService.ReadInRange not implemented")
 }
 
 func (m *mockIndexService) VerifyConsistency(indexMap []types.IndexOffsetPair) error {
-	panic("mockIndexService.VerifyConsistency not implemented")
+	if m.VerifyConsistencyFunc != nil {
+		return m.VerifyConsistencyFunc(indexMap)
+	}
+	return nil
 }
 
 func (m *mockIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
+	if m.GetBoundsFunc != nil {
+		return m.GetBoundsFunc(indexMap, currentFirst, currentLast)
+	}
 	return m.getBoundsResult
 }
 
 func (m *mockIndexService) Append(base, additions []types.IndexOffsetPair) []types.IndexOffsetPair {
-	panic("mockIndexService.AppendEntries not implemented")
+	if m.AppendFunc != nil {
+		return m.AppendFunc(base, additions)
+	}
+	return append(base, additions...)
 }
 
 func (m *mockIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair {
-	panic("mockIndexService.TruncateLastEntries not implemented")
+	if m.TruncateLastFunc != nil {
+		return m.TruncateLastFunc(indexMap, count)
+	}
+	if count <= 0 {
+		return indexMap
+	}
+	if count >= len(indexMap) {
+		return []types.IndexOffsetPair{}
+	}
+	return indexMap[:len(indexMap)-count]
 }
 
 func (m *mockIndexService) FindFirstIndexAtOrAfter(indexMap []types.IndexOffsetPair, target types.Index) int {
+	if m.FindFirstIndexFunc != nil {
+		return m.FindFirstIndexFunc(indexMap, target)
+	}
 	panic("mockIndexService.FindFirstIndexAtOrAfter not implemented")
 }
 
 func (m *mockIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+	if m.TruncateAfterFunc != nil {
+		return m.TruncateAfterFunc(indexMap, target)
+	}
 	panic("mockIndexService.TruncateAfter not implemented")
 }
 
 func (m *mockIndexService) TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+	if m.TruncateBeforeFunc != nil {
+		return m.TruncateBeforeFunc(indexMap, target)
+	}
 	panic("mockIndexService.TruncateBefore not implemented")
 }
 
+// mockMetadataService implements metadataService for testing.
 type mockMetadataService struct {
 	loadError        error
 	saveError        error
@@ -655,36 +813,79 @@ type mockMetadataService struct {
 	savedAtomicWrite bool
 	saveCalled       bool
 
-	SaveMetadataFunc func(path string, metadata logMetadata, useAtomicWrite bool) error
+	LoadMetadataFunc             func(path string) (logMetadata, error)
+	SaveMetadataFunc             func(path string, metadata logMetadata, useAtomicWrite bool) error
+	SyncMetadataFromIndexMapFunc func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error)
+	ValidateMetadataRangeFunc    func(firstIndex, lastIndex types.Index) error
 }
 
 func (mms *mockMetadataService) LoadMetadata(path string) (logMetadata, error) {
+	if mms.LoadMetadataFunc != nil {
+		return mms.LoadMetadataFunc(path)
+	}
 	return logMetadata{}, mms.loadError
 }
 func (mms *mockMetadataService) SaveMetadata(path string, metadata logMetadata, useAtomicWrite bool) error {
-	if mms.SaveMetadataFunc != nil {
-		return mms.SaveMetadataFunc(path, metadata, useAtomicWrite)
-	}
-
 	mms.saveCalled = true
 	mms.savedPath = path
 	mms.savedMetadata = metadata
 	mms.savedAtomicWrite = useAtomicWrite
+	if mms.SaveMetadataFunc != nil {
+		return mms.SaveMetadataFunc(path, metadata, useAtomicWrite)
+	}
 	return mms.saveError
 }
 func (mms *mockMetadataService) SyncMetadataFromIndexMap(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+	if mms.SyncMetadataFromIndexMapFunc != nil {
+		return mms.SyncMetadataFromIndexMapFunc(path, indexMap, currentFirst, currentLast, context, useAtomicWrite)
+	}
 	return 0, 0, mms.syncError
 }
 func (mms *mockMetadataService) ValidateMetadataRange(firstIndex, lastIndex types.Index) error {
+	if mms.ValidateMetadataRangeFunc != nil {
+		return mms.ValidateMetadataRangeFunc(firstIndex, lastIndex)
+	}
 	return mms.validateError
 }
 
+// mockSystemInfo implements systemInfo for testing.
 type mockSystemInfo struct {
 	PIDFunc          func() int
 	HostnameFunc     func() string
 	NowUnixMilliFunc func() int64
 }
 
-func (m *mockSystemInfo) PID() int            { return m.PIDFunc() }
-func (m *mockSystemInfo) Hostname() string    { return m.HostnameFunc() }
-func (m *mockSystemInfo) NowUnixMilli() int64 { return m.NowUnixMilliFunc() }
+func (m *mockSystemInfo) PID() int {
+	if m.PIDFunc != nil {
+		return m.PIDFunc()
+	}
+	return 12345
+}
+func (m *mockSystemInfo) Hostname() string {
+	if m.HostnameFunc != nil {
+		return m.HostnameFunc()
+	}
+	return "mock-host"
+}
+func (m *mockSystemInfo) NowUnixMilli() int64 {
+	if m.NowUnixMilliFunc != nil {
+		return m.NowUnixMilliFunc()
+	}
+	return 1678886400000 // Default fixed time (approx Mar 15 2023)
+}
+
+type mockFileInfo struct {
+	nameVal string
+	sizeVal int64
+	modeVal os.FileMode
+	modtVal time.Time
+	isDir   bool
+	sysVal  any
+}
+
+func (m *mockFileInfo) Name() string       { return m.nameVal }
+func (m *mockFileInfo) Size() int64        { return m.sizeVal }
+func (m *mockFileInfo) Mode() os.FileMode  { return m.modeVal }
+func (m *mockFileInfo) ModTime() time.Time { return m.modtVal }
+func (m *mockFileInfo) IsDir() bool        { return m.isDir }
+func (m *mockFileInfo) Sys() any           { return m.sysVal }

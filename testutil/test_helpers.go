@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,49 +16,49 @@ func AssertLessThanEqual(t *testing.T, a, b uint64) {
 	}
 }
 
-func AssertTrue(t testing.TB, condition bool, msgAndArgs ...interface{}) {
+func AssertTrue(t testing.TB, condition bool, msgAndArgs ...any) {
 	t.Helper()
 	if !condition {
 		t.Errorf("Expected condition to be true\n%s", FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func AssertFalse(t testing.TB, condition bool, msgAndArgs ...interface{}) {
+func AssertFalse(t testing.TB, condition bool, msgAndArgs ...any) {
 	t.Helper()
 	if condition {
 		t.Errorf("Expected condition to be false\n%s", FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func AssertEqual(t testing.TB, expected, actual interface{}, msgAndArgs ...interface{}) {
+func AssertEqual(t testing.TB, expected, actual any, msgAndArgs ...any) {
 	t.Helper()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Not equal: \nexpected: %v\nactual  : %v\n%s", expected, actual, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func AssertNoError(t testing.TB, err error, msgAndArgs ...interface{}) {
+func AssertNoError(t testing.TB, err error, msgAndArgs ...any) {
 	t.Helper()
 	if err != nil {
 		t.Errorf("Unexpected error: %v\n%s", err, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func AssertError(t testing.TB, err error, msgAndArgs ...interface{}) {
+func AssertError(t testing.TB, err error, msgAndArgs ...any) {
 	t.Helper()
 	if err == nil {
 		t.Errorf("Expected an error but got nil\n%s", FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func AssertErrorIs(t testing.TB, err, target error, msgAndArgs ...interface{}) {
+func AssertErrorIs(t testing.TB, err, target error, msgAndArgs ...any) {
 	t.Helper()
 	if !errors.Is(err, target) {
 		t.Errorf("Expected error to be %v but got %v\n%s", target, err, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func AssertLen(t testing.TB, object interface{}, length int, msgAndArgs ...interface{}) {
+func AssertLen(t testing.TB, object any, length int, msgAndArgs ...any) {
 	t.Helper()
 	v := reflect.ValueOf(object)
 	if v.Len() != length {
@@ -73,7 +74,7 @@ func AssertEmpty(t testing.TB, object interface{}, msgAndArgs ...interface{}) {
 	}
 }
 
-func AssertNotNil(t testing.TB, object interface{}, msgAndArgs ...interface{}) {
+func AssertNotNil(t testing.TB, object any, msgAndArgs ...any) {
 	t.Helper()
 	if object == nil {
 		t.Errorf("Expected not nil but got nil\n%s", FormatMsgAndArgs(msgAndArgs...))
@@ -87,7 +88,7 @@ func AssertNotNil(t testing.TB, object interface{}, msgAndArgs ...interface{}) {
 }
 
 // Format message and arguments for error output
-func FormatMsgAndArgs(msgAndArgs ...interface{}) string {
+func FormatMsgAndArgs(msgAndArgs ...any) string {
 	if len(msgAndArgs) == 0 {
 		return ""
 	}
@@ -98,14 +99,14 @@ func FormatMsgAndArgs(msgAndArgs ...interface{}) string {
 }
 
 // Custom require helpers that fail the test immediately
-func RequireNoError(t testing.TB, err error, msgAndArgs ...interface{}) {
+func RequireNoError(t testing.TB, err error, msgAndArgs ...any) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("Required no error but got: %v\n%s", err, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
 
-func RequireNotNil(t testing.TB, object interface{}, msgAndArgs ...interface{}) {
+func RequireNotNil(t testing.TB, object any, msgAndArgs ...any) {
 	t.Helper()
 	if object == nil {
 		t.Fatalf("Required not nil but got nil\n%s", FormatMsgAndArgs(msgAndArgs...))
@@ -118,9 +119,18 @@ func RequireNotNil(t testing.TB, object interface{}, msgAndArgs ...interface{}) 
 	}
 }
 
-func AssertContains(t testing.TB, s, substr string, msgAndArgs ...interface{}) {
+func AssertContains(t testing.TB, s, substr string, msgAndArgs ...any) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
 		t.Errorf("Expected string to contain substring:\nstring: %q\nsubstring: %q\n%s", s, substr, FormatMsgAndArgs(msgAndArgs...))
+	}
+}
+
+// AssertFileRemoved checks if the given path exists in the slice of removed file paths.
+func AssertFileRemoved(t testing.TB, path string, removedFiles []string, msgAndArgs ...any) {
+	t.Helper()
+	found := slices.Contains(removedFiles, path)
+	if !found {
+		t.Errorf("Expected file %q to be removed, but it wasn't in the list of removed files: %v\n%s", path, removedFiles, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
