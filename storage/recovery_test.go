@@ -8,7 +8,46 @@ import (
 	"testing"
 
 	"github.com/jathurchan/raftlock/logger"
+	"github.com/jathurchan/raftlock/testutil"
+	"github.com/jathurchan/raftlock/types"
 )
+
+// TestRecoveryModeString tests the String method of recoveryMode
+func TestRecoveryModeString(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     recoveryMode
+		expected string
+	}{
+		{
+			name:     "ConservativeMode",
+			mode:     conservativeMode,
+			expected: "conservative",
+		},
+		{
+			name:     "NormalMode",
+			mode:     normalMode,
+			expected: "normal",
+		},
+		{
+			name:     "AggressiveMode",
+			mode:     aggressiveMode,
+			expected: "aggressive",
+		},
+		{
+			name:     "UnknownMode",
+			mode:     recoveryMode(999), // Invalid value
+			expected: "unknown",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.mode.String()
+			testutil.AssertEqual(t, tc.expected, result)
+		})
+	}
+}
 
 func TestNewRecoveryService(t *testing.T) {
 	// Test default constructor
@@ -1123,4 +1162,260 @@ func TestRemoveRecoveryMarker(t *testing.T) {
 // Helper function to create a bytes.Reader without having to import bytes
 func newMockReader(data []byte) *bytes.Reader {
 	return bytes.NewReader(data)
+}
+
+// TestCreateSnapshotRecoveryMarker tests the CreateSnapshotRecoveryMarker method
+func TestCreateSnapshotRecoveryMarker(t *testing.T) {
+	tests := []struct {
+		name        string
+		writeErr    error
+		expectedErr bool
+	}{
+		{
+			name:        "Success",
+			writeErr:    nil,
+			expectedErr: false,
+		},
+		{
+			name:        "WriteError",
+			writeErr:    errors.New("write error"),
+			expectedErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newMockFileSystem()
+			markerPath := fs.Path("/tmp/raft", snapshotMarkerFilename)
+
+			// Track if WriteFile was called
+			writeFileCalled := false
+
+			fs.WriteFileFunc = func(name string, data []byte, perm os.FileMode) error {
+				if name == markerPath {
+					writeFileCalled = true
+					if tc.writeErr != nil {
+						return tc.writeErr
+					}
+					fs.files[name] = data
+				}
+				return nil
+			}
+
+			sysInfo := &mockSystemInfo{
+				PIDFunc:          func() int { return 12345 },
+				HostnameFunc:     func() string { return "test-host" },
+				NowUnixMilliFunc: func() int64 { return 1617293982123 },
+			}
+
+			rs := &defaultRecoveryService{
+				fs:     fs,
+				logger: &logger.NoOpLogger{},
+				dir:    "/tmp/raft",
+				proc:   sysInfo,
+			}
+
+			metadata := types.SnapshotMetadata{
+				LastIncludedIndex: 100,
+				LastIncludedTerm:  5,
+			}
+
+			err := rs.CreateSnapshotRecoveryMarker(metadata)
+
+			if tc.expectedErr && err == nil {
+				t.Fatal("Expected error but got nil")
+			}
+
+			if !tc.expectedErr && err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if !tc.expectedErr {
+				testutil.AssertTrue(t, writeFileCalled, "Expected WriteFile to be called for marker")
+			}
+		})
+	}
+}
+
+// TestUpdateSnapshotMarkerStatus tests the UpdateSnapshotMarkerStatus method
+func TestUpdateSnapshotMarkerStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		readErr     error
+		writeErr    error
+		expectedErr bool
+	}{
+		{
+			name:        "Success",
+			readErr:     nil,
+			writeErr:    nil,
+			expectedErr: false,
+		},
+		{
+			name:        "ReadError",
+			readErr:     errors.New("read error"),
+			writeErr:    nil,
+			expectedErr: true,
+		},
+		{
+			name:        "WriteError",
+			readErr:     nil,
+			writeErr:    errors.New("write error"),
+			expectedErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newMockFileSystem()
+			markerPath := fs.Path("/tmp/raft", snapshotMarkerFilename)
+
+			// Initialize with existing content
+			initialContent := "pid=12345,time=1617293982123"
+			if tc.readErr == nil {
+				fs.files[markerPath] = []byte(initialContent)
+			}
+
+			fs.ReadFileFunc = func(name string) ([]byte, error) {
+				if tc.readErr != nil {
+					return nil, tc.readErr
+				}
+				return fs.files[name], nil
+			}
+
+			fs.WriteFileFunc = func(name string, data []byte, perm os.FileMode) error {
+				if tc.writeErr != nil {
+					return tc.writeErr
+				}
+				fs.files[name] = data
+				return nil
+			}
+
+			rs := &defaultRecoveryService{
+				fs:     fs,
+				logger: &logger.NoOpLogger{},
+				dir:    "/tmp/raft",
+			}
+
+			err := rs.UpdateSnapshotMarkerStatus("meta_committed=true")
+
+			if tc.expectedErr && err == nil {
+				t.Fatal("Expected error but got nil")
+			}
+
+			if !tc.expectedErr && err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if !tc.expectedErr {
+				updatedContent, _ := fs.ReadFile(markerPath)
+				expected := initialContent + ",meta_committed=true"
+				testutil.AssertEqual(t, expected, string(updatedContent))
+			}
+		})
+	}
+}
+
+// TestRemoveSnapshotRecoveryMarker tests the RemoveSnapshotRecoveryMarker method
+func TestRemoveSnapshotRecoveryMarker(t *testing.T) {
+	tests := []struct {
+		name        string
+		removeErr   error
+		expectedErr bool
+	}{
+		{
+			name:        "Success",
+			removeErr:   nil,
+			expectedErr: false,
+		},
+		{
+			name:        "RemoveError",
+			removeErr:   errors.New("remove error"),
+			expectedErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newMockFileSystem()
+			markerPath := fs.Path("/tmp/raft", snapshotMarkerFilename)
+
+			// Create marker file
+			fs.files[markerPath] = []byte("marker content")
+
+			removeCalled := false
+			fs.RemoveFunc = func(name string) error {
+				if name == markerPath {
+					removeCalled = true
+					if tc.removeErr != nil {
+						return tc.removeErr
+					}
+					// Actually remove the file from our mock's internal state
+					delete(fs.files, name)
+				}
+				return nil
+			}
+
+			rs := &defaultRecoveryService{
+				fs:     fs,
+				logger: &logger.NoOpLogger{},
+				dir:    "/tmp/raft",
+			}
+
+			err := rs.RemoveSnapshotRecoveryMarker()
+
+			if tc.expectedErr && err == nil {
+				t.Fatal("Expected error but got nil")
+			}
+
+			if !tc.expectedErr && err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			testutil.AssertTrue(t, removeCalled, "Expected Remove to be called")
+
+			if !tc.expectedErr {
+				_, exists := fs.files[markerPath]
+				testutil.AssertFalse(t, exists, "Expected marker file to be removed")
+			}
+		})
+	}
+}
+
+// TestCompleteSnapshotDataCommitWithRollbackError tests the error case when both rename and metadata removal fail
+func TestCompleteSnapshotDataCommitWithRollbackError(t *testing.T) {
+	fs := newMockFileSystem()
+	mockLog := &logger.NoOpLogger{
+		ErrorwFunc: func(msg string, keysAndValues ...any) {
+			// Verification that error is logged can be done here if needed
+		},
+	}
+
+	rs := &defaultRecoveryService{
+		fs:     fs,
+		logger: mockLog,
+		dir:    "/tmp/raft",
+		mode:   normalMode,
+	}
+
+	// Setup both rename and remove to fail
+	renameErr := errors.New("rename error")
+	removeErr := errors.New("remove error")
+
+	fs.RenameFunc = func(oldPath, newPath string) error {
+		return renameErr
+	}
+
+	fs.RemoveFunc = func(name string) error {
+		return removeErr
+	}
+
+	// Call the method under test
+	err := rs.completeSnapshotDataCommit()
+
+	// Verify error contains both error messages
+	testutil.AssertError(t, err)
+	testutil.AssertErrorIs(t, err, ErrStorageIO)
+	testutil.AssertContains(t, err.Error(), "rename error")
+	testutil.AssertContains(t, err.Error(), "remove error")
 }
