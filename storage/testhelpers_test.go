@@ -11,8 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
+	"github.com/jathurchan/raftlock/logger"
+	"github.com/jathurchan/raftlock/testutil"
 	"github.com/jathurchan/raftlock/types"
 )
 
@@ -39,6 +42,24 @@ var _ metadataService = (*mockMetadataService)(nil)
 
 // mockSystemInfo implements the `systemInfo` for testing.
 var _ systemInfo = (*mockSystemInfo)(nil)
+
+// mockRecoveryService implements the `recoveryService` for testing.
+var _ recoveryService = (*mockRecoveryService)(nil)
+
+// mockLogAppender implements the `logAppender` for testing.
+var _ logAppender = (*mockLogAppender)(nil)
+
+// mockLogRewriter implements the `logRewriter` for testing.
+var _ logRewriter = (*mockLogRewriter)(nil)
+
+// mockSnapshotWriter implements the `snapshotWriter` for testing.
+var _ snapshotWriter = (*mockSnapshotWriter)(nil)
+
+// mockSnapshotReader implements the `snapshotReader` for testing.
+var _ snapshotReader = (*mockSnapshotReader)(nil)
+
+// mockRWOperationLocker implements the `rwOperationLocker` for testing.
+var _ rwOperationLocker = (*mockRWOperationLocker)(nil)
 
 type mockFile struct {
 	*bytes.Reader
@@ -406,7 +427,10 @@ func (mfs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	if mfs.MkdirAllFunc != nil {
 		return mfs.MkdirAllFunc(path, perm)
 	}
-	return mfs.mkdirAllErr
+	if mfs.mkdirAllErr != nil {
+		return mfs.mkdirAllErr
+	}
+	return nil
 }
 
 func (mfs *mockFileSystem) Dir(path string) string {
@@ -490,10 +514,7 @@ func (r *failingReader) Read(p []byte) (int, error) {
 	if r.bytesToRead <= 0 {
 		return 0, r.err
 	}
-	toRead := len(p)
-	if toRead > r.bytesToRead {
-		toRead = r.bytesToRead
-	}
+	toRead := min(len(p), r.bytesToRead)
 	n, err := r.reader.Read(p[:toRead])
 	r.bytesToRead -= n
 	if r.bytesToRead <= 0 {
@@ -597,12 +618,13 @@ func (m *mockSerializer) UnmarshalSnapshotMetadata(data []byte) (types.SnapshotM
 
 // mockLogEntryReader implements logEntryReader for testing
 type mockLogEntryReader struct {
-	mu          sync.Mutex
-	entries     []types.LogEntry
-	offsets     []int64
-	bytesRead   []int64
-	readErrors  []error
-	readCallIdx int
+	mu            sync.Mutex
+	entries       []types.LogEntry
+	offsets       []int64
+	bytesRead     []int64
+	readErrors    []error
+	readCallIdx   int
+	ScanRangeFunc func(context.Context, file, types.Index, types.Index) ([]types.LogEntry, error)
 }
 
 func newMockLogEntryReader() *mockLogEntryReader {
@@ -695,6 +717,9 @@ func (m *mockLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex
 }
 
 func (m *mockLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+	if m.ScanRangeFunc != nil {
+		return m.ScanRangeFunc(ctx, file, start, end)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -889,3 +914,374 @@ func (m *mockFileInfo) Mode() os.FileMode  { return m.modeVal }
 func (m *mockFileInfo) ModTime() time.Time { return m.modtVal }
 func (m *mockFileInfo) IsDir() bool        { return m.isDir }
 func (m *mockFileInfo) Sys() any           { return m.sysVal }
+
+// mockRecoveryService implements recoveryService for testing
+type mockRecoveryService struct {
+	checkForMarkersErr           error
+	performRecoveryErr           error
+	createMarkerErr              error
+	cleanupTempFilesErr          error
+	removeMarkerErr              error
+	createSnapshotMarkerErr      error
+	updateSnapshotMarkerErr      error
+	removeSnapshotMarkerErr      error
+	recoveryNeeded               bool
+	checkForMarkersCalled        bool
+	performRecoveryCalled        bool
+	createMarkerCalled           bool
+	cleanupTempFilesCalled       bool
+	removeMarkerCalled           bool
+	createSnapshotMarkerCalled   bool
+	updateSnapshotMarkerCalled   bool
+	removeSnapshotMarkerCalled   bool
+	lastUpdateSnapshotMarkerArgs string
+	lastSnapshotMetadata         types.SnapshotMetadata
+}
+
+func (m *mockRecoveryService) CheckForRecoveryMarkers() (bool, error) {
+	m.checkForMarkersCalled = true
+	return m.recoveryNeeded, m.checkForMarkersErr
+}
+
+func (m *mockRecoveryService) PerformRecovery() error {
+	m.performRecoveryCalled = true
+	return m.performRecoveryErr
+}
+
+func (m *mockRecoveryService) CreateRecoveryMarker() error {
+	m.createMarkerCalled = true
+	return m.createMarkerErr
+}
+
+func (m *mockRecoveryService) CleanupTempFiles() error {
+	m.cleanupTempFilesCalled = true
+	return m.cleanupTempFilesErr
+}
+
+func (m *mockRecoveryService) RemoveRecoveryMarker() error {
+	m.removeMarkerCalled = true
+	return m.removeMarkerErr
+}
+
+func (m *mockRecoveryService) CreateSnapshotRecoveryMarker(metadata types.SnapshotMetadata) error {
+	m.createSnapshotMarkerCalled = true
+	m.lastSnapshotMetadata = metadata
+	return m.createSnapshotMarkerErr
+}
+
+func (m *mockRecoveryService) UpdateSnapshotMarkerStatus(status string) error {
+	m.updateSnapshotMarkerCalled = true
+	m.lastUpdateSnapshotMarkerArgs = status
+	return m.updateSnapshotMarkerErr
+}
+
+func (m *mockRecoveryService) RemoveSnapshotRecoveryMarker() error {
+	m.removeSnapshotMarkerCalled = true
+	return m.removeSnapshotMarkerErr
+}
+
+// mockLogAppender implements logAppender for testing
+type mockLogAppender struct {
+	appendErr  error
+	appendArgs struct {
+		ctx          context.Context
+		entries      []types.LogEntry
+		currentLast  types.Index
+		callCount    int
+		lastEntries  []types.LogEntry
+		lastCurrent  types.Index
+		allCalledCtx []context.Context
+	}
+	appendResult appendResult
+}
+
+func (m *mockLogAppender) Append(ctx context.Context, entries []types.LogEntry, currentLast types.Index) (appendResult, error) {
+	m.appendArgs.ctx = ctx
+	m.appendArgs.callCount++
+	m.appendArgs.lastEntries = entries
+	m.appendArgs.lastCurrent = currentLast
+	m.appendArgs.allCalledCtx = append(m.appendArgs.allCalledCtx, ctx)
+	return m.appendResult, m.appendErr
+}
+
+// mockLogRewriter implements logRewriter for testing
+type mockLogRewriter struct {
+	rewriteFunc func(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error)
+	rewriteCall struct {
+		ctx       context.Context
+		entries   []types.LogEntry
+		callCount int
+	}
+}
+
+func (m *mockLogRewriter) Rewrite(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error) {
+	m.rewriteCall.ctx = ctx
+	m.rewriteCall.entries = entries
+	m.rewriteCall.callCount++
+
+	if m.rewriteFunc != nil {
+		return m.rewriteFunc(ctx, entries)
+	}
+
+	// Default: return one offset pair per entry
+	pairs := make([]types.IndexOffsetPair, len(entries))
+	for i, entry := range entries {
+		pairs[i] = types.IndexOffsetPair{
+			Index:  entry.Index,
+			Offset: int64(i * 100), // Mock offset
+		}
+	}
+	return pairs, nil
+}
+
+// mockSnapshotWriter implements snapshotWriter for testing
+type mockSnapshotWriter struct {
+	writeErr  error
+	writeCall struct {
+		ctx       context.Context
+		metadata  types.SnapshotMetadata
+		data      []byte
+		callCount int
+	}
+}
+
+func (m *mockSnapshotWriter) Write(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+	m.writeCall.ctx = ctx
+	m.writeCall.metadata = metadata
+	m.writeCall.data = data
+	m.writeCall.callCount++
+	return m.writeErr
+}
+
+// mockSnapshotReader implements snapshotReader for testing
+type mockSnapshotReader struct {
+	readErr    error
+	readResult struct {
+		metadata types.SnapshotMetadata
+		data     []byte
+	}
+	readCall struct {
+		ctx       context.Context
+		callCount int
+	}
+}
+
+func (m *mockSnapshotReader) Read(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
+	m.readCall.ctx = ctx
+	m.readCall.callCount++
+	return m.readResult.metadata, m.readResult.data, m.readErr
+}
+
+// mockStorageDependencies holds all the mock dependencies needed for FileStorage tests
+type mockStorageDependencies struct {
+	fs             *mockFileSystem
+	serializer     *mockSerializer
+	logAppender    *mockLogAppender
+	logReader      *mockLogEntryReader
+	logRewriter    *mockLogRewriter
+	indexSvc       *mockIndexService
+	metadataSvc    *mockMetadataService
+	recoverySvc    *mockRecoveryService
+	snapshotWriter *mockSnapshotWriter
+	snapshotReader *mockSnapshotReader
+	logger         *logger.NoOpLogger
+}
+
+// newMockStorageDependencies creates a new set of mock dependencies for testing
+func newMockStorageDependencies() *mockStorageDependencies {
+	return &mockStorageDependencies{
+		fs:             newMockFileSystem(),
+		serializer:     &mockSerializer{},
+		logAppender:    &mockLogAppender{},
+		logReader:      newMockLogEntryReader(),
+		logRewriter:    &mockLogRewriter{},
+		indexSvc:       &mockIndexService{},
+		metadataSvc:    &mockMetadataService{},
+		recoverySvc:    &mockRecoveryService{},
+		snapshotWriter: &mockSnapshotWriter{},
+		snapshotReader: &mockSnapshotReader{},
+		logger:         &logger.NoOpLogger{},
+	}
+}
+
+// createFileStorageWithMocks creates a new FileStorage with the provided mock dependencies
+func createFileStorageWithMocks(cfg StorageConfig, options FileStorageOptions, deps *mockStorageDependencies) (*FileStorage, error) {
+	s := &FileStorage{
+		dir:            cfg.Dir,
+		options:        options,
+		fileSystem:     deps.fs,
+		serializer:     deps.serializer,
+		logAppender:    deps.logAppender,
+		logReader:      deps.logReader,
+		logRewriter:    deps.logRewriter,
+		indexSvc:       deps.indexSvc,
+		metadataSvc:    deps.metadataSvc,
+		recoverySvc:    deps.recoverySvc,
+		snapshotWriter: deps.snapshotWriter,
+		snapshotReader: deps.snapshotReader,
+		logger:         deps.logger,
+	}
+
+	// Initialize atomic values
+	s.status.Store(storageStatusReady)
+
+	// Initialize mutexes
+	s.logLocker = newRWOperationLocker(
+		&s.logMu,
+		deps.logger,
+		options,
+		&s.metrics.slowOperations,
+	)
+
+	s.snapshotLocker = newRWOperationLocker(
+		&s.snapshotMu,
+		deps.logger,
+		options,
+		&s.metrics.slowOperations,
+	)
+
+	return s, nil
+}
+
+// checkStorage validates FileStorage behavior in tests
+func checkStorage(t *testing.T, s *FileStorage, expectedFirst, expectedLast types.Index, expectedStatus storageStatus) {
+	t.Helper()
+
+	actualFirst := s.FirstLogIndex()
+	actualLast := s.LastLogIndex()
+	actualStatus := s.status.Load().(storageStatus)
+
+	testutil.AssertEqual(t, expectedFirst, actualFirst, "FirstLogIndex mismatch")
+	testutil.AssertEqual(t, expectedLast, actualLast, "LastLogIndex mismatch")
+	testutil.AssertEqual(t, expectedStatus, actualStatus, "Storage status mismatch")
+}
+
+// verifyAppendCall checks if Append was called correctly
+func verifyAppendCall(t *testing.T, mock *mockLogAppender, expectedEntries []types.LogEntry, expectedLastIndex types.Index) {
+	t.Helper()
+
+	testutil.AssertTrue(t, mock.appendArgs.callCount > 0, "Append should have been called")
+	testutil.AssertEqual(t, expectedLastIndex, mock.appendArgs.lastCurrent, "Last index mismatch in Append call")
+
+	if expectedEntries != nil {
+		testutil.AssertEqual(t, len(expectedEntries), len(mock.appendArgs.lastEntries), "Entry count mismatch in Append call")
+
+		for i := range expectedEntries {
+			testutil.AssertEqual(t, expectedEntries[i].Index, mock.appendArgs.lastEntries[i].Index,
+				"Entry index mismatch at position %d", i)
+			testutil.AssertEqual(t, expectedEntries[i].Term, mock.appendArgs.lastEntries[i].Term,
+				"Entry term mismatch at position %d", i)
+		}
+	}
+}
+
+// mockRWOperationLocker is a simplified implementation of rwOperationLocker for testing
+type mockRWOperationLocker struct {
+	mu sync.RWMutex
+}
+
+func (m *mockRWOperationLocker) DoWrite(ctx context.Context, operation func() error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return operation()
+}
+
+func (m *mockRWOperationLocker) DoRead(ctx context.Context, operation func() error) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return operation()
+}
+
+type testStorageBuilder struct {
+	t     *testing.T
+	cfg   StorageConfig
+	opts  FileStorageOptions
+	deps  *mockStorageDependencies
+	first types.Index
+	last  types.Index
+}
+
+func newTestStorageBuilder(t *testing.T) *testStorageBuilder {
+	deps := newMockStorageDependencies()
+
+	deps.metadataSvc.ValidateMetadataRangeFunc = func(firstIndex, lastIndex types.Index) error { return nil }
+	deps.indexSvc.BuildFunc = func(path string) (buildResult, error) {
+		return buildResult{
+			IndexMap:       []types.IndexOffsetPair{{Index: 1, Offset: 0}},
+			Truncated:      false,
+			LastValidIndex: 1,
+		}, nil
+	}
+	deps.indexSvc.TruncateAfterFunc = func(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+		var result []types.IndexOffsetPair
+		for _, pair := range indexMap {
+			if pair.Index <= target {
+				result = append(result, pair)
+			}
+		}
+		return result
+	}
+	deps.indexSvc.TruncateBeforeFunc = func(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+		var result []types.IndexOffsetPair
+		for _, pair := range indexMap {
+			if pair.Index >= target {
+				result = append(result, pair)
+			}
+		}
+		return result
+	}
+	deps.indexSvc.ReadInRangeFunc = func(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
+		return []types.LogEntry{}, 0, nil
+	}
+	deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+		return 1, 1, nil
+	}
+	deps.logAppender.appendResult = appendResult{
+		FirstIndex: 1,
+		LastIndex:  1,
+		Offsets:    []types.IndexOffsetPair{{Index: 1, Offset: 0}},
+	}
+	deps.indexSvc.getBoundsResult = boundsResult{NewFirst: 1, NewLast: 1, Changed: false, WasReset: false}
+	deps.snapshotReader.readResult = struct {
+		metadata types.SnapshotMetadata
+		data     []byte
+	}{
+		metadata: types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1},
+		data:     []byte("test-snapshot"),
+	}
+
+	return &testStorageBuilder{
+		t:     t,
+		cfg:   StorageConfig{Dir: "/test"},
+		opts:  DefaultFileStorageOptions(),
+		deps:  deps,
+		first: 1,
+		last:  1,
+	}
+}
+
+func (b *testStorageBuilder) WithIndexBounds(first, last types.Index) *testStorageBuilder {
+	b.first = first
+	b.last = last
+	return b
+}
+
+func (b *testStorageBuilder) WithOptions(opts FileStorageOptions) *testStorageBuilder {
+	b.opts = opts
+	return b
+}
+
+func (b *testStorageBuilder) WithDeps(configure func(*mockStorageDependencies)) *testStorageBuilder {
+	configure(b.deps)
+	return b
+}
+
+func (b *testStorageBuilder) Build() (*FileStorage, *mockStorageDependencies) {
+	s, err := createFileStorageWithMocks(b.cfg, b.opts, b.deps)
+	if err != nil {
+		b.t.Fatalf("Failed to create test storage: %v", err)
+	}
+	s.firstLogIndex.Store(uint64(b.first))
+	s.lastLogIndex.Store(uint64(b.last))
+	return s, b.deps
+}
