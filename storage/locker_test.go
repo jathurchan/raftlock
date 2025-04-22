@@ -137,7 +137,7 @@ func TestRWOperationLocker_Concurrency(t *testing.T) {
 		var wg sync.WaitGroup
 		var counter atomic.Int32
 		const numReaders = 10
-		for i := 0; i < numReaders; i++ {
+		for range numReaders {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
