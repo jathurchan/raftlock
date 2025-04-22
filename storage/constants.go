@@ -71,4 +71,10 @@ const (
 
 	// defaultSlowOpThreshold is the threshold duration to log warnings for slow operations (100ms).
 	defaultSlowOpThreshold = 100 * time.Millisecond
+
+	// latencySampleLimit defines the maximum number of recent latency samples to retain
+	// per operation type (e.g., append, read, snapshot, etc.). These samples are used
+	// to compute latency percentiles (P95, P99). When the buffer exceeds this limit,
+	// the oldest samples are discarded in a FIFO manner.
+	latencySampleLimit = 512
 )
