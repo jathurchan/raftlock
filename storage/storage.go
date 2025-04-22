@@ -589,29 +589,32 @@ func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index)
 
 	var entries []types.LogEntry
 	err := s.logLocker.DoRead(ctx, func() error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		firstIdx := s.FirstLogIndex()
-		lastIdx := s.LastLogIndex()
-		clampedStart, clampedEnd, validRange := clampLogRange(start, end, firstIdx, lastIdx)
-		if !validRange {
-			s.logger.Debugw("Requested range is outside log bounds", "start", start, "end", end, "first", firstIdx, "last", lastIdx)
-			entries = []types.LogEntry{}
-			return nil
-		}
-
 		var err error
-		if s.options.Features.EnableIndexMap {
-			entries, err = s.getEntriesViaIndexMap(ctx, clampedStart, clampedEnd)
-		} else {
-			entries, err = s.getEntriesViaScan(ctx, clampedStart, clampedEnd)
-		}
+		entries, err = s.getLogEntriesUnlocked(ctx, start, end)
 		return err
 	})
 
 	return entries, err
+}
+
+func (s *FileStorage) getLogEntriesUnlocked(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+	if start == end {
+		return []types.LogEntry{}, nil
+	}
+
+	firstIdx := s.FirstLogIndex()
+	lastIdx := s.LastLogIndex()
+	clampedStart, clampedEnd, validRange := clampLogRange(start, end, firstIdx, lastIdx)
+	if !validRange {
+		s.logger.Debugw("Requested range is outside log bounds", "start", start, "end", end, "first", firstIdx, "last", lastIdx)
+		return []types.LogEntry{}, ErrIndexOutOfRange
+	}
+
+	if s.options.Features.EnableIndexMap {
+		return s.getEntriesViaIndexMap(ctx, clampedStart, clampedEnd)
+	}
+
+	return s.getEntriesViaScan(ctx, clampedStart, clampedEnd)
 }
 
 func (s *FileStorage) getEntriesViaIndexMap(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
@@ -822,7 +825,7 @@ func (s *FileStorage) truncateLogRange(ctx context.Context, keepStart, keepEnd t
 		return err
 	}
 
-	entries, err := s.GetLogEntries(ctx, keepStart, keepEnd)
+	entries, err := s.getLogEntriesUnlocked(ctx, keepStart, keepEnd)
 	if err != nil {
 		return fmt.Errorf("failed to load log entries for truncation: %w", err)
 	}
