@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
+
+	"slices"
 
 	"github.com/jathurchan/raftlock/types"
 )
@@ -131,4 +134,58 @@ func readChunks(ctx context.Context, file file, size int64, chunkSize int) ([]by
 	}
 
 	return data, nil
+}
+
+// updateMax atomically updates the value of max if the given value is greater.
+// Uses a compare-and-swap loop to safely update shared state.
+func updateMax(max *atomic.Uint64, val uint64) {
+	for {
+		current := max.Load()
+		if val <= current || max.CompareAndSwap(current, val) {
+			break
+		}
+	}
+}
+
+// computePercentile calculates the value at the given percentile from a slice of samples.
+// The input slice is copied and sorted to avoid modifying the original.
+func computePercentile(samples []uint64, percentile float64) uint64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	sorted := make([]uint64, len(samples))
+	copy(sorted, samples)
+	slices.Sort(sorted)
+	idx := int(float64(len(sorted)-1) * percentile)
+	return sorted[idx]
+}
+
+// formatDurationNs formats a duration in nanoseconds into a human-readable string.
+// Displays in milliseconds if >= 1,000,000 ns, otherwise in microseconds.
+// Returns "0 ns" if the duration is zero.
+func formatDurationNs(ns uint64) string {
+	if ns == 0 {
+		return "0 ns"
+	}
+	if ns >= 1_000_000 {
+		return fmt.Sprintf("%.2f ms", float64(ns)/1_000_000)
+	}
+	return fmt.Sprintf("%d µs", ns/1_000)
+}
+
+// formatByteSize returns a human-readable string for the given byte size.
+// Converts bytes into binary units (KiB, MiB, etc.) with two decimal precision.
+func formatByteSize(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	div, exp := uint64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	return fmt.Sprintf("%.2f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

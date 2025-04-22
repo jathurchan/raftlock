@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jathurchan/raftlock/testutil"
@@ -434,4 +435,284 @@ func TestReadChunks(t *testing.T) {
 		testutil.AssertContains(t, err.Error(), "read returned 0 bytes with no error")
 		testutil.AssertTrue(t, result == nil)
 	})
+}
+
+// TestUpdateMax tests the updateMax atomic function
+func TestUpdateMax(t *testing.T) {
+	tests := []struct {
+		name        string
+		initialVal  uint64
+		newVal      uint64
+		expectedVal uint64
+	}{
+		{
+			name:        "New value greater than current",
+			initialVal:  10,
+			newVal:      20,
+			expectedVal: 20,
+		},
+		{
+			name:        "New value equal to current",
+			initialVal:  10,
+			newVal:      10,
+			expectedVal: 10,
+		},
+		{
+			name:        "New value less than current",
+			initialVal:  10,
+			newVal:      5,
+			expectedVal: 10,
+		},
+		{
+			name:        "Current value zero",
+			initialVal:  0,
+			newVal:      5,
+			expectedVal: 5,
+		},
+		{
+			name:        "New value zero",
+			initialVal:  10,
+			newVal:      0,
+			expectedVal: 10,
+		},
+		{
+			name:        "Both values zero",
+			initialVal:  0,
+			newVal:      0,
+			expectedVal: 0,
+		},
+		{
+			name:        "Very large values",
+			initialVal:  ^uint64(0) - 10,
+			newVal:      ^uint64(0),
+			expectedVal: ^uint64(0),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var max atomic.Uint64
+			max.Store(tc.initialVal)
+
+			updateMax(&max, tc.newVal)
+
+			result := max.Load()
+			testutil.AssertEqual(t, tc.expectedVal, result)
+		})
+	}
+}
+
+// TestComputePercentile tests the computePercentile function
+func TestComputePercentile(t *testing.T) {
+	tests := []struct {
+		name       string
+		samples    []uint64
+		percentile float64
+		expected   uint64
+	}{
+		{
+			name:       "Empty samples",
+			samples:    []uint64{},
+			percentile: 0.5,
+			expected:   0,
+		},
+		{
+			name:       "Single sample",
+			samples:    []uint64{42},
+			percentile: 0.5,
+			expected:   42,
+		},
+		{
+			name:       "Median (odd number of samples)",
+			samples:    []uint64{1, 3, 5, 7, 9},
+			percentile: 0.5,
+			expected:   5,
+		},
+		{
+			name:       "Median (even number of samples)",
+			samples:    []uint64{1, 3, 5, 7},
+			percentile: 0.5,
+			expected:   3, // index 1.5 rounded down to 1
+		},
+		{
+			name:       "95th percentile",
+			samples:    []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+			percentile: 0.95,
+			expected:   19, // index 18.05 rounded down to 18
+		},
+		{
+			name:       "0th percentile",
+			samples:    []uint64{5, 10, 15, 20, 25},
+			percentile: 0.0,
+			expected:   5,
+		},
+		{
+			name:       "100th percentile",
+			samples:    []uint64{5, 10, 15, 20, 25},
+			percentile: 1.0,
+			expected:   25,
+		},
+		{
+			name:       "Unsorted input",
+			samples:    []uint64{15, 5, 25, 10, 20},
+			percentile: 0.5,
+			expected:   15,
+		},
+		{
+			name:       "Duplicate values",
+			samples:    []uint64{1, 1, 1, 2, 2, 3, 3, 3},
+			percentile: 0.5,
+			expected:   2, // index 3.5 rounded down to 3
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := computePercentile(tc.samples, tc.percentile)
+			testutil.AssertEqual(t, tc.expected, result, "Expected %d for percentile %.2f but got %d",
+				tc.expected, tc.percentile, result)
+
+			// Verify the original slice is not modified
+			if len(tc.samples) > 0 {
+				originalSampleCopy := make([]uint64, len(tc.samples))
+				copy(originalSampleCopy, tc.samples)
+				computePercentile(tc.samples, tc.percentile)
+
+				// Check the samples weren't modified
+				for i := range tc.samples {
+					testutil.AssertEqual(t, originalSampleCopy[i], tc.samples[i],
+						"Original sample at index %d was modified", i)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatDurationNs tests the formatDurationNs function
+func TestFormatDurationNs(t *testing.T) {
+	tests := []struct {
+		name     string
+		ns       uint64
+		expected string
+	}{
+		{
+			name:     "Zero nanoseconds",
+			ns:       0,
+			expected: "0 ns",
+		},
+		{
+			name:     "Under millisecond threshold",
+			ns:       500,
+			expected: "0 µs",
+		},
+		{
+			name:     "Microseconds",
+			ns:       5000,
+			expected: "5 µs",
+		},
+		{
+			name:     "Almost millisecond",
+			ns:       999_999,
+			expected: "999 µs",
+		},
+		{
+			name:     "Exactly millisecond",
+			ns:       1_000_000,
+			expected: "1.00 ms",
+		},
+		{
+			name:     "Multiple milliseconds",
+			ns:       5_000_000,
+			expected: "5.00 ms",
+		},
+		{
+			name:     "Fractional milliseconds",
+			ns:       1_234_567,
+			expected: "1.23 ms",
+		},
+		{
+			name:     "Seconds in milliseconds",
+			ns:       1_000_000_000,
+			expected: "1000.00 ms",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := formatDurationNs(tc.ns)
+			testutil.AssertEqual(t, tc.expected, result)
+		})
+	}
+}
+
+// TestFormatByteSize tests the formatByteSize function
+func TestFormatByteSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		bytes    uint64
+		expected string
+	}{
+		{
+			name:     "Zero bytes",
+			bytes:    0,
+			expected: "0 B",
+		},
+		{
+			name:     "Small number of bytes",
+			bytes:    123,
+			expected: "123 B",
+		},
+		{
+			name:     "Exactly 1 KiB",
+			bytes:    1024,
+			expected: "1.00 KiB",
+		},
+		{
+			name:     "Fractional KiB",
+			bytes:    1500,
+			expected: "1.46 KiB",
+		},
+		{
+			name:     "Exactly 1 MiB",
+			bytes:    1024 * 1024,
+			expected: "1.00 MiB",
+		},
+		{
+			name:     "Fractional MiB",
+			bytes:    1536 * 1024, // 1.5 MiB
+			expected: "1.50 MiB",
+		},
+		{
+			name:     "Exactly 1 GiB",
+			bytes:    1024 * 1024 * 1024,
+			expected: "1.00 GiB",
+		},
+		{
+			name:     "Exactly 1 TiB",
+			bytes:    1024 * 1024 * 1024 * 1024,
+			expected: "1.00 TiB",
+		},
+		{
+			name:     "Exactly 1 PiB",
+			bytes:    1024 * 1024 * 1024 * 1024 * 1024,
+			expected: "1.00 PiB",
+		},
+		{
+			name:     "Exactly 1 EiB",
+			bytes:    1024 * 1024 * 1024 * 1024 * 1024 * 1024,
+			expected: "1.00 EiB",
+		},
+		{
+			name:     "Large value beyond EiB",
+			bytes:    1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 10, // 10 EiB
+			expected: "10.00 EiB",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := formatByteSize(tc.bytes)
+			testutil.AssertEqual(t, tc.expected, result)
+		})
+	}
 }
