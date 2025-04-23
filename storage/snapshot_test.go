@@ -745,8 +745,8 @@ func TestHooksAndLifecycle(t *testing.T) {
 	testutil.AssertEqual(t, snapshotData, readData)
 }
 
-// TestConcurrentOperations tests snapshot operations under concurrent access
-func TestConcurrentOperations(t *testing.T) {
+// TestSnapshotConcurrentOperations tests snapshot operations under concurrent access
+func TestSnapshotConcurrentOperations(t *testing.T) {
 	log := &logger.NoOpLogger{}
 	fs := newMockFileSystem()
 	serializer := newJsonSerializer()
