@@ -134,3 +134,11 @@ func AssertFileRemoved(t testing.TB, path string, removedFiles []string, msgAndA
 		t.Errorf("Expected file %q to be removed, but it wasn't in the list of removed files: %v\n%s", path, removedFiles, FormatMsgAndArgs(msgAndArgs...))
 	}
 }
+
+// AssertPositive checks if a uint64 value is greater than zero.
+func AssertPositive(t testing.TB, val uint64, msgAndArgs ...any) {
+	t.Helper()
+	if val == 0 {
+		t.Errorf("Expected value > 0, got 0\n%s", FormatMsgAndArgs(msgAndArgs...))
+	}
+}
