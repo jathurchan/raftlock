@@ -58,9 +58,6 @@ var _ snapshotWriter = (*mockSnapshotWriter)(nil)
 // mockSnapshotReader implements the `snapshotReader` for testing.
 var _ snapshotReader = (*mockSnapshotReader)(nil)
 
-// mockRWOperationLocker implements the `rwOperationLocker` for testing.
-var _ rwOperationLocker = (*mockRWOperationLocker)(nil)
-
 type mockFile struct {
 	*bytes.Reader
 	reader       io.Reader
@@ -755,6 +752,9 @@ type mockIndexService struct {
 	TruncateAfterFunc     func([]types.IndexOffsetPair, types.Index) []types.IndexOffsetPair
 	TruncateBeforeFunc    func([]types.IndexOffsetPair, types.Index) []types.IndexOffsetPair
 
+	truncateLastCalled bool // Track if TruncateLast was called
+	truncateLastCount  int  // Track the last count passed to TruncateLast
+
 	getBoundsResult boundsResult
 }
 
@@ -794,6 +794,9 @@ func (m *mockIndexService) Append(base, additions []types.IndexOffsetPair) []typ
 }
 
 func (m *mockIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair {
+	m.truncateLastCalled = true
+	m.truncateLastCount = count
+
 	if m.TruncateLastFunc != nil {
 		return m.TruncateLastFunc(indexMap, count)
 	}
@@ -866,6 +869,7 @@ func (mms *mockMetadataService) SyncMetadataFromIndexMap(path string, indexMap [
 	}
 	return 0, 0, mms.syncError
 }
+
 func (mms *mockMetadataService) ValidateMetadataRange(firstIndex, lastIndex types.Index) error {
 	if mms.ValidateMetadataRangeFunc != nil {
 		return mms.ValidateMetadataRangeFunc(firstIndex, lastIndex)
@@ -993,9 +997,15 @@ type mockLogAppender struct {
 		allCalledCtx []context.Context
 	}
 	appendResult appendResult
+
+	appendFunc func(context.Context, []types.LogEntry, types.Index) (appendResult, error)
 }
 
 func (m *mockLogAppender) Append(ctx context.Context, entries []types.LogEntry, currentLast types.Index) (appendResult, error) {
+	if m.appendFunc != nil {
+		return m.appendFunc(ctx, entries, currentLast)
+	}
+
 	m.appendArgs.ctx = ctx
 	m.appendArgs.callCount++
 	m.appendArgs.lastEntries = entries
@@ -1043,9 +1053,15 @@ type mockSnapshotWriter struct {
 		data      []byte
 		callCount int
 	}
+
+	writeFunc func(context.Context, types.SnapshotMetadata, []byte) error
 }
 
 func (m *mockSnapshotWriter) Write(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+	if m.writeFunc != nil {
+		return m.writeFunc(ctx, metadata, data)
+	}
+
 	m.writeCall.ctx = ctx
 	m.writeCall.metadata = metadata
 	m.writeCall.data = data
@@ -1064,9 +1080,15 @@ type mockSnapshotReader struct {
 		ctx       context.Context
 		callCount int
 	}
+
+	readFunc func(context.Context) (types.SnapshotMetadata, []byte, error)
 }
 
 func (m *mockSnapshotReader) Read(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
+	if m.readFunc != nil {
+		return m.readFunc(ctx)
+	}
+
 	m.readCall.ctx = ctx
 	m.readCall.callCount++
 	return m.readResult.metadata, m.readResult.data, m.readErr
@@ -1084,6 +1106,7 @@ type mockStorageDependencies struct {
 	recoverySvc    *mockRecoveryService
 	snapshotWriter *mockSnapshotWriter
 	snapshotReader *mockSnapshotReader
+	systemInfo     *mockSystemInfo
 	logger         *logger.NoOpLogger
 }
 
@@ -1100,6 +1123,7 @@ func newMockStorageDependencies() *mockStorageDependencies {
 		recoverySvc:    &mockRecoveryService{},
 		snapshotWriter: &mockSnapshotWriter{},
 		snapshotReader: &mockSnapshotReader{},
+		systemInfo:     &mockSystemInfo{},
 		logger:         &logger.NoOpLogger{},
 	}
 }
@@ -1175,23 +1199,6 @@ func verifyAppendCall(t *testing.T, mock *mockLogAppender, expectedEntries []typ
 	}
 }
 
-// mockRWOperationLocker is a simplified implementation of rwOperationLocker for testing
-type mockRWOperationLocker struct {
-	mu sync.RWMutex
-}
-
-func (m *mockRWOperationLocker) DoWrite(ctx context.Context, operation func() error) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return operation()
-}
-
-func (m *mockRWOperationLocker) DoRead(ctx context.Context, operation func() error) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return operation()
-}
-
 type testStorageBuilder struct {
 	t     *testing.T
 	cfg   StorageConfig
@@ -1203,7 +1210,6 @@ type testStorageBuilder struct {
 
 func newTestStorageBuilder(t *testing.T) *testStorageBuilder {
 	deps := newMockStorageDependencies()
-
 	deps.metadataSvc.ValidateMetadataRangeFunc = func(firstIndex, lastIndex types.Index) error { return nil }
 	deps.indexSvc.BuildFunc = func(path string) (buildResult, error) {
 		return buildResult{
@@ -1233,6 +1239,9 @@ func newTestStorageBuilder(t *testing.T) *testStorageBuilder {
 	deps.indexSvc.ReadInRangeFunc = func(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
 		return []types.LogEntry{}, 0, nil
 	}
+	deps.indexSvc.VerifyConsistencyFunc = func(_ []types.IndexOffsetPair) error {
+		return nil
+	}
 	deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
 		return 1, 1, nil
 	}
@@ -1249,7 +1258,6 @@ func newTestStorageBuilder(t *testing.T) *testStorageBuilder {
 		metadata: types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1},
 		data:     []byte("test-snapshot"),
 	}
-
 	return &testStorageBuilder{
 		t:     t,
 		cfg:   StorageConfig{Dir: "/test"},
