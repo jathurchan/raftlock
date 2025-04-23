@@ -1,13 +1,13 @@
-name: Test Raft
+name: Test Storage
 
 on:
   push:
     branches: [main]
     paths:
-      - 'raft/**'
+        - 'storage/**'
   pull_request:
     paths:
-      - 'raft/**'
+        - 'storage/**'
   workflow_dispatch:  # Allow manual workflow runs
 
 jobs:
@@ -32,19 +32,6 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
       
-      - name: Install protoc and Go plugins
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          export PATH="$PATH:$(go env GOPATH)/bin"
-      
-      - name: Generate protobuf files
-        run: |
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          protoc --go_out=. --go-grpc_out=. proto/*.proto
-      
       # - name: Run linting
       #   uses: golangci/golangci-lint-action@v4
       #   with:
@@ -54,35 +41,37 @@ jobs:
       #       --out-format=colored-line-number
       #       --exclude-dirs=proto
       
-      - name: Run tests with coverage (excluding testutil)
+      - name: Run storage tests with coverage
         run: |
-          go test -v ./raft -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
+            # Run tests specifically for the ./storage package
+            go test -v ./storage -race -coverprofile=storage-coverage.out -covermode=atomic | tee storage-test-output.txt
         
-      - name: ✅ Show test results and coverage %
+      - name: ✅ Show storage test results and coverage %
         run: |
-          echo "### ✅ Test Results:"
-          grep -E '^(=== RUN|--- (PASS|FAIL))' test-output.txt \
+          echo "### ✅ Storage Test Results:"
+          grep -E '^(=== RUN|--- (PASS|FAIL))' storage-test-output.txt \
             | sed -E 's/=== RUN +/Running: /; s/--- PASS: /✅ Passed: /; s/--- FAIL: /❌ Failed: /'
 
           echo ""
-          echo "### 📊 Total Coverage:"
-          go tool cover -func=coverage.out | grep total
+          echo "### 📊 Storage Total Coverage:"
+          # Use the storage-specific coverage file
+          go tool cover -func=storage-coverage.out | grep total
 
-      - name: Generate coverage report
-        run: go tool cover -html=coverage.out -o coverage.html
+      - name: Generate storage coverage report
+        run: go tool cover -html=storage-coverage.out -o storage-coverage.html
 
       - name: Upload coverage report as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
-          path: coverage.html
+          name: storage-coverage-report
+          path: storage-coverage.html
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: coverage.out
-          flags: unittests
-          name: codecov-${{ matrix.go-version }}
+          files: storage-coverage.out
+          flags: storage-unittests
+          name: codecov-storage-${{ matrix.go-version }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
           verbose: true
