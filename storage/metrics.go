@@ -160,6 +160,7 @@ func (m *metrics) loadRawMetrics() map[string]uint64 {
 		"append_bytes":                m.appendBytes.Load(),
 		"read_ops":                    m.readOps.Load(),
 		"read_bytes":                  m.readBytes.Load(),
+		"read_entries":                m.readEntries.Load(),
 		"state_ops":                   m.stateOps.Load(),
 		"snapshot_save_ops":           m.snapshotSaveOps.Load(),
 		"snapshot_load_ops":           m.snapshotLoadOps.Load(),
