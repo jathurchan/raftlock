@@ -96,4 +96,19 @@ type Storage interface {
 	// Returns:
 	//   - ErrStorageIO if cleanup fails.
 	Close() error
+
+	// ResetMetrics clears all collected performance and usage metrics counters and samples.
+	// This operation only has an effect if metrics collection is enabled in the storage options.
+	ResetMetrics()
+
+	// GetMetrics returns a map containing the current values of all collected metrics.
+	// Keys are strings identifying the metric (e.g., "append_ops", "avg_read_latency_us").
+	// Values are uint64 representations of the metric value.
+	// Returns nil if metrics collection is disabled in the storage options.
+	GetMetrics() map[string]uint64
+
+	// GetMetricsSummary returns a formatted, human-readable string summarizing key metrics.
+	// Includes operation counts, latencies (avg, max, p95, p99), storage sizes, and error rates.
+	// Returns a fixed string indicating "Storage metrics disabled" if metrics collection is disabled.
+	GetMetricsSummary() string
 }

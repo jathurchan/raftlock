@@ -14,6 +14,19 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
+type fileStorageDeps struct {
+	FileSystem      fileSystem
+	Serializer      serializer
+	LogAppender     logAppender
+	LogReader       logEntryReader
+	LogRewriter     logRewriter
+	IndexService    indexService
+	MetadataService metadataService
+	RecoveryService recoveryService
+	SystemInfo      systemInfo
+	Logger          logger.Logger
+}
+
 // StorageConfig defines configuration parameters for initializing FileStorage.
 type StorageConfig struct {
 	// Dir specifies the root directory where all storage-related files
@@ -81,59 +94,49 @@ type FileStorage struct {
 	// logger is the structured logger used for logging storage operations and events.
 	logger logger.Logger
 
-	// metrics holds various atomic counters for tracking performance statistics,
-	// used only if Features.EnableMetrics is true.
-	metrics struct {
-		// appendOps counts the number of successful AppendLogEntries operations.
-		appendOps atomic.Uint64
-		// appendBytes counts the total bytes written by AppendLogEntries operations.
-		appendBytes atomic.Uint64
-		// readOps counts the number of read operations (GetLogEntry, GetLogEntries, LoadSnapshot).
-		readOps atomic.Uint64
-		// readBytes counts the total bytes read by read operations.
-		readBytes atomic.Uint64
-		// snapshotSaveOps counts the number of successful SaveSnapshot operations.
-		snapshotSaveOps atomic.Uint64
-		// snapshotLoadOps counts the number of successful LoadSnapshot operations.
-		snapshotLoadOps atomic.Uint64
-		// truncatePrefixOps counts the number of successful TruncateLogPrefix operations.
-		truncatePrefixOps atomic.Uint64
-		// truncateSuffixOps counts the number of successful TruncateLogSuffix operations.
-		truncateSuffixOps atomic.Uint64
-		// slowOperations counts the number of log operations exceeding a predefined threshold.
-		slowOperations atomic.Uint64
-	}
+	metrics
 }
 
 // NewFileStorage creates a new FileStorage with default options.
 func NewFileStorage(cfg StorageConfig, logger logger.Logger) (Storage, error) {
-	return NewFileStorageWithOptions(cfg, DefaultFileStorageOptions(), logger)
+	return newFileStorageWithOptions(cfg, DefaultFileStorageOptions(), logger)
 }
 
-// NewFileStorageWithOptions creates a new FileStorage with custom options.
-func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, logger logger.Logger) (Storage, error) {
+// newFileStorageWithOptions creates a new FileStorage with custom options.
+func newFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, logger logger.Logger) (Storage, error) {
+	deps, err := DefaultFileStorageDeps(cfg, options, logger)
+	if err != nil {
+		return nil, err
+	}
+	return newFileStorageWithDeps(cfg, options, deps)
+}
+
+func DefaultFileStorageDeps(cfg StorageConfig, options FileStorageOptions, logger logger.Logger) (fileStorageDeps, error) {
 	if cfg.Dir == "" {
-		return nil, errors.New("storage directory must be specified")
+		return fileStorageDeps{}, errors.New("storage directory must be specified")
 	}
 
 	fileSystem := newFileSystem()
 	serializer := getSerializer(options.Features.EnableBinaryFormat)
-	writer := newLogWriter(serializer, logger)
+	systemInfo := NewSystemInfo()
 	logReader := newLogEntryReader(maxEntrySizeBytes, lengthPrefixSize, serializer, logger)
-	logAppender := newLogAppender(
-		fileSystem.Path(cfg.Dir, logFilename),
-		fileSystem,
-		writer,
-		logger,
-		options.SyncOnAppend,
-	)
-	logRewriter := newLogRewriter(fileSystem.Path(cfg.Dir, logFilename), fileSystem, serializer, logger)
 	indexService := newIndexServiceWithReader(fileSystem, logReader, logger)
 	metadataService := newMetadataServiceWithDeps(fileSystem, serializer, indexService, logger)
-	systemInfo := NewSystemInfo()
 	recoveryService := newRecoveryService(fileSystem, serializer, logger, cfg.Dir, normalMode, indexService, metadataService, systemInfo)
+	writer := newLogWriter(serializer, logger)
 
-	return newFileStorageWithDeps(cfg, options, fileSystem, serializer, logAppender, logReader, logRewriter, indexService, metadataService, recoveryService, logger)
+	return fileStorageDeps{
+		FileSystem:      fileSystem,
+		Serializer:      serializer,
+		LogAppender:     newLogAppender(fileSystem.Path(cfg.Dir, logFilename), fileSystem, writer, logger, options.SyncOnAppend),
+		LogReader:       logReader,
+		LogRewriter:     newLogRewriter(fileSystem.Path(cfg.Dir, logFilename), fileSystem, serializer, logger),
+		IndexService:    indexService,
+		MetadataService: metadataService,
+		RecoveryService: recoveryService,
+		SystemInfo:      systemInfo,
+		Logger:          logger,
+	}, nil
 }
 
 func getSerializer(enableBinary bool) serializer {
@@ -143,56 +146,33 @@ func getSerializer(enableBinary bool) serializer {
 	return newJsonSerializer()
 }
 
-func newFileStorageWithDeps(
-	cfg StorageConfig,
-	options FileStorageOptions,
-	fileSystem fileSystem,
-	serializer serializer,
-	logAppender logAppender,
-	logReader logEntryReader,
-	logRewriter logRewriter,
-	indexService indexService,
-	metadataService metadataService,
-	recoveryService recoveryService,
-	logger logger.Logger,
-) (Storage, error) {
-	if err := fileSystem.MkdirAll(cfg.Dir, ownRWXOthRX); err != nil {
+func newFileStorageWithDeps(cfg StorageConfig, options FileStorageOptions, deps fileStorageDeps) (Storage, error) {
+	if err := deps.FileSystem.MkdirAll(cfg.Dir, ownRWXOthRX); err != nil {
 		return nil, fmt.Errorf("failed to create storage directory %q: %w", cfg.Dir, err)
 	}
 
-	logger = logger.WithComponent("storage")
+	logger := deps.Logger.WithComponent("storage")
 
 	s := &FileStorage{
 		dir:         cfg.Dir,
 		options:     options,
-		fileSystem:  fileSystem,
-		serializer:  serializer,
-		logAppender: logAppender,
-		logReader:   logReader,
-		logRewriter: logRewriter,
-		indexSvc:    indexService,
-		metadataSvc: metadataService,
-		recoverySvc: recoveryService,
+		fileSystem:  deps.FileSystem,
+		serializer:  deps.Serializer,
+		logAppender: deps.LogAppender,
+		logReader:   deps.LogReader,
+		logRewriter: deps.LogRewriter,
+		indexSvc:    deps.IndexService,
+		metadataSvc: deps.MetadataService,
+		recoverySvc: deps.RecoveryService,
 		logger:      logger,
 	}
 
-	s.logLocker = newRWOperationLocker(
-		&s.logMu,
-		logger,
-		options,
-		&s.metrics.slowOperations,
-	)
-
-	s.snapshotLocker = newRWOperationLocker(
-		&s.snapshotMu,
-		logger,
-		options,
-		&s.metrics.slowOperations,
-	)
+	s.logLocker = newRWOperationLocker(&s.logMu, logger, options, &s.metrics.slowOperations)
+	s.snapshotLocker = newRWOperationLocker(&s.snapshotMu, logger, options, &s.metrics.slowOperations)
 
 	s.snapshotWriter = newSnapshotWriter(
-		fileSystem,
-		serializer,
+		deps.FileSystem,
+		deps.Serializer,
 		logger,
 		cfg.Dir,
 		&snapshotWriteHooks{
@@ -207,17 +187,11 @@ func newFileStorageWithDeps(
 		options.ChunkSize,
 	)
 
-	s.snapshotReader = newSnapshotReader(
-		fileSystem,
-		serializer,
-		logger,
-		cfg.Dir,
-	)
+	s.snapshotReader = newSnapshotReader(deps.FileSystem, deps.Serializer, logger, cfg.Dir)
 
 	s.status.Store(storageStatusInitializing)
 	s.logger.Infow("Initializing storage", "dir", cfg.Dir)
 
-	// Initialize the storage
 	if err := s.initialize(); err != nil {
 		return nil, err
 	}
@@ -256,6 +230,12 @@ func (s *FileStorage) initialize() error {
 
 	s.recoverySvc.RemoveRecoveryMarker()
 
+	if s.options.Features.EnableMetrics {
+		s.updateLogSizeMetricUnlocked()
+		s.updateMetadataSizeMetricUnlocked()
+		s.updateIndexMapSizeMetricUnlocked()
+	}
+
 	s.status.Store(storageStatusReady)
 	s.logger.Infow("Storage initialized successfully",
 		"firstIndex", s.firstLogIndex.Load(),
@@ -286,9 +266,12 @@ func (s *FileStorage) initStateAndMetadata() error {
 	return nil
 }
 
+// loadInitialState loads the initial persistent state. It handles the case where
+// the state file doesn't exist (returning nil) but propagates other errors
+// returned by LoadState.
 func (s *FileStorage) loadInitialState() error {
-	if _, err := s.LoadState(context.Background()); err != nil &&
-		!errors.Is(err, ErrStorageIO) && !errors.Is(err, ErrCorruptedState) {
+	_, err := s.LoadState(context.Background())
+	if err != nil {
 		return fmt.Errorf("failed to load initial state: %w", err)
 	}
 	return nil
@@ -433,6 +416,8 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 //   - ErrCorruptedState if unmarshaling the file fails due to corruption or format issues.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) LoadState(ctx context.Context) (types.PersistentState, error) {
+	startTime := time.Now()
+
 	if err := ctx.Err(); err != nil {
 		s.logger.Warnw("LoadState aborted: context cancelled early", "error", err)
 		return types.PersistentState{}, err
@@ -451,10 +436,25 @@ func (s *FileStorage) LoadState(ctx context.Context) (types.PersistentState, err
 			return types.PersistentState{CurrentTerm: 0, VotedFor: ""}, nil
 		}
 		s.logger.Errorw("Failed to read state file", "path", statePath, "error", err)
-		return types.PersistentState{}, fmt.Errorf("%w: failed to read state file %q: %v", ErrStorageIO, statePath, err)
+
+		if s.options.Features.EnableMetrics {
+			s.trackOperationLatency("state", startTime, &s.metrics.stateErrors, err)
+		}
+
+		return types.PersistentState{}, fmt.Errorf("%w: failed to read state file %q: %w", ErrStorageIO, statePath, err)
 	}
 
+	deserializeStart := time.Now()
 	state, err := s.serializer.UnmarshalState(data)
+
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("state", startTime, &s.metrics.stateErrors, err)
+		s.trackOperationLatency("deserialization", deserializeStart, nil, err)
+
+		s.metrics.stateOps.Add(1)
+		s.metrics.stateSize.Store(uint64(len(data)))
+	}
+
 	if err != nil {
 		s.logger.Errorw("Failed to decode state file", "path", statePath, "error", err)
 		return types.PersistentState{}, fmt.Errorf("%w: failed to decode state file %q: %v", ErrCorruptedState, statePath, err)
@@ -471,6 +471,8 @@ func (s *FileStorage) LoadState(ctx context.Context) (types.PersistentState, err
 //   - ErrStorageIO if the operation fails due to I/O issues.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState) error {
+	startTime := time.Now()
+
 	if err := ctx.Err(); err != nil {
 		s.logger.Warnw("SaveState aborted: context error", "error", err)
 		return err
@@ -484,15 +486,31 @@ func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState
 
 	s.logger.Debugw("Attempting to persist state", "path", statePath, "term", state.CurrentTerm, "votedFor", state.VotedFor)
 
+	serializeStart := time.Now()
 	data, err := s.serializer.MarshalState(state)
+
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("serialization", serializeStart, nil, err)
+
+	}
+
 	if err != nil {
 		s.logger.Errorw("Failed to encode state", "path", statePath, "error", err)
+		s.trackOperationLatency("state", startTime, &s.metrics.stateErrors, err)
 		return fmt.Errorf("%w: failed to marshal state: %v", ErrStorageIO, err)
 	}
 
 	if err := s.fileSystem.WriteMaybeAtomic(statePath, data, ownRWOthR, useAtomicWrite); err != nil {
 		s.logger.Errorw("Failed to write state", "path", statePath, "error", err)
+		s.trackOperationLatency("state", startTime, &s.metrics.stateErrors, err)
 		return fmt.Errorf("%w: failed to write metadata file: %v", ErrStorageIO, err)
+	}
+
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("state", startTime, nil, nil)
+
+		s.metrics.stateOps.Add(1)
+		s.metrics.stateSize.Store(uint64(len(data)))
 	}
 
 	s.logger.Infow("State saved", "path", statePath)
@@ -509,9 +527,19 @@ func (s *FileStorage) SaveState(ctx context.Context, state types.PersistentState
 //   - ErrStorageIO on I/O failure.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) AppendLogEntries(ctx context.Context, entries []types.LogEntry) error {
+	startTime := time.Now()
+
+	var totalBytes uint64
+	if s.options.Features.EnableMetrics {
+		for _, entry := range entries {
+			estimateEntrySize := uint64(len(entry.Command) + headerSize)
+			totalBytes += estimateEntrySize
+		}
+	}
+
 	currentLastIndex := types.Index(s.lastLogIndex.Load())
 
-	return s.logLocker.DoWrite(ctx, func() error {
+	err := s.logLocker.DoWrite(ctx, func() error {
 		result, err := s.logAppender.Append(ctx, entries, currentLastIndex)
 		if err != nil {
 			s.logger.Warnw("Failed to append log entries",
@@ -522,13 +550,27 @@ func (s *FileStorage) AppendLogEntries(ctx context.Context, entries []types.LogE
 			return err
 		}
 
-		return s.commitAppendChangesLocked(
+		commitErr := s.commitAppendChangesLocked(
 			result.Offsets,
 			result.FirstIndex,
 			result.LastIndex,
 			currentLastIndex,
 		)
+
+		if commitErr == nil && s.options.Features.EnableMetrics {
+			s.metrics.appendOps.Add(1)
+			s.metrics.appendBytes.Add(totalBytes)
+			s.updateLogSizeMetricUnlocked()
+		}
+
+		return commitErr
 	})
+
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("append", startTime, &s.metrics.appendErrors, err)
+	}
+
+	return err
 }
 
 // commitAppendChangesLocked finalizes an append operation by updating in-memory state,
@@ -583,7 +625,12 @@ func (s *FileStorage) commitAppendChangesLocked(
 //   - ErrIndexOutOfRange if the requested range includes missing or compacted entries.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+	startTime := time.Now()
+
 	if start >= end {
+		if s.options.Features.EnableMetrics {
+			s.trackOperationLatency("read", startTime, &s.metrics.readErrors, ErrInvalidLogRange)
+		}
 		return nil, ErrInvalidLogRange
 	}
 
@@ -593,6 +640,11 @@ func (s *FileStorage) GetLogEntries(ctx context.Context, start, end types.Index)
 		entries, err = s.getLogEntriesUnlocked(ctx, start, end)
 		return err
 	})
+
+	// Track overall latency for the entire operation, including lock wait time.
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("read", startTime, &s.metrics.readErrors, err)
+	}
 
 	return entries, err
 }
@@ -623,7 +675,11 @@ func (s *FileStorage) getEntriesViaIndexMap(ctx context.Context, start, end type
 	if err != nil {
 		return nil, fmt.Errorf("index map read failed: %w", err)
 	}
-	s.trackMetrics(len(entries), totalBytes)
+
+	if s.options.Features.EnableMetrics {
+		s.trackMetrics(len(entries), totalBytes)
+	}
+
 	s.logger.Debugw("Read entries via index map", "start", start, "end", end, "count", len(entries), "bytes", totalBytes)
 	return entries, nil
 }
@@ -642,7 +698,10 @@ func (s *FileStorage) getEntriesViaScan(ctx context.Context, start, end types.In
 	}
 
 	estimatedSize := int64(len(entries)) * int64(lengthPrefixSize+maxEntrySizeBytes)
-	s.trackMetrics(len(entries), estimatedSize)
+	if s.options.Features.EnableMetrics {
+		s.trackMetrics(len(entries), estimatedSize)
+	}
+
 	s.logger.Debugw("Scanned log for entries", "start", start, "end", end, "count", len(entries), "bytes", estimatedSize)
 
 	return entries, nil
@@ -654,7 +713,10 @@ func (s *FileStorage) getEntriesViaScan(ctx context.Context, start, end types.In
 //   - ErrEntryNotFound if the entry is missing or compacted.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
+	startTime := time.Now()
+
 	var entry types.LogEntry
+
 	err := s.logLocker.DoRead(ctx, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -667,14 +729,19 @@ func (s *FileStorage) GetLogEntry(ctx context.Context, index types.Index) (types
 			return ErrEntryNotFound
 		}
 
-		var err error
+		var readErr error
 		if s.options.Features.EnableIndexMap {
-			entry, err = s.getEntryViaIndexMap(ctx, index)
+			entry, readErr = s.getEntryViaIndexMap(ctx, index)
 		} else {
-			entry, err = s.getEntryViaScan(ctx, index)
+			entry, readErr = s.getEntryViaScan(ctx, index)
 		}
-		return err
+		return readErr
 	})
+
+	// Track overall latency for the entire operation, including lock wait time.
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("read", startTime, &s.metrics.readErrors, err)
+	}
 
 	return entry, err
 }
@@ -688,7 +755,11 @@ func (s *FileStorage) getEntryViaIndexMap(ctx context.Context, index types.Index
 	if len(entries) != 1 {
 		return types.LogEntry{}, ErrEntryNotFound
 	}
-	s.trackMetrics(1, totalBytes)
+
+	if s.options.Features.EnableMetrics {
+		s.trackMetrics(1, totalBytes)
+	}
+
 	s.logger.Debugw("Read entry via index map", "index", index, "bytes", totalBytes)
 	return entries[0], nil
 }
@@ -720,7 +791,9 @@ func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (t
 
 		switch {
 		case err == io.EOF:
-			s.trackMetrics(0, totalBytes)
+			if s.options.Features.EnableMetrics {
+				s.trackMetrics(0, totalBytes)
+			}
 			s.logger.Debugw("Entry not found", "index", index, "bytesScanned", totalBytes, "entriesScanned", entriesScanned)
 			return types.LogEntry{}, ErrEntryNotFound
 
@@ -729,12 +802,16 @@ func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (t
 			return types.LogEntry{}, fmt.Errorf("log scan error: %w", err)
 
 		case entry.Index == index:
-			s.trackMetrics(1, totalBytes)
+			if s.options.Features.EnableMetrics {
+				s.trackMetrics(1, totalBytes)
+			}
 			s.logger.Debugw("Entry found", "index", index, "bytesScanned", totalBytes, "entriesScanned", entriesScanned)
 			return entry, nil
 
 		case entry.Index > index:
-			s.trackMetrics(0, totalBytes)
+			if s.options.Features.EnableMetrics {
+				s.trackMetrics(0, totalBytes)
+			}
 			s.logger.Debugw("Entry index exceeded", "index", index, "bytesScanned", totalBytes, "entriesScanned", entriesScanned)
 			return types.LogEntry{}, ErrEntryNotFound
 		}
@@ -748,7 +825,9 @@ func (s *FileStorage) getEntryViaScan(ctx context.Context, index types.Index) (t
 //   - ErrIndexOutOfRange if the index is beyond the last log index.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) error {
-	return s.logLocker.DoWrite(ctx, func() error {
+	startTime := time.Now()
+
+	err := s.logLocker.DoWrite(ctx, func() error {
 		first := s.FirstLogIndex()
 		last := s.LastLogIndex()
 
@@ -775,10 +854,21 @@ func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) 
 			s.logger.Debugw("Truncated index-to-offset map after", "index", index-1)
 		}
 
-		s.metrics.truncateSuffixOps.Add(1)
+		// Increment counter only on successful attempt within the lock
+		if s.options.Features.EnableMetrics {
+			s.metrics.truncateSuffixOps.Add(1)
+		}
+
 		s.logger.Infow("Successfully truncated log suffix", "newLast", index-1)
 		return nil
 	})
+
+	// Track overall latency for the entire operation, including lock wait time.
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("truncate_suffix", startTime, nil, err)
+	}
+
+	return err
 }
 
 // TruncateLogPrefix deletes all log entries with indices < the given index.
@@ -788,7 +878,9 @@ func (s *FileStorage) TruncateLogSuffix(ctx context.Context, index types.Index) 
 //   - ErrIndexOutOfRange if the index is less than the first log index.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) TruncateLogPrefix(ctx context.Context, index types.Index) error {
-	return s.logLocker.DoWrite(ctx, func() error {
+	startTime := time.Now()
+
+	err := s.logLocker.DoWrite(ctx, func() error {
 		first := s.FirstLogIndex()
 		last := s.LastLogIndex()
 
@@ -815,14 +907,38 @@ func (s *FileStorage) TruncateLogPrefix(ctx context.Context, index types.Index) 
 			s.logger.Debugw("Truncated index-to-offset map before", "index", index)
 		}
 
-		s.metrics.truncatePrefixOps.Add(1)
+		// Increment counter only on successful attempt within the lock
+		if s.options.Features.EnableMetrics {
+			s.metrics.truncatePrefixOps.Add(1)
+		}
+		s.logger.Infow("Successfully truncated log prefix", "newFirst", first)
 		return nil
 	})
+
+	// Track overall latency for the entire operation, including lock wait time.
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("truncate_prefix", startTime, nil, err)
+	}
+
+	return err
 }
 
+// truncateLogRange rewrites the log file keeping only entries in [keepStart, keepEnd).
+// assumes logLocker write lock is held.
 func (s *FileStorage) truncateLogRange(ctx context.Context, keepStart, keepEnd types.Index) error {
+	startTime := time.Now()
+
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	var oldLogSize uint64
+	if s.options.Features.EnableMetrics {
+		logPath := s.fileSystem.Path(s.dir, logFilename)
+		info, err := s.fileSystem.Stat(logPath)
+		if err == nil {
+			oldLogSize = uint64(info.Size())
+		}
 	}
 
 	entries, err := s.getLogEntriesUnlocked(ctx, keepStart, keepEnd)
@@ -851,6 +967,23 @@ func (s *FileStorage) truncateLogRange(ctx context.Context, keepStart, keepEnd t
 		return fmt.Errorf("truncate succeeded but failed to save metadata: %w", err)
 	}
 
+	if s.options.Features.EnableMetrics {
+		s.metrics.compactionOps.Add(1)
+		s.updateLogSizeMetricUnlocked()
+		s.updateIndexMapSizeMetricUnlocked()
+
+		newLogSize := s.metrics.logSize.Load()
+		if oldLogSize > newLogSize {
+			spaceReduced := oldLogSize - newLogSize
+			s.logger.Infow("Log compaction saved space",
+				"bytesSaved", spaceReduced,
+				"reductionPercentage", fmt.Sprintf("%.2f%%", float64(spaceReduced)/float64(oldLogSize)*100),
+			)
+		}
+
+		s.trackOperationLatency("compaction", startTime, nil, nil)
+	}
+
 	s.logger.Infow("Log truncated",
 		"keepStart", keepStart,
 		"keepEnd", keepEnd,
@@ -869,7 +1002,9 @@ func (s *FileStorage) truncateLogRange(ctx context.Context, keepStart, keepEnd t
 //   - ErrStorageIO on failure to persist the snapshot.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
-	return s.snapshotLocker.DoWrite(ctx, func() error {
+	startTime := time.Now()
+
+	err := s.snapshotLocker.DoWrite(ctx, func() error {
 		s.logger.Infow("Saving snapshot",
 			"lastIndex", metadata.LastIncludedIndex,
 			"lastTerm", metadata.LastIncludedTerm,
@@ -885,10 +1020,21 @@ func (s *FileStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotM
 			return err
 		}
 
-		s.metrics.snapshotSaveOps.Add(1)
+		if s.options.Features.EnableMetrics {
+			s.metrics.snapshotSaveOps.Add(1)
+			s.metrics.snapshotSize.Store(uint64(len(data)))
+		}
+
 		s.maybeTruncateAfterSnapshot(ctx, metadata)
 		return nil
 	})
+
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("snapshot_save", startTime, &s.metrics.snapshotErrors, err)
+
+	}
+
+	return err
 }
 
 // maybeTruncateAfterSnapshot performs log prefix truncation after a snapshot is saved.
@@ -908,8 +1054,17 @@ func (s *FileStorage) maybeTruncateAfterSnapshot(ctx context.Context, metadata t
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, s.getTruncationTimeout())
 		defer cancel()
 
-		if err := s.TruncateLogPrefix(ctxWithTimeout, metadata.LastIncludedIndex+1); err != nil {
-			s.logger.Warnw("Synchronous log truncation after snapshot failed", "error", err)
+		err := s.TruncateLogPrefix(ctxWithTimeout, metadata.LastIncludedIndex+1)
+
+		if err != nil {
+			s.logger.Warnw("Synchronous log truncation after snapshot failed",
+				"error", err,
+				"index", metadata.LastIncludedIndex+1,
+			)
+		} else {
+			s.logger.Infow("Synchronous log truncation after snapshot succeeded",
+				"index", metadata.LastIncludedIndex+1,
+			)
 		}
 	}
 }
@@ -919,16 +1074,25 @@ func (s *FileStorage) maybeTruncateAfterSnapshot(ctx context.Context, metadata t
 // by TruncationTimeout in the storage options, defaulting to 30 seconds if unset.
 func (s *FileStorage) asyncTruncateLogPrefixFromSnapshot(metadata types.SnapshotMetadata) {
 	go func() {
-		timeout := s.options.TruncationTimeout
-		if timeout == 0 {
-			timeout = 30 * time.Second
-		}
+		timeout := s.getTruncationTimeout()
 
 		tCtx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
+		s.logger.Infow("Starting async log truncation after snapshot",
+			"truncateAfterIndex", metadata.LastIncludedIndex+1,
+			"timeout", timeout,
+		)
+
 		if err := s.TruncateLogPrefix(tCtx, metadata.LastIncludedIndex+1); err != nil {
-			s.logger.Warnw("Async log truncation failed", "error", err)
+			s.logger.Warnw("Async log truncation after snapshot failed",
+				"error", err,
+				"truncateAfterIndex", metadata.LastIncludedIndex+1,
+			)
+		} else {
+			s.logger.Infow("Async log truncation after snapshot succeeded",
+				"truncateAfterIndex", metadata.LastIncludedIndex+1,
+			)
 		}
 	}()
 }
@@ -949,21 +1113,31 @@ func (s *FileStorage) getTruncationTimeout() time.Duration {
 //   - ErrCorruptedSnapshot if the snapshot is unreadable or invalid.
 //   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 func (s *FileStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
-	var metadata types.SnapshotMetadata
-	var data []byte
+	startTime := time.Now()
+
+	var (
+		metadata types.SnapshotMetadata
+		data     []byte
+	)
 
 	err := s.snapshotLocker.DoRead(ctx, func() error {
-		m, d, err := s.snapshotReader.Read(ctx)
-		if err != nil {
-			return err
+		var readErr error
+		metadata, data, readErr = s.snapshotReader.Read(ctx)
+		if readErr != nil {
+			return readErr
 		}
-		metadata = m
-		data = d
 
-		s.metrics.snapshotLoadOps.Add(1)
-		s.metrics.readBytes.Add(uint64(len(data)))
+		if s.options.Features.EnableMetrics {
+			s.metrics.snapshotLoadOps.Add(1)
+			s.metrics.readBytes.Add(uint64(len(data)))
+			s.metrics.snapshotSize.Store(uint64(len(data)))
+		}
 		return nil
 	})
+
+	if s.options.Features.EnableMetrics {
+		s.trackOperationLatency("snapshot_load", startTime, &s.metrics.snapshotErrors, err)
+	}
 
 	return metadata, data, err
 }
@@ -985,40 +1159,39 @@ func (s *FileStorage) FirstLogIndex() types.Index {
 // Returns:
 //   - ErrStorageIO if cleanup fails.
 func (s *FileStorage) Close() error {
-	currentStatus := s.status.Load().(storageStatus)
-	if currentStatus == storageStatusClosed {
-		s.logger.Warnw("Close called on already closed storage")
-		return nil
-	}
+	startTime := time.Now()
 
-	s.logMu.Lock()
-	defer s.logMu.Unlock()
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	s.snapshotMu.Lock()
-	defer s.snapshotMu.Unlock()
-
-	// Re-check status after acquiring locks to handle potential race conditions
-	// where status changed between the initial check and acquiring locks.
-	currentStatus = s.status.Load().(storageStatus)
-	if currentStatus == storageStatusClosed {
-		s.logger.Warnw("Storage was closed while acquiring locks for Close")
-		return nil
+	if !s.status.CompareAndSwap(storageStatusReady, storageStatusClosed) {
+		currentStatus := s.status.Load().(storageStatus)
+		if currentStatus == storageStatusClosed {
+			s.logger.Warnw("Close called on already closed storage")
+			return nil
+		}
+		s.logger.Errorw("Close called on storage in unexpected status", "status", currentStatus.string())
+		s.status.Store(storageStatusClosed)
 	}
 
 	var closeErr error
 	if err := s.recoverySvc.RemoveRecoveryMarker(); err != nil {
-		s.logger.Errorw("Failed to remove recovery marker during close", "error", err)
-		closeErr = fmt.Errorf("%w: failed to remove recovery marker: %v", ErrStorageIO, err)
+		underlyingErr := errors.Unwrap(err)
+		if underlyingErr == nil {
+			underlyingErr = err
+		}
+		if !s.fileSystem.IsNotExist(underlyingErr) {
+			s.logger.Errorw("Failed to remove recovery marker during close", "error", err)
+			closeErr = fmt.Errorf("%w: failed to remove recovery marker: %w", ErrStorageIO, err)
+		} else {
+			s.logger.Debugw("Recovery marker not found during close (normal after successful init)", "error", err)
+		}
 	}
 
-	s.status.Store(storageStatusClosed)
+	if s.options.Features.EnableMetrics {
+		if s.options.Features.EnableMetrics {
+			s.trackOperationLatency("close", startTime, nil, closeErr)
+		}
+	}
 
-	s.logger.Infow("Storage closed",
-		"firstIndex", s.firstLogIndex.Load(),
-		"lastIndex", s.lastLogIndex.Load(),
-		"error", closeErr,
-	)
+	s.logger.Infow("Storage closed", "error", closeErr)
 
 	return closeErr
 }
@@ -1078,9 +1251,160 @@ func (s *FileStorage) rollbackIndexMapState(count int) {
 	s.indexToOffsetMap = s.indexSvc.TruncateLast(s.indexToOffsetMap, count)
 }
 
-func (fs *FileStorage) trackMetrics(count int, bytes int64) {
-	if fs.options.Features.EnableMetrics {
-		fs.metrics.readOps.Add(1)
-		fs.metrics.readBytes.Add(uint64(bytes))
+// trackOperationLatency records latency and errors for a specific operation type.
+func (s *FileStorage) trackOperationLatency(
+	opType string,
+	startTime time.Time,
+	errorCounter *atomic.Uint64,
+	err error,
+) {
+	if !s.options.Features.EnableMetrics {
+		return
 	}
+
+	durationNs := uint64(time.Since(startTime).Nanoseconds())
+
+	var sumCounter, countCounter, maxCounter *atomic.Uint64
+	var sampleOpType string = ""
+
+	switch opType {
+	case "append":
+		sumCounter = &s.metrics.appendLatencySum
+		countCounter = &s.metrics.appendLatencyCount
+		maxCounter = &s.metrics.appendLatencyMax
+		sampleOpType = "append"
+	case "read": //
+		sumCounter = &s.metrics.readLatencySum
+		countCounter = &s.metrics.readLatencyCount
+		maxCounter = &s.metrics.readLatencyMax
+		sampleOpType = "read"
+	case "state": //
+		sumCounter = &s.metrics.stateLatencySum
+		countCounter = &s.metrics.stateLatencyCount
+		maxCounter = &s.metrics.stateLatencyMax
+		sampleOpType = "state"
+	case "snapshot_save", "snapshot_load":
+		sumCounter = &s.metrics.snapshotLatencySum
+		countCounter = &s.metrics.snapshotLatencyCount
+		maxCounter = &s.metrics.snapshotLatencyMax
+		sampleOpType = "snapshot"
+	case "serialization":
+		sumCounter = &s.metrics.serializationTimeSum
+		countCounter = &s.metrics.serializationCount
+		maxCounter = &s.metrics.serializationMax
+	case "deserialization":
+		sumCounter = &s.metrics.deserializationTimeSum
+		countCounter = &s.metrics.deserializationCount
+		maxCounter = &s.metrics.deserializationMax
+	default:
+		// Operation type not configured for detailed latency tracking
+		// Update error counter if provided
+		if err != nil && errorCounter != nil {
+			errorCounter.Add(1)
+		}
+		return
+	}
+
+	if sumCounter != nil {
+		sumCounter.Add(durationNs)
+	}
+	if countCounter != nil {
+		countCounter.Add(1)
+	}
+	if err != nil && errorCounter != nil {
+		errorCounter.Add(1)
+	}
+
+	if maxCounter != nil {
+		updateMax(maxCounter, durationNs)
+	}
+	if sampleOpType != "" {
+		s.metrics.recordLatencySample(sampleOpType, durationNs)
+	}
+}
+
+// trackMetrics updates counters after a read operation request completes.
+// It increments the readOps counter by 1, adds the number of entries found,
+// and adds the total bytes read/scanned.
+func (s *FileStorage) trackMetrics(numEntriesFound int, bytesReadOrScanned int64) {
+	if !s.options.Features.EnableMetrics {
+		return
+	}
+
+	// readOps counts the number of read requests initiated.
+	s.metrics.readOps.Add(1)
+	// readEntries counts the total number of entries returned by read requests.
+	s.metrics.readEntries.Add(uint64(numEntriesFound))
+	// readBytes counts the bytes transferred or scanned during the request.
+	s.metrics.readBytes.Add(uint64(bytesReadOrScanned))
+}
+
+// updateLogSizeMetricUnlocked updates the log file size metric.
+func (s *FileStorage) updateLogSizeMetricUnlocked() {
+	if !s.options.Features.EnableMetrics {
+		return
+	}
+
+	logPath := s.fileSystem.Path(s.dir, logFilename)
+	info, err := s.fileSystem.Stat(logPath)
+	if err != nil {
+		s.logger.Debugw("Could not stat log file for size metric", "path", logPath, "error", err)
+		return
+	}
+
+	s.metrics.logSize.Store(uint64(info.Size()))
+}
+
+// updateMetadataSizeMetricUnlocked updates the metadata file size metric.
+func (s *FileStorage) updateMetadataSizeMetricUnlocked() {
+	if !s.options.Features.EnableMetrics {
+		return
+	}
+
+	metadataPath := s.fileSystem.Path(s.dir, metadataFilename)
+	info, err := s.fileSystem.Stat(metadataPath)
+	if err != nil {
+		s.logger.Debugw("Could not stat metadata file for size metric", "path", metadataPath, "error", err)
+		return
+	}
+
+	s.metrics.metadataSize.Store(uint64(info.Size()))
+}
+
+// updateIndexMapSizeMetricUnlocked updates the index map entry count metric.
+func (s *FileStorage) updateIndexMapSizeMetricUnlocked() {
+	if !s.options.Features.EnableMetrics {
+		return
+	}
+
+	size := uint64(len(s.indexToOffsetMap))
+	s.metrics.indexMapSize.Store(size)
+	s.logger.Debugw("Updated index map size metric", "entries", size)
+}
+
+// ResetMetrics clears all collected performance and usage metrics counters and samples.
+// This operation only has an effect if metrics collection is enabled in the storage options.
+func (s *FileStorage) ResetMetrics() {
+	s.metrics.Reset()
+}
+
+// GetMetrics returns a map containing the current values of all collected metrics.
+// Keys are strings identifying the metric (e.g., "append_ops", "avg_read_latency_us").
+// Values are uint64 representations of the metric value.
+// Returns nil if metrics collection is disabled in the storage options.
+func (s *FileStorage) GetMetrics() map[string]uint64 {
+	if !s.options.Features.EnableMetrics {
+		return nil
+	}
+	return s.metrics.ToMap()
+}
+
+// GetMetricsSummary returns a formatted, human-readable string summarizing key metrics.
+// Includes operation counts, latencies (avg, max, p95, p99), storage sizes, and error rates.
+// Returns a fixed string indicating "Storage metrics disabled" if metrics collection is disabled.
+func (s *FileStorage) GetMetricsSummary() string {
+	if !s.options.Features.EnableMetrics {
+		return "Storage metrics disabled"
+	}
+	return s.metrics.Summary()
 }
