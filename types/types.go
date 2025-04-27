@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 // NodeID uniquely identifies a Raft node within a cluster.
 // It should be globally unique and remain stable across restarts.
 type NodeID string
@@ -121,12 +123,18 @@ type InstallSnapshotArgs struct {
 	LeaderID          NodeID // So follower can redirect clients (Empty if none)
 	LastIncludedIndex Index  // Snapshot replaces entries up to this index
 	LastIncludedTerm  Term   // Term of lastIncludedIndex
-	Offset            uint64 // Offset where chunk is placed
 	Data              []byte // Snapshot chunk data
-	Done              bool   // True if this is the last chunk
 }
 
 // InstallSnapshotReply encapsulates the reply for the InstallSnapshot RPC.
 type InstallSnapshotReply struct {
 	Term Term // Current term, for leader to update itself
+}
+
+// PeerConnectionStatus describes the current health of a peer connection.
+type PeerConnectionStatus struct {
+	Connected   bool      // True if connection likely exists.
+	LastError   error     // Last significant error; nil if none.
+	LastActive  time.Time // Last successful communication timestamp.
+	PendingRPCs int       // Number of in-flight RPCs.
 }

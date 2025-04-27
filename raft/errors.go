@@ -51,4 +51,8 @@ var (
 	// ErrStateMismatch is returned when an internal consistency check fails,
 	// such as mismatched state machine expectations or log assumptions.
 	ErrStateMismatch = errors.New("raft: unexpected state mismatch")
+
+	// ErrPeerNotFound indicates the specified peer ID is not known to the network layer
+	// or is not part of the current configuration.
+	ErrPeerNotFound = errors.New("raft: peer not found")
 )
