@@ -6,7 +6,7 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-// Network represents the RPC communication layer between Raft peers.
+// PeerNetwork represents the RPC communication layer between Raft peers.
 //
 // It handles connection management, serialization, context cancellation,
 // and efficient transfer of large payloads (e.g., snapshots).
@@ -15,7 +15,7 @@ import (
 // at initialization, not via methods like Start.
 //
 // Implementations must be safe for concurrent use.
-type Network interface {
+type PeerNetwork interface {
 	// Start activates the network layer and begins listening for peer RPCs.
 	// Must succeed before participating in Raft consensus.
 	Start() error

@@ -18,31 +18,53 @@ type Index uint64
 type NodeRole int
 
 const (
-	// RoleFollower is the default role of a Raft node when it starts up.
-	// - Followers do not initiate actions on their own and only respond to requests from other nodes.
-	// - If a RoleFollower receives a heartbeat (`AppendEntries` RPC) from a valid Leader, it resets its election timeout.
-	// - Else, it transitions to Candidate and starts a new election.
+	// RoleFollower is the default role of a Raft node at startup.
+	// - Followers respond to requests from other nodes but do not initiate actions themselves.
+	// - Receiving valid heartbeats (AppendEntries RPCs) from a leader resets their election timeout.
+	// - Lack of heartbeats causes a follower to transition to Candidate and start an election.
 	RoleFollower NodeRole = iota
 
-	// RoleCandidate is the role a node enters when it times out without hearing from a Leader.
-	// - A RoleCandidate starts a new election by incrementing its term and sending `RequestVote` RPCs to other servers.
-	// - If it receives votes from the majority of servers, it transitions to Leader.
-	// - If it discovers an existing Leader (via an `AppendEntries` RPC) or detects a higher term in another node's message,
-	//   it transitions back to Follower.
-	// - If it times out without a majority vote, it starts a new election cycle.
+	// RoleCandidate is the role a node assumes after an election timeout.
+	// - Candidates initiate new elections by incrementing their term and sending RequestVote RPCs.
+	// - A Candidate becomes Leader if it wins a majority of votes.
+	// - It reverts to Follower upon discovering a current leader or higher term.
+	// - If an election is inconclusive, it starts a new election cycle.
 	RoleCandidate
 
-	// RoleLeader is the role a node enters after winning an election.
-	// - A RoleLeader sends periodic heartbeats (`AppendEntries` RPCs) to maintain authority over Followers.
-	// - It handles client requests and replicates log entries across the cluster.
-	// - If it detects a higher term in another server's message, it steps down and transitions back to Follower.
+	// RoleLeader is the role a node assumes after winning an election.
+	// - Leaders send periodic heartbeats (AppendEntries RPCs) to maintain authority.
+	// - They handle client requests and replicate log entries to followers.
+	// - If a leader observes a higher term, it steps down to Follower.
 	RoleLeader
 )
 
+// LogEntry represents a single entry in the Raft log.
 type LogEntry struct {
-	Term    Term
-	Index   Index
-	Command []byte // Command to be applied to the state machine
+	Term    Term   // Term when the entry was created
+	Index   Index  // Position of the entry in the log
+	Command []byte // Command to apply to the replicated state machine
+}
+
+// RaftStatus captures a snapshot of the internal state of a Raft node.
+// Used for monitoring, diagnostics, and debugging.
+type RaftStatus struct {
+	ID           NodeID                           // Local node ID
+	Term         Term                             // Current term
+	Role         NodeRole                         // Current role (Follower, Candidate, Leader)
+	LeaderID     NodeID                           // Known leader ID, or empty if unknown
+	CommitIndex  Index                            // Highest committed log index
+	LastApplied  Index                            // Highest log index applied to state machine
+	LastLogIndex Index                            // Highest log index stored locally
+	LastLogTerm  Term                             // Term of the latest local log entry
+	Replication  map[NodeID]PeerReplicationStatus // Follower replication progress; populated only if Leader
+}
+
+// PeerReplicationStatus describes log replication progress for a peer.
+// Populated when the local node is Leader.
+type PeerReplicationStatus struct {
+	MatchIndex   Index // Highest log index known replicated on this peer
+	NextIndex    Index // Next log index to send to this peer
+	RecentActive bool  // Whether the peer recently responded to RPCs
 }
 
 // ApplyMsg is sent on the ApplyChannel once an entry is committed and applied.
@@ -59,10 +81,11 @@ type ApplyMsg struct {
 	SnapshotTerm  Term   // The term of the last log entry included in the snapshot
 }
 
-// IndexOffsetPair maps a log entry index to its file offset.
+// IndexOffsetPair maps a Raft log index to its file offset.
+// Used for efficient log access and compaction.
 type IndexOffsetPair struct {
-	Index  Index
-	Offset int64
+	Index  Index // Log index
+	Offset int64 // File offset
 }
 
 // PersistentState defines the state that must be saved to stable storage
