@@ -55,4 +55,12 @@ var (
 	// ErrPeerNotFound indicates the specified peer ID is not known to the network layer
 	// or is not part of the current configuration.
 	ErrPeerNotFound = errors.New("raft: peer not found")
+
+	// ErrConfigValidation is returned when the provided Raft configuration fails
+	// validation checks (e.g., invalid timeouts, missing required fields).
+	ErrConfigValidation = errors.New("raft: config validation error")
+
+	// ErrMissingDependencies is returned when essential components are missing
+	// from the configuration provided during Raft node initialization.
+	ErrMissingDependencies = errors.New("raft: config missing required dependencies")
 )
