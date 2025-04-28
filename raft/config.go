@@ -1,10 +1,6 @@
 package raft
 
 import (
-	"fmt"
-
-	"github.com/jathurchan/raftlock/logger"
-	"github.com/jathurchan/raftlock/storage"
 	"github.com/jathurchan/raftlock/types"
 )
 
@@ -15,42 +11,6 @@ type PeerConfig struct {
 
 	// Address is the network address (e.g., "host:port") for communication with this peer.
 	Address string
-}
-
-// Dependencies bundles the external components required by a Raft node instance.
-type Dependencies struct {
-	// Storage persists Raft log entries, state, and snapshots.
-	Storage storage.Storage
-
-	// Network handles RPC communication between Raft peers.
-	Network PeerNetwork
-
-	// Applier applies committed entries to the user state machine and handles snapshots.
-	Applier Applier
-
-	// Logger provides structured logging.
-	Logger logger.Logger
-
-	// Metrics records operational metrics.
-	Metrics Metrics
-}
-
-// Validate checks that all required dependencies are provided.
-// Optional dependencies (Logger, Metrics) may be nil.
-func (d *Dependencies) Validate() error {
-	if d == nil {
-		return fmt.Errorf("%w: dependencies struct cannot be nil", ErrMissingDependencies)
-	}
-	if d.Storage == nil {
-		return fmt.Errorf("%w: Storage dependency cannot be nil", ErrMissingDependencies)
-	}
-	if d.Network == nil {
-		return fmt.Errorf("%w: Network dependency cannot be nil", ErrMissingDependencies)
-	}
-	if d.Applier == nil {
-		return fmt.Errorf("%w: Applier dependency cannot be nil", ErrMissingDependencies)
-	}
-	return nil
 }
 
 // Config holds the complete configuration for initializing a Raft node.
@@ -120,6 +80,9 @@ type FeatureFlags struct {
 
 	// PreVoteEnabled enables a PreVote phase before starting an election.
 	PreVoteEnabled bool
+
+	// explicitlySet is an internal flag to track if defaults should be overridden.
+	explicitlySet bool
 }
 
 // TuningParams configures advanced performance-related parameters.
@@ -129,4 +92,10 @@ type TuningParams struct {
 	// MaxSnapshotChunkSize sets the maximum snapshot chunk size (bytes) during InstallSnapshot RPCs.
 	// 0 disables chunking.
 	MaxSnapshotChunkSize int
+}
+
+// WithExplicitFlags marks feature flags as explicitly set by the user
+func (f *FeatureFlags) WithExplicitFlags() *FeatureFlags {
+	f.explicitlySet = true
+	return f
 }
