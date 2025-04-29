@@ -33,6 +33,10 @@ type Metrics interface {
 	// term specifies the Raft term during which the change occurred.
 	ObserveLeaderChange(newLeader types.NodeID, term types.Term)
 
+	// ObserveLeaderNotificationDropped records that a leader notification was dropped.
+	// Implemented as a counter.
+	ObserveLeaderNotificationDropped()
+
 	// ObserveRoleChange records a transition in the node's Raft role.
 	// Implemented as a counter labeled by the 'from_role' and 'to_role'.
 	// term specifies the Raft term during which the transition occurred.
@@ -127,8 +131,14 @@ const (
 	// SnapshotCreate indicates a snapshot was created.
 	SnapshotCreate SnapshotAction = "create"
 
-	// SnapshotApply indicates a snapshot was applied locally.
-	SnapshotApply SnapshotAction = "apply"
+	// SnapshotCreateFailure indicates that an attempt to create a snapshot failed
+	SnapshotCreateFailure SnapshotAction = "create_failure"
+
+	// SnapshotApplySuccess indicates a snapshot was successfully applied
+	SnapshotApplySuccess SnapshotAction = "apply_success"
+
+	// SnapshotApplyFailure indicates a snapshot application failed
+	SnapshotApplyFailure SnapshotAction = "apply_failure"
 
 	// SnapshotSendSuccess indicates a snapshot was successfully sent to a peer.
 	SnapshotSendSuccess SnapshotAction = "send_success"
@@ -165,3 +175,23 @@ const (
 	// ReplicationResultFailed indicates replication failed due to an unspecified error.
 	ReplicationResultFailed ReplicationResult = "failed"
 )
+
+// No-op metrics implementation
+type noOpMetrics struct{}
+
+func (m *noOpMetrics) IncCounter(name string, labels ...string)                      {}
+func (m *noOpMetrics) SetGauge(name string, value float64, labels ...string)         {}
+func (m *noOpMetrics) ObserveHistogram(name string, value float64, labels ...string) {}
+func (m *noOpMetrics) ObserveCommitIndex(index types.Index)                          {}
+func (m *noOpMetrics) ObserveAppliedIndex(index types.Index)                         {}
+func (m *noOpMetrics) ObserveLeaderChange(newLeader types.NodeID, term types.Term)   {}
+func (m *noOpMetrics) ObserveLeaderNotificationDropped()                             {}
+func (m *noOpMetrics) ObserveRoleChange(newRole types.NodeRole, oldRole types.NodeRole, term types.Term) {
+}
+func (m *noOpMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {}
+func (m *noOpMetrics) ObserveProposal(success bool, reason ProposalResult)         {}
+func (m *noOpMetrics) ObserveReadIndex(success bool, path string)                  {}
+func (m *noOpMetrics) ObserveSnapshot(action SnapshotAction, labels ...string)     {}
+func (m *noOpMetrics) ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult) {
+}
+func (m *noOpMetrics) ObserveHeartbeat(peerID types.NodeID, success bool, latencyMs float64) {}

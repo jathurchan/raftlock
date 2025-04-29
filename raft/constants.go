@@ -1,6 +1,11 @@
 package raft
 
+import "github.com/jathurchan/raftlock/types"
+
 const (
+	// unknownLeaderID represents the absence of a known leader.
+	unknownLeaderID = types.NodeID("")
+
 	// HeartbeatTickCount is the number of ticks between leader heartbeats (empty AppendEntries RPCs).
 	DefaultHeartbeatTickCount = 1
 
