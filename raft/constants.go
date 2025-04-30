@@ -63,7 +63,11 @@ const (
 )
 
 const (
-	// logManagerInternalOpTimeout is the timeout used for internal log manager operations such as reading metadata
+	// logManagerOpTimeout is the timeout used for internal log manager operations such as reading metadata
 	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
-	logManagerInternalOpTimeout = 500 * time.Millisecond
+	logManagerOpTimeout = 500 * time.Millisecond
+
+	// electionManagerOpTimeout bounds the duration of electionManager operations
+	// such as requesting votes or updating election state, ensuring they complete promptly.
+	electionManagerOpTimeout = 1 * time.Second
 )

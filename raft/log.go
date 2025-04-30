@@ -651,13 +651,13 @@ func (lm *logManager) updateCachedStateLocked(index types.Index, term types.Term
 // fetchEntryTerm fetches the term of the log entry at the given index from storage.
 // Uses a context with a predefined internal timeout.
 func (lm *logManager) fetchEntryTerm(ctx context.Context, index types.Index) (types.Term, error) {
-	fetchCtx, cancel := context.WithTimeout(ctx, logManagerInternalOpTimeout)
+	fetchCtx, cancel := context.WithTimeout(ctx, logManagerOpTimeout)
 	defer cancel()
 
 	entry, err := lm.storage.GetLogEntry(fetchCtx, index)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			lm.logger.Warnw("Timeout fetching entry term internally", "index", index, "timeout", logManagerInternalOpTimeout)
+			lm.logger.Warnw("Timeout fetching entry term internally", "index", index, "timeout", logManagerOpTimeout)
 		} else if errors.Is(err, context.Canceled) {
 			lm.logger.Infow("Context canceled fetching entry term internally", "index", index)
 		} else if errors.Is(err, storage.ErrEntryNotFound) {
