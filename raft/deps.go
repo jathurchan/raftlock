@@ -13,7 +13,7 @@ type Dependencies struct {
 	Storage storage.Storage
 
 	// Network handles RPC communication between Raft peers.
-	Network PeerNetwork
+	Network NetworkManager
 
 	// Applier applies committed entries to the user state machine and handles snapshots.
 	Applier Applier
