@@ -455,7 +455,7 @@ func (sm *stateManager) GrantVote(ctx context.Context, candidateID types.NodeID,
 	sm.logger.Infow("Vote granted",
 		"term", currentTerm,
 		"candidate_id", candidateID)
-	sm.metrics.IncCounter("raft_votes_granted", "term", fmt.Sprintf("%d", currentTerm))
+	sm.metrics.ObserveVoteGranted(currentTerm)
 	return true
 }
 
