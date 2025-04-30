@@ -140,7 +140,7 @@ func (sm *stateManager) Initialize(ctx context.Context) error {
 	sm.mu.Lock()
 	sm.applyPersistentStateLocked(state.CurrentTerm, state.VotedFor)
 	sm.role = types.RoleFollower
-	sm.leaderID = unknownLeaderID
+	sm.leaderID = unknownNodeID
 	currentTerm := sm.currentTerm
 	votedFor := sm.votedFor
 	sm.mu.Unlock()
@@ -157,12 +157,12 @@ func (sm *stateManager) Initialize(ctx context.Context) error {
 // and persists this initial state. Called when loading fails or state is corrupted.
 func (sm *stateManager) initializeDefaultState(ctx context.Context) error {
 	initialTerm := types.Term(0)
-	initialVotedFor := unknownLeaderID
+	initialVotedFor := unknownNodeID
 
 	sm.mu.Lock()
 	sm.applyPersistentStateLocked(initialTerm, initialVotedFor)
 	sm.role = types.RoleFollower
-	sm.leaderID = unknownLeaderID
+	sm.leaderID = unknownNodeID
 	sm.mu.Unlock()
 
 	if err := sm.persistState(ctx, initialTerm, initialVotedFor); err != nil {
@@ -296,7 +296,7 @@ func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, lea
 		sm.logger.Infow("Becoming follower due to higher term",
 			"current_term", previousTerm, "new_term", term, "new_leader", leaderID)
 		sm.currentTerm = term
-		sm.votedFor = unknownLeaderID
+		sm.votedFor = unknownNodeID
 		termChanged = true
 
 		if err := sm.persistState(ctx, sm.currentTerm, sm.votedFor); err != nil {
@@ -351,7 +351,7 @@ func (sm *stateManager) CheckTermAndStepDown(ctx context.Context, rpcTerm types.
 	}
 
 	if rpcTerm == sm.currentTerm {
-		if currentRole != types.RoleFollower || (rpcLeader != unknownLeaderID && rpcLeader != currentLeader) {
+		if currentRole != types.RoleFollower || (rpcLeader != unknownNodeID && rpcLeader != currentLeader) {
 			if currentRole != types.RoleFollower {
 				sm.logger.Infow("Same term RPC received; stepping down from non-follower role",
 					"term", sm.currentTerm,
@@ -381,9 +381,9 @@ func (sm *stateManager) stepDownToHigherTermLocked(ctx context.Context, newTerm 
 	previousTerm := sm.currentTerm
 	previousVotedFor := sm.votedFor
 
-	sm.applyPersistentStateLocked(newTerm, unknownLeaderID)
+	sm.applyPersistentStateLocked(newTerm, unknownNodeID)
 
-	if err := sm.persistState(ctx, newTerm, unknownLeaderID); err != nil {
+	if err := sm.persistState(ctx, newTerm, unknownNodeID); err != nil {
 		sm.logger.Errorw("Failed to persist state after stepping down to higher term",
 			"new_term", newTerm,
 			"error", err,
@@ -421,7 +421,7 @@ func (sm *stateManager) GrantVote(ctx context.Context, candidateID types.NodeID,
 		return false
 	}
 
-	canVote := sm.votedFor == unknownLeaderID || sm.votedFor == candidateID
+	canVote := sm.votedFor == unknownNodeID || sm.votedFor == candidateID
 	if !canVote {
 		sm.logger.Infow("Vote rejected: already voted for another candidate in this term",
 			"current_term", sm.currentTerm,
@@ -549,7 +549,7 @@ func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor typ
 func (sm *stateManager) startElectionLocked() {
 	newTerm := sm.currentTerm + 1
 	sm.applyPersistentStateLocked(newTerm, sm.id)
-	sm.setRoleAndLeaderLocked(types.RoleCandidate, unknownLeaderID, newTerm)
+	sm.setRoleAndLeaderLocked(types.RoleCandidate, unknownNodeID, newTerm)
 }
 
 // setRoleAndLeaderLocked updates the role and leaderID, logging the change and notifying listeners.
@@ -565,7 +565,7 @@ func (sm *stateManager) setRoleAndLeaderLocked(newRole types.NodeRole, newLeader
 	sm.role = newRole
 	sm.leaderID = newLeader
 
-	if newLeader != unknownLeaderID {
+	if newLeader != unknownNodeID {
 		sm.lastKnownLeaderID = newLeader
 	}
 
