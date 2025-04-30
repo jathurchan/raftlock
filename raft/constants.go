@@ -1,10 +1,14 @@
 package raft
 
-import "github.com/jathurchan/raftlock/types"
+import (
+	"time"
+
+	"github.com/jathurchan/raftlock/types"
+)
 
 const (
-	// unknownLeaderID represents the absence of a known leader.
-	unknownLeaderID = types.NodeID("")
+	// unknownNodeID represents the absence of a node.
+	unknownNodeID = types.NodeID("")
 
 	// HeartbeatTickCount is the number of ticks between leader heartbeats (empty AppendEntries RPCs).
 	DefaultHeartbeatTickCount = 1
@@ -48,7 +52,18 @@ const (
 
 // Internal thresholds for validation and tuning.
 const (
-	minReasonableSnapshotThreshold = 1000 // Minimum recommended SnapshotThreshold to avoid excessive snapshotting.
-	maxReasonableStorageSyncDelay  = 100  // Maximum recommended StorageSyncDelayTicks to limit durability risk.
-	minElectionTickMultiplier      = 3    // Minimum ElectionTickCount/HeartbeatTickCount ratio for stability.
+	// minReasonableSnapshotThreshold is the recommended lower bound for SnapshotThreshold to avoid too-frequent snapshots.
+	minReasonableSnapshotThreshold = 1000
+
+	// maxReasonableStorageSyncDelay is the recommended upper bound for StorageSyncDelayTicks to avoid risking data durability.
+	maxReasonableStorageSyncDelay = 100
+
+	// minElectionTickMultiplier ensures ElectionTickCount is sufficiently larger than HeartbeatTickCount for cluster stability.
+	minElectionTickMultiplier = 3
+)
+
+const (
+	// logManagerInternalOpTimeout is the timeout used for internal log manager operations such as reading metadata
+	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
+	logManagerInternalOpTimeout = 500 * time.Millisecond
 )
