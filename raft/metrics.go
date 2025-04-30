@@ -101,14 +101,18 @@ type Metrics interface {
 	ObserveHeartbeat(peerID types.NodeID, success bool, latency time.Duration)
 }
 
-// ElectionReason specifies why a new election was triggered.
-type ElectionReason string
+// ElectionReason specifies why an election was triggered.
+type ElectionReason int
 
 const (
-	ElectionReasonTimeout        ElectionReason = "timeout"
-	ElectionReasonLeaderTransfer ElectionReason = "leader_transfer"
-	ElectionReasonPreVote        ElectionReason = "pre_vote_initiated"
-	ElectionReasonUnknown        ElectionReason = "unknown"
+	// ElectionReasonTimeout indicates an election started due to election timeout
+	ElectionReasonTimeout ElectionReason = iota
+	// ElectionReasonTransfer indicates an election started due to leadership transfer
+	ElectionReasonTransfer
+	// ElectionReasonRestart indicates an election started after node restart
+	ElectionReasonRestart
+	// ElectionReasonPreVote indicates a pre-vote phase was initiated
+	ElectionReasonPreVote
 )
 
 // ProposalResult specifies the outcome of a proposal submission.
@@ -121,8 +125,8 @@ const (
 	ProposalResultDropped      ProposalResult = "dropped"
 	ProposalResultForwarded    ProposalResult = "forwarded"
 	ProposalResultStaleTerm    ProposalResult = "stale_term"
-	ProposalResultQueueFull    ProposalResult = "queue_full"    // Added for backpressure
-	ProposalResultShuttingDown ProposalResult = "shutting_down" // Added for shutdown state
+	ProposalResultQueueFull    ProposalResult = "queue_full"
+	ProposalResultShuttingDown ProposalResult = "shutting_down"
 	ProposalResultOther        ProposalResult = "other"
 )
 
@@ -149,27 +153,27 @@ type ReplicationResult string
 
 const (
 	ReplicationResultSuccess          ReplicationResult = "success"
-	ReplicationResultLogMismatch      ReplicationResult = "log_mismatch" // Follower log doesn't match PrevLogIndex/Term
+	ReplicationResultLogMismatch      ReplicationResult = "log_mismatch"
 	ReplicationResultStaleTerm        ReplicationResult = "stale_term"
 	ReplicationResultTimeout          ReplicationResult = "timeout"
 	ReplicationResultSnapshotRequired ReplicationResult = "snapshot_required"
-	ReplicationResultFailed           ReplicationResult = "failed" // Generic network or internal error
+	ReplicationResultFailed           ReplicationResult = "failed"
 )
 
 // LogReadType specifies the type of log read operation.
 type LogReadType string
 
 const (
-	LogReadTypeTerm    LogReadType = "term"    // GetTerm operation
-	LogReadTypeEntries LogReadType = "entries" // GetEntries operation
+	LogReadTypeTerm    LogReadType = "term"
+	LogReadTypeEntries LogReadType = "entries"
 )
 
 // LogTruncateType specifies the type of log truncation operation.
 type LogTruncateType string
 
 const (
-	LogTruncateTypePrefix LogTruncateType = "prefix" // TruncatePrefix operation
-	LogTruncateTypeSuffix LogTruncateType = "suffix" // TruncateSuffix operation
+	LogTruncateTypePrefix LogTruncateType = "prefix"
+	LogTruncateTypeSuffix LogTruncateType = "suffix"
 )
 
 // No-op metrics implementation
