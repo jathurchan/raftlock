@@ -130,7 +130,7 @@ func (sm *stateManager) Initialize(ctx context.Context) error {
 	if err != nil {
 		if errors.Is(err, storage.ErrCorruptedState) {
 			sm.logger.Warnw("Persistent state corrupted or missing, initializing default state", "error", err)
-			return sm.initializeDefaultState(ctx, err)
+			return sm.initializeDefaultState(ctx)
 		}
 
 		sm.logger.Errorw("Failed to load persistent state", "error", err)
@@ -155,7 +155,7 @@ func (sm *stateManager) Initialize(ctx context.Context) error {
 
 // initializeDefaultState sets the in-memory state to term 0, no vote, follower role,
 // and persists this initial state. Called when loading fails or state is corrupted.
-func (sm *stateManager) initializeDefaultState(ctx context.Context, loadErr error) error {
+func (sm *stateManager) initializeDefaultState(ctx context.Context) error {
 	initialTerm := types.Term(0)
 	initialVotedFor := unknownLeaderID
 
