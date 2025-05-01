@@ -79,6 +79,10 @@ type Metrics interface {
 	// Counter: raft_log_consistency_errors_total
 	ObserveLogConsistencyError()
 
+	// ObserveElectionElapsed sets the number of ticks since the last election reset.
+	// Gauge: raft_election_elapsed_ticks (labeled by node_id and term)
+	ObserveElectionElapsed(nodeID types.NodeID, term types.Term, ticks int)
+
 	// ObserveProposal records the result of a proposal.
 	// Counter: raft_proposals_total (labeled by result)
 	ObserveProposal(success bool, reason ProposalResult)
@@ -205,9 +209,10 @@ func (m *noOpMetrics) ObserveLogRead(readType LogReadType, latency time.Duration
 }
 func (m *noOpMetrics) ObserveLogTruncate(truncateType LogTruncateType, entriesRemoved int, latency time.Duration, success bool) {
 }
-func (m *noOpMetrics) ObserveLogConsistencyError()                         {}
-func (m *noOpMetrics) ObserveProposal(success bool, reason ProposalResult) {}
-func (m *noOpMetrics) ObserveReadIndex(success bool, path string)          {}
+func (m *noOpMetrics) ObserveLogConsistencyError()                                            {}
+func (m *noOpMetrics) ObserveElectionElapsed(nodeID types.NodeID, term types.Term, ticks int) {}
+func (m *noOpMetrics) ObserveProposal(success bool, reason ProposalResult)                    {}
+func (m *noOpMetrics) ObserveReadIndex(success bool, path string)                             {}
 func (m *noOpMetrics) ObserveSnapshot(action SnapshotAction, status SnapshotStatus, labels ...string) {
 }
 func (m *noOpMetrics) ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult) {
