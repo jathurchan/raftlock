@@ -76,6 +76,10 @@ type LogManager interface {
 	// from the persistent storage. Used during recovery or when inconsistencies are detected.
 	RebuildInMemoryState(ctx context.Context) error
 
+	// IsUpToDate reports whether the candidate’s log is at least as up-to-date
+	// as the local log, based on term and index, per the Raft election rules.
+	IsUpToDate(candidateTerm types.Term, candidateIndex types.Index) bool
+
 	// Stop signals the log manager to shut down and release resources.
 	// Note: Actual shutdown logic (stopping operations) relies on checking the
 	// shared isShutdown flag.
@@ -614,6 +618,19 @@ func (lm *logManager) RebuildInMemoryState(ctx context.Context) error {
 		"lastTerm", lastTerm)
 
 	return nil
+}
+
+// IsUpToDate reports whether the candidate's log is at least as up-to-date
+// as the local log, based on the Raft election rules.
+func (lm *logManager) IsUpToDate(candidateTerm types.Term, candidateIndex types.Index) bool {
+	localIndex, localTerm := lm.GetConsistentLastState()
+	return isLogUpToDate(candidateTerm, candidateIndex, localTerm, localIndex)
+}
+
+// isLogUpToDate returns true if the candidate's log term is greater than the local term,
+// or if terms are equal and the candidate's index is at least as large.
+func isLogUpToDate(candidateTerm types.Term, candidateIndex types.Index, localTerm types.Term, localIndex types.Index) bool {
+	return candidateTerm > localTerm || (candidateTerm == localTerm && candidateIndex >= localIndex)
 }
 
 // Stop logs the shutdown signal for the LogManager.
