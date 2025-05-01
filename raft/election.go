@@ -636,6 +636,12 @@ func (em *electionManager) ResetTimerOnHeartbeat() {
 
 // HandleRequestVote processes an incoming RequestVote RPC.
 func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+	if err := ctx.Err(); err != nil {
+		em.logger.Debugw("Rejecting vote request: context cancelled", "from", args.CandidateID, "error", err, "nodeID", em.id)
+		term, _, _ := em.stateMgr.GetState()
+		return &types.RequestVoteReply{Term: term, VoteGranted: false}, err
+	}
+
 	if em.isShutdown.Load() {
 		term, _, _ := em.stateMgr.GetState()
 		em.logger.Debugw("Rejecting vote request: node is shutting down", "from", args.CandidateID, "nodeID", em.id)
@@ -649,24 +655,22 @@ func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.Re
 	currentTerm, _, _ := em.stateMgr.GetState()
 	reply.Term = currentTerm
 
-	logType := "Vote"
-	if args.IsPreVote {
-		logType = "Pre-vote"
-	}
+	logType := requestTypeLabel(args.IsPreVote)
 
 	if args.Term < termBeforeCheck {
 		em.logger.Debugw(fmt.Sprintf("%s rejected: requester term %d lower than local term %d", logType, args.Term, termBeforeCheck),
 			"from", args.CandidateID, "nodeID", em.id)
-		return reply, nil
+		return reply, nil // VoteGranted remains false
 	}
 
-	if !em.logMgr.IsUpToDate(args.LastLogTerm, args.LastLogIndex) {
-		localLastIndex, localLastTerm := em.logMgr.GetConsistentLastState()
+	localLastIndex, localLastTerm := em.logMgr.GetConsistentLastState()
+
+	if !isLogUpToDate(args.LastLogTerm, args.LastLogIndex, localLastTerm, localLastIndex) {
 		em.logger.Debugw(fmt.Sprintf("%s rejected: candidate log is not up-to-date", logType),
 			"from", args.CandidateID, "reqTerm", args.Term, "nodeID", em.id,
 			"candidateLastIdx", args.LastLogIndex, "candidateLastTerm", args.LastLogTerm,
 			"localLastIdx", localLastIndex, "localLastTerm", localLastTerm)
-		return reply, nil
+		return reply, nil // VoteGranted remains false
 	}
 
 	if args.IsPreVote {
@@ -687,6 +691,12 @@ func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.Re
 	}
 
 	return reply, nil
+}
+
+// isLogUpToDate returns true if the candidate's log term is greater than the local term,
+// or if terms are equal and the candidate's index is at least as large.
+func isLogUpToDate(candidateTerm types.Term, candidateIndex types.Index, localTerm types.Term, localIndex types.Index) bool {
+	return candidateTerm > localTerm || (candidateTerm == localTerm && candidateIndex >= localIndex)
 }
 
 // Stop signals the election manager to shut down.
