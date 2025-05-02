@@ -45,26 +45,30 @@ type LogEntry struct {
 	Command []byte // Command to apply to the replicated state machine
 }
 
-// RaftStatus captures a snapshot of the internal state of a Raft node.
-// Used for monitoring, diagnostics, and debugging.
+// RaftStatus represents the current state of a Raft node for monitoring and debugging.
 type RaftStatus struct {
-	ID           NodeID                           // Local node ID
-	Term         Term                             // Current term
-	Role         NodeRole                         // Current role (Follower, Candidate, Leader)
-	LeaderID     NodeID                           // Known leader ID, or empty if unknown
-	CommitIndex  Index                            // Highest committed log index
-	LastApplied  Index                            // Highest log index applied to state machine
-	LastLogIndex Index                            // Highest log index stored locally
-	LastLogTerm  Term                             // Term of the latest local log entry
-	Replication  map[NodeID]PeerReplicationStatus // Follower replication progress; populated only if Leader
+	ID       NodeID   // This node's identifier
+	Role     NodeRole // Current role (Leader, Follower, Candidate)
+	Term     Term     // Current term
+	LeaderID NodeID   // Current leader's ID (if known, empty if unknown)
+
+	LastLogIndex Index // Highest log entry index in the node's log
+	LastLogTerm  Term  // Term of the highest log entry
+	CommitIndex  Index // Highest index known to be committed
+	LastApplied  Index // Highest index applied to state machine
+
+	SnapshotIndex Index // Index of the last snapshot
+	SnapshotTerm  Term  // Term of the last snapshot
+
+	Replication map[NodeID]PeerReplicationStatus
 }
 
-// PeerReplicationStatus describes log replication progress for a peer.
-// Populated when the local node is Leader.
+// PeerReplicationStatus tracks the replication state for a single peer.
 type PeerReplicationStatus struct {
-	MatchIndex   Index // Highest log index known replicated on this peer
-	NextIndex    Index // Next log index to send to this peer
-	RecentActive bool  // Whether the peer recently responded to RPCs
+	NextIndex  Index     // Next index to send to this peer
+	MatchIndex Index     // Highest log entry known to be replicated on server
+	IsActive   bool      // Whether the peer is responding
+	LastActive time.Time // When the peer was last known to be active
 }
 
 // ApplyMsg is sent on the ApplyChannel once an entry is committed and applied.
