@@ -60,11 +60,11 @@ type RaftStatus struct {
 	SnapshotIndex Index // Index of the last snapshot
 	SnapshotTerm  Term  // Term of the last snapshot
 
-	Replication map[NodeID]PeerReplicationStatus
+	Replication map[NodeID]PeerState
 }
 
-// PeerReplicationStatus tracks the replication state for a single peer.
-type PeerReplicationStatus struct {
+// PeerState tracks the replication state for a single peer.
+type PeerState struct {
 	NextIndex  Index     // Next index to send to this peer
 	MatchIndex Index     // Highest log entry known to be replicated on server
 	IsActive   bool      // Whether the peer is responding

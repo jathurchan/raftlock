@@ -79,45 +79,39 @@ type SnapshotManagerDeps struct {
 	NotifyCommitCheck func() // Callback to trigger commit check
 }
 
-// validateSnapshotManagerDeps verifies that all required dependencies are present.
+// validateSnapshotManagerDeps checks that all required dependencies are non-nil or valid.
+// Returns an error describing the first missing dependency.
 func validateSnapshotManagerDeps(deps SnapshotManagerDeps) error {
-	if deps.ID == "" {
-		return errors.New("missing Node ID")
+	switch {
+	case deps.Mu == nil:
+		return fmt.Errorf("SnapshotManagerDeps: Mu is required")
+	case deps.ID == "":
+		return fmt.Errorf("SnapshotManagerDeps: ID is required")
+	case deps.Storage == nil:
+		return fmt.Errorf("SnapshotManagerDeps: Storage is required")
+	case deps.Applier == nil:
+		return fmt.Errorf("SnapshotManagerDeps: Applier is required")
+	case deps.LogMgr == nil:
+		return fmt.Errorf("SnapshotManagerDeps: LogMgr is required")
+	case deps.NetworkMgr == nil:
+		return fmt.Errorf("SnapshotManagerDeps: NetworkMgr is required")
+	case deps.StateMgr == nil:
+		return fmt.Errorf("SnapshotManagerDeps: StateMgr is required")
+	case deps.PeerStateUpdater == nil:
+		return fmt.Errorf("SnapshotManagerDeps: PeerStateUpdater is required")
+	case deps.Metrics == nil:
+		return fmt.Errorf("SnapshotManagerDeps: Metrics is required")
+	case deps.Logger == nil:
+		return fmt.Errorf("SnapshotManagerDeps: Logger is required")
+	case deps.Clock == nil:
+		return fmt.Errorf("SnapshotManagerDeps: Clock is required")
+	case deps.IsShutdown == nil:
+		return fmt.Errorf("SnapshotManagerDeps: IsShutdown flag is required")
+	case deps.NotifyCommitCheck == nil:
+		return fmt.Errorf("SnapshotManagerDeps: NotifyCommitCheck callback is required")
+	default:
+		return nil
 	}
-	if deps.Storage == nil {
-		return errors.New("missing Storage dependency")
-	}
-	if deps.Applier == nil {
-		return errors.New("missing Applier dependency")
-	}
-	if deps.LogMgr == nil {
-		return errors.New("missing LogManager dependency")
-	}
-	if deps.NetworkMgr == nil {
-		return errors.New("missing NetworkManager dependency")
-	}
-	if deps.StateMgr == nil {
-		return errors.New("missing StateManager dependency")
-	}
-	if deps.PeerStateUpdater == nil {
-		return errors.New("missing PeerStateUpdater dependency")
-	}
-	if deps.Metrics == nil {
-		return errors.New("missing Metrics dependency")
-	}
-	if deps.Logger == nil {
-		return errors.New("missing Logger dependency")
-	}
-	if deps.Clock == nil {
-		return errors.New("missing Clock dependency")
-	}
-	if deps.IsShutdown == nil {
-		return errors.New("missing IsShutdown flag")
-	}
-	if deps.NotifyCommitCheck == nil {
-		return errors.New("missing NotifyCommitCheck function")
-	}
-	return nil
 }
 
 // snapshotManager is a concrete implementation of the SnapshotManager interface.
