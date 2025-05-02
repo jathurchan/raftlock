@@ -138,10 +138,12 @@ const (
 type SnapshotAction string
 
 const (
-	SnapshotActionCreate  SnapshotAction = "create"
-	SnapshotActionApply   SnapshotAction = "apply"
-	SnapshotActionSend    SnapshotAction = "send"
-	SnapshotActionReceive SnapshotAction = "receive"
+	SnapshotActionCapture  SnapshotAction = "create_capture"
+	SnapshotActionPersist  SnapshotAction = "create_persist"
+	SnapshotActionFinalize SnapshotAction = "create_finalize"
+	SnapshotActionApply    SnapshotAction = "apply"
+	SnapshotActionSend     SnapshotAction = "send"
+	SnapshotActionReceive  SnapshotAction = "receive"
 )
 
 // SnapshotStatus specifies the success or failure of a snapshot operation.
@@ -150,6 +152,20 @@ type SnapshotStatus string
 const (
 	SnapshotStatusSuccess SnapshotStatus = "success"
 	SnapshotStatusFailure SnapshotStatus = "failure"
+)
+
+type SnapshotReason string
+
+const (
+	SnapshotReasonApplierError         SnapshotReason = "applier_error"
+	SnapshotReasonLogTermError         SnapshotReason = "log_term_error"
+	SnapshotReasonStorageError         SnapshotReason = "storage_error"
+	SnapshotReasonShutdown             SnapshotReason = "shutdown"
+	SnapshotReasonInProgress           SnapshotReason = "already_in_progress"
+	SnapshotReasonEmptySnapshot        SnapshotReason = "empty_snapshot"
+	SnapshotReasonApplierRestoreFailed SnapshotReason = "applier_restore_failed"
+	SnapshotReasonRestoreError         SnapshotReason = "restore_error"
+	SnapshotReasonStaleTerm            SnapshotReason = "stale_term"
 )
 
 // ReplicationResult specifies the outcome of a log replication attempt to a peer.
