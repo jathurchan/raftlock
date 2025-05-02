@@ -70,4 +70,29 @@ const (
 	// electionManagerOpTimeout bounds the duration of electionManager operations
 	// such as requesting votes or updating election state, ensuring they complete promptly.
 	electionManagerOpTimeout = 1 * time.Second
+
+	// defaultSnapshotCaptureTimeout is the timeout for capturing snapshot data from the applier.
+	defaultSnapshotCaptureTimeout = 30 * time.Second
+
+	// defaultSnapshotLogTermTimeout is the timeout for resolving the term of the log entry at the snapshot index.
+	defaultSnapshotLogTermTimeout = 2 * time.Second
+
+	// defaultSnapshotPersistTimeout is the timeout for persisting the snapshot data to stable storage.
+	defaultSnapshotPersistTimeout = 30 * time.Second
+
+	// defaultSnapshotLogTruncateTimeout is the timeout for truncating the Raft log prefix after snapshot creation or installation.
+	defaultSnapshotLogTruncateTimeout = 10 * time.Second
+
+	// defaultSnapshotRestoreTimeout is the timeout for restoring the state machine from snapshot data.
+	defaultSnapshotRestoreTimeout = 5 * time.Minute
+
+	// defaultSnapshotLoadTimeout is the timeout for loading snapshot data from storage in preparation for sending to a follower.
+	defaultSnapshotLoadTimeout = 30 * time.Second
+
+	// defaultSnapshotSendRPCTimeout is the timeout for sending the InstallSnapshot RPC to a follower.
+	defaultSnapshotSendRPCTimeout = 2 * time.Minute
+
+	// defaultSnapshotStopTimeout is the timeout for completing snapshot-related operations during shutdown.
+	// Ensures the system can shut down gracefully without hanging on snapshot activity.
+	defaultSnapshotStopTimeout = 10 * time.Second
 )
