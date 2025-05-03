@@ -1157,6 +1157,7 @@ func (s *FileStorage) FirstLogIndex() types.Index {
 // Close releases all underlying resources used by the storage implementation.
 //
 // Returns:
+//   - nil if the storage is already closed.
 //   - ErrStorageIO if cleanup fails.
 func (s *FileStorage) Close() error {
 	startTime := time.Now()

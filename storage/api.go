@@ -17,10 +17,11 @@ type Storage interface {
 	//   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 	SaveState(ctx context.Context, state types.PersistentState) error
 
-	// LoadState retrieves the most recently persisted PersistentState.
-	// Typically used during node startup or recovery.
+	// LoadState loads the most recently persisted PersistentState from disk.
+	// This should be called during node startup or recovery to restore the last known term and vote.
 	//
 	// Returns:
+	//   - A zero-valued PersistentState if no state file exists (fresh start).
 	//   - ErrCorruptedState if the data is malformed or unreadable.
 	//   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 	LoadState(ctx context.Context) (types.PersistentState, error)
@@ -80,7 +81,8 @@ type Storage interface {
 	// Returns:
 	//   - ErrNoSnapshot if no snapshot has been saved.
 	//   - ErrCorruptedSnapshot if the snapshot is unreadable or invalid.
-	//	 - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
+	//   - ErrStorageIO if I/O operations fail during snapshot loading.
+	//   - context.Canceled or context.DeadlineExceeded if the context is canceled or expired.
 	LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error)
 
 	// LastLogIndex returns the highest index currently stored in the log.
@@ -94,6 +96,7 @@ type Storage interface {
 	// Close releases all underlying resources used by the storage implementation.
 	//
 	// Returns:
+	//   - nil if the storage is already closed.
 	//   - ErrStorageIO if cleanup fails.
 	Close() error
 
