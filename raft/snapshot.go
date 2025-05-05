@@ -464,7 +464,9 @@ func (sm *snapshotManager) maybeTriggerLogCompaction(ctx context.Context, snapsh
 	}
 
 	snapshotIndex := snapshotMeta.LastIncludedIndex
-	lastLogIndex := sm.logMgr.GetLastIndex()
+	sm.mu.RLock()
+	lastLogIndex := sm.logMgr.GetLastIndexUnsafe()
+	sm.mu.RUnlock()
 
 	var entriesAfterSnapshot uint64
 	if lastLogIndex >= snapshotIndex {

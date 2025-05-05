@@ -65,10 +65,13 @@ type RaftStatus struct {
 
 // PeerState tracks the replication state for a single peer.
 type PeerState struct {
-	NextIndex  Index     // Next index to send to this peer
-	MatchIndex Index     // Highest log entry known to be replicated on server
-	IsActive   bool      // Whether the peer is responding
-	LastActive time.Time // When the peer was last known to be active
+	NextIndex          Index     // Next index to send to this peer
+	MatchIndex         Index     // Highest log entry known to be replicated on server
+	IsActive           bool      // Whether the peer is responding
+	LastActive         time.Time // When the peer was last known to be active
+	SnapshotInProgress bool      // Whether snapshot transfer is in progress
+	ReplicationLag     Index     // How far behind this peer is (leader's lastIndex - matchIndex)
+
 }
 
 // ApplyMsg is sent on the ApplyChannel once an entry is committed and applied.
