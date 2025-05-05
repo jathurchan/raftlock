@@ -50,7 +50,35 @@ const (
 	DefaultMaxSnapshotChunkSize = 0
 )
 
-// Internal thresholds for validation and tuning.
+const (
+	// DefaultMaxRecvMsgSize is the default maximum gRPC message size the server will receive. (16 MB)
+	DefaultMaxRecvMsgSize = 16 * 1024 * 1024
+
+	// DefaultMaxSendMsgSize is the default maximum gRPC message size the client/server will send. (16 MB)
+	DefaultMaxSendMsgSize = 16 * 1024 * 1024
+
+	// DefaultDialTimeout is the default timeout for establishing a gRPC connection to a peer. (2 seconds)
+	DefaultDialTimeout = 2 * time.Second
+
+	// DefaultServerStartTimeout is the default maximum time to wait for the gRPC server goroutine to start listening. (5 seconds)
+	DefaultServerStartTimeout = 5 * time.Second
+
+	// DefaultKeepaliveTime is the default interval for client/server gRPC keepalive pings when idle. (5 seconds)
+	DefaultKeepaliveTime = 5 * time.Second
+
+	// DefaultKeepaliveTimeout is the default timeout waiting for a keepalive ping acknowledgement. (1 second)
+	DefaultKeepaliveTimeout = 1 * time.Second
+
+	// DefaultServerMaxConnectionIdle is the default maximum duration a server-side gRPC connection can be idle before being closed. (15 seconds)
+	DefaultServerMaxConnectionIdle = 15 * time.Second
+
+	// DefaultServerMaxConnectionAge is the default maximum duration a server-side gRPC connection may exist before being gracefully closed. (30 minutes)
+	DefaultServerMaxConnectionAge = 30 * time.Minute
+
+	// DefaultServerMaxConnectionAgeGrace is the default time allowed for RPCs to complete on a server-side connection after a graceful close is initiated due to MaxConnectionAge. (5 seconds)
+	DefaultServerMaxConnectionAgeGrace = 5 * time.Second
+)
+
 const (
 	// minReasonableSnapshotThreshold is the recommended lower bound for SnapshotThreshold to avoid too-frequent snapshots.
 	minReasonableSnapshotThreshold = 1000
@@ -60,9 +88,7 @@ const (
 
 	// minElectionTickMultiplier ensures ElectionTickCount is sufficiently larger than HeartbeatTickCount for cluster stability.
 	minElectionTickMultiplier = 3
-)
 
-const (
 	// nominalTickInterval defines the base interval between Raft ticks.
 	// Used as the time unit for election and heartbeat timeouts.
 	nominalTickInterval = 100 * time.Millisecond
