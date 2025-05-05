@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/jathurchan/raftlock/types"
 )
 
 // StdLogger implements the Logger interface using Go's standard log package.
@@ -105,12 +107,12 @@ func (l *StdLogger) With(kvs ...any) Logger {
 }
 
 // WithNodeID returns a new logger with a node identifier added to the context.
-func (l *StdLogger) WithNodeID(id int) Logger {
+func (l *StdLogger) WithNodeID(id types.NodeID) Logger {
 	return l.cloneWithContext(map[string]any{"node": id})
 }
 
 // WithTerm returns a new logger with the Raft term added to the context.
-func (l *StdLogger) WithTerm(term uint64) Logger {
+func (l *StdLogger) WithTerm(term types.Term) Logger {
 	return l.cloneWithContext(map[string]any{"term": term})
 }
 
