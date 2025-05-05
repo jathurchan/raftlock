@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package raft.proto;
+
+option go_package = "github.com/jathurchan/raftlock/raft/proto";
+
+// LogEntry represents a single command entry in the Raft replicated log.
+message LogEntry {
+    // Term when the entry was first created by the leader.
+    uint64 term = 1;
+    // Index of the entry in the log. Indices start at 1.
+    uint64 index = 2;
+    // The command payload to be applied to the state machine. Opaque to Raft.
+    bytes command = 3;
+}
+
+// RequestVoteRequest contains the arguments for the RequestVote RPC.
+message RequestVoteRequest {
+    // Candidate's term.
+    uint64 term = 1;
+    // ID of the candidate requesting the vote.
+    string candidate_id = 2;
+    // Index of the candidate's last log entry.
+    uint64 last_log_index = 3;
+    // Term of the candidate's last log entry.
+    uint64 last_log_term = 4;
+    // If true, this is a pre-vote request, not a formal vote request.
+    bool is_pre_vote = 5;
+}
+
+// RequestVoteResponse contains the results for the RequestVote RPC.
+message RequestVoteResponse {
+    // Receiver's current term, for candidate to update itself if necessary.
+    uint64 term = 1;
+    // True if the vote was granted to the candidate.
+    bool vote_granted = 2;
+}
+
+// AppendEntriesRequest contains the arguments for the AppendEntries RPC.
+// Can also serve as a heartbeat if the 'entries' field is empty.
+message AppendEntriesRequest {
+    // Leader's current term.
+    uint64 term = 1;
+    // ID of the leader sending the request.
+    string leader_id = 2;
+    // Index of the log entry immediately preceding the new ones (if any).
+    uint64 prev_log_index = 3;
+    // Term of the entry at prev_log_index.
+    uint64 prev_log_term = 4;
+    // Log entries to store (empty for heartbeat).
+    repeated LogEntry entries = 5;
+    // Leader's commit index (highest log index known to be committed).
+    uint64 leader_commit = 6;
+}
+
+// AppendEntriesResponse contains the results for the AppendEntries RPC.
+message AppendEntriesResponse {
+    // Receiver's current term, for leader to update itself if necessary.
+    uint64 term = 1;
+    // True if the follower contained an entry matching prev_log_index and prev_log_term.
+    bool success = 2;
+    // If success is false due to log inconsistency, this suggests an optimized
+    // index for the leader to retry with (follower's first index for conflict_term, or just past follower's last index).
+    uint64 conflict_index = 3;
+    // If success is false due to log inconsistency, this is the term of the
+    // conflicting entry at conflict_index on the follower. Zero if conflict index is beyond log.
+    uint64 conflict_term = 4;
+    // An optional hint from the follower about its current match index after processing the request.
+    uint64 match_index = 5;
+}
+
+// InstallSnapshotRequest contains the arguments for the InstallSnapshot RPC.
+// Used when a follower is too far behind to catch up via AppendEntries.
+message InstallSnapshotRequest {
+    // Leader's current term.
+    uint64 term = 1;
+    // ID of the leader sending the snapshot.
+    string leader_id = 2;
+    // The snapshot replaces all log entries up to and including this index.
+    uint64 last_included_index = 3;
+    // The term of the last log entry included in the snapshot.
+    uint64 last_included_term = 4;
+    // The raw byte data of the snapshot.
+    bytes data = 5;
+}
+
+// InstallSnapshotResponse contains the results for the InstallSnapshot RPC.
+message InstallSnapshotResponse {
+    // Receiver's current term, for leader to update itself if necessary.
+    uint64 term = 1;
+}
+
+// Raft defines the gRPC service for Raft peer-to-peer communication.
+service Raft {
+    // RequestVote is called by candidates to gather votes.
+    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+  
+    // AppendEntries is called by leaders to replicate log entries
+    // and as heartbeats.
+    rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+  
+    // InstallSnapshot is called by leaders to send snapshot chunks to followers
+    // that are too far behind.
+    rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
+}
