@@ -18,7 +18,7 @@ func TestNoOpLogger(t *testing.T) {
 	enriched := logger.With("key", "value")
 	enriched.Infow("enriched message")
 
-	nodeLogger := logger.WithNodeID(1)
+	nodeLogger := logger.WithNodeID("1")
 	nodeLogger.Infow("node message")
 
 	termLogger := logger.WithTerm(5)
@@ -28,6 +28,6 @@ func TestNoOpLogger(t *testing.T) {
 	compLogger.Infow("component message")
 
 	// Test chaining of context enrichment methods
-	chainedLogger := logger.WithNodeID(1).WithTerm(5).WithComponent("test").With("key", "value")
+	chainedLogger := logger.WithNodeID("1").WithTerm(5).WithComponent("test").With("key", "value")
 	chainedLogger.Infow("chained message")
 }

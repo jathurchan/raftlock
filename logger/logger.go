@@ -1,5 +1,9 @@
 package logger
 
+import (
+	"github.com/jathurchan/raftlock/types"
+)
+
 // Logger defines an interface for structured, context-aware logging used in a Raft implementation.
 //
 // All logging methods support structured output by accepting a message and a variadic list of key-value pairs.
@@ -56,10 +60,10 @@ type Logger interface {
 
 	// WithNodeID adds a node identifier to the logger's context.
 	// Typically used to distinguish logs from different Raft nodes.
-	WithNodeID(id int) Logger
+	WithNodeID(id types.NodeID) Logger
 
 	// WithTerm adds the current Raft term to the logger's context.
-	WithTerm(term uint64) Logger
+	WithTerm(term types.Term) Logger
 
 	// WithComponent adds a component label (e.g., "election", "rpc")
 	// used to categorize log output.

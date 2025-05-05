@@ -189,7 +189,7 @@ func TestStdLogger_ContextEnrichment(t *testing.T) {
 	logger := NewStdLogger()
 
 	// Test WithNodeID
-	nodeLogger := logger.WithNodeID(1)
+	nodeLogger := logger.WithNodeID("1")
 	nodeLogger.Infow("node message")
 	if !strings.Contains(buf.String(), "[INFO] node message") || !strings.Contains(buf.String(), "node=1") {
 		t.Errorf("Node log doesn't contain expected content: %s", buf.String())
@@ -213,7 +213,7 @@ func TestStdLogger_ContextEnrichment(t *testing.T) {
 	buf.Reset()
 
 	// Test chaining context methods
-	chainedLogger := logger.WithNodeID(1).WithTerm(5).WithComponent("rpc")
+	chainedLogger := logger.WithNodeID("1").WithTerm(5).WithComponent("rpc")
 	chainedLogger.Infow("chained message")
 	output := buf.String()
 	buf.Reset()
@@ -254,10 +254,10 @@ func TestStdLogger_ContextOverride(t *testing.T) {
 	logger := NewStdLogger()
 
 	// Create logger with initial context
-	nodeLogger := logger.WithNodeID(1)
+	nodeLogger := logger.WithNodeID("1")
 
 	// Override context with new values
-	newNodeLogger := nodeLogger.WithNodeID(2)
+	newNodeLogger := nodeLogger.WithNodeID("2")
 
 	// Check that original logger retains its context
 	nodeLogger.Infow("original node")
@@ -274,8 +274,8 @@ func TestStdLogger_ContextOverride(t *testing.T) {
 	buf.Reset()
 
 	// Test overriding multiple contexts
-	multiLogger := logger.WithNodeID(1).WithTerm(5)
-	updatedLogger := multiLogger.WithNodeID(2).WithTerm(6)
+	multiLogger := logger.WithNodeID("1").WithTerm(5)
+	updatedLogger := multiLogger.WithNodeID("2").WithTerm(6)
 
 	multiLogger.Infow("original multi")
 	output := buf.String()
@@ -301,7 +301,7 @@ func TestStdLogger_TemporaryContext(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	logger := NewStdLogger().WithNodeID(1)
+	logger := NewStdLogger().WithNodeID("1")
 
 	// Add temporary context for a single log entry
 	logger.With("latency", "150ms").Warnw("Slow response")

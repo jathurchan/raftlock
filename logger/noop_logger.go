@@ -1,5 +1,7 @@
 package logger
 
+import "github.com/jathurchan/raftlock/types"
+
 // NoOpLogger is a Logger implementation that silently discards all log messages.
 // It is useful for testing, benchmarking, or disabling logging entirely.
 // Each method can be optionally overridden for testing purposes.
@@ -50,10 +52,10 @@ func (l *NoOpLogger) Fatalw(msg string, keysAndValues ...any) {
 func (l *NoOpLogger) With(keysAndValues ...any) Logger { return l }
 
 // WithNodeID returns the same NoOpLogger; context is not stored.
-func (l *NoOpLogger) WithNodeID(id int) Logger { return l }
+func (l *NoOpLogger) WithNodeID(id types.NodeID) Logger { return l }
 
 // WithTerm returns the same NoOpLogger; context is not stored.
-func (l *NoOpLogger) WithTerm(term uint64) Logger { return l }
+func (l *NoOpLogger) WithTerm(term types.Term) Logger { return l }
 
 // WithComponent returns the same NoOpLogger; context is not stored.
 func (l *NoOpLogger) WithComponent(name string) Logger { return l }
