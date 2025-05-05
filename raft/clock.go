@@ -8,6 +8,15 @@ type Clock interface {
 	// Now returns the current local time.
 	Now() time.Time
 
+	// Since returns the time elapsed since t (equivalent to Now().Sub(t)).
+	// Added for convenience and closer parity with the standard `time` package functions.
+	Since(t time.Time) time.Duration
+
+	// After waits for the duration to elapse and then sends the current time
+	// on the returned channel. It is equivalent to NewTimer(d).Chan(),
+	// but simpler to use for one-off waits.
+	After(d time.Duration) <-chan time.Time
+
 	// NewTicker returns a new Ticker containing a channel that will send the
 	// time with a period specified by the duration argument.
 	// It adjusts the intervals or drops ticks to make up for slow receivers.
@@ -62,4 +71,70 @@ type Timer interface {
 	// For a Timer created with NewTimer, Reset should be invoked only on stopped
 	// or expired timers with drained channels.
 	Reset(d time.Duration) bool
+}
+
+// standardClock implements the Clock interface using the standard Go time package.
+type standardClock struct{}
+
+// NewStandardClock returns a Clock implementation based on Go's standard time package.
+func NewStandardClock() Clock {
+	return &standardClock{}
+}
+
+func (sc *standardClock) Now() time.Time {
+	return time.Now()
+}
+
+func (sc *standardClock) Since(t time.Time) time.Duration {
+	return time.Since(t) // Uses time.Now().Sub(t) internally
+}
+
+func (sc *standardClock) After(d time.Duration) <-chan time.Time {
+	return time.After(d)
+}
+
+func (sc *standardClock) NewTicker(d time.Duration) Ticker {
+	return &standardTicker{ticker: time.NewTicker(d)}
+}
+
+func (sc *standardClock) NewTimer(d time.Duration) Timer {
+	return &standardTimer{timer: time.NewTimer(d)}
+}
+
+func (sc *standardClock) Sleep(d time.Duration) {
+	time.Sleep(d)
+}
+
+// standardTicker wraps time.Ticker to satisfy the Ticker interface.
+type standardTicker struct {
+	ticker *time.Ticker
+}
+
+func (st *standardTicker) Chan() <-chan time.Time {
+	return st.ticker.C
+}
+
+func (st *standardTicker) Stop() {
+	st.ticker.Stop()
+}
+
+func (st *standardTicker) Reset(d time.Duration) {
+	st.ticker.Reset(d)
+}
+
+// standardTimer wraps time.Timer to satisfy the Timer interface.
+type standardTimer struct {
+	timer *time.Timer
+}
+
+func (st *standardTimer) Chan() <-chan time.Time {
+	return st.timer.C
+}
+
+func (st *standardTimer) Stop() bool {
+	return st.timer.Stop()
+}
+
+func (st *standardTimer) Reset(d time.Duration) bool {
+	return st.timer.Reset(d)
 }
