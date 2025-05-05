@@ -23,6 +23,11 @@ type StateManager interface {
 	// Safe for concurrent use.
 	GetState() (types.Term, types.NodeRole, types.NodeID)
 
+	// GetStateUnsafe returns the current term, role, and leader ID without synchronization.
+	// Intended for internal use where the caller can guarantee exclusive access or immutability.
+	// Not safe for concurrent use.
+	GetStateUnsafe() (types.Term, types.NodeRole, types.NodeID)
+
 	// GetLastKnownLeader returns the most recently known leader ID.
 	// Useful for client request forwarding even when current leader is temporarily unknown.
 	// Safe for concurrent use.
@@ -57,15 +62,26 @@ type StateManager interface {
 	GrantVote(ctx context.Context, candidateID types.NodeID, term types.Term) bool
 
 	// UpdateCommitIndex sets the commit index if the new index is higher.
-	// Returns true if the index was updated. Safe for concurrent use.
+	// Returns true if the index was updated.
+	// Safe for concurrent use.
 	UpdateCommitIndex(newCommitIndex types.Index) bool
+
+	// UpdateCommitIndex sets the commit index if the new index is higher.
+	// Returns true if the index was updated.
+	// The caller must ensure thread safety.
+	UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool
 
 	// UpdateLastApplied sets the last applied index if the new index is higher.
 	// Returns true if the index was updated. Safe for concurrent use.
 	UpdateLastApplied(newLastApplied types.Index) bool
 
-	// GetCommitIndex returns the current commit index. Safe for concurrent use.
+	// GetCommitIndex returns the current commit index.
+	// Safe for concurrent use.
 	GetCommitIndex() types.Index
+
+	// GetCommitIndexUnsafe returns the current commit index without synchronization.
+	// The caller must ensure thread safety.
+	GetCommitIndexUnsafe() types.Index
 
 	// GetLastApplied returns the index of the last applied log entry. Safe for concurrent use.
 	GetLastApplied() types.Index
@@ -178,9 +194,17 @@ func (sm *stateManager) initializeDefaultState(ctx context.Context) error {
 }
 
 // GetState returns the current term, role, and leader ID using a read lock.
+// This method is safe for concurrent use.
 func (sm *stateManager) GetState() (types.Term, types.NodeRole, types.NodeID) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
+	return sm.GetStateUnsafe()
+}
+
+// GetStateUnsafe returns the current term, role, and leader ID without acquiring a lock.
+// This method is not safe for concurrent use and should only be called when external synchronization is guaranteed.
+func (sm *stateManager) GetStateUnsafe() (types.Term, types.NodeRole, types.NodeID) {
 	return sm.currentTerm, sm.role, sm.leaderID
 }
 
@@ -465,6 +489,12 @@ func (sm *stateManager) UpdateCommitIndex(newCommitIndex types.Index) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	return sm.UpdateCommitIndexUnsafe(newCommitIndex)
+}
+
+// UpdateCommitIndex updates the commit index if the new index is higher.
+// Assumes holds sm.mu.Lock()
+func (sm *stateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool {
 	if newCommitIndex <= sm.commitIndex {
 		return false
 	}
@@ -518,6 +548,13 @@ func (sm *stateManager) UpdateLastApplied(newLastApplied types.Index) bool {
 func (sm *stateManager) GetCommitIndex() types.Index {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
+	return sm.commitIndex
+}
+
+// GetCommitIndexUnsafe returns the current commit index without acquiring a lock.
+// Assumes the caller holds sm.mu.RLock()
+func (sm *stateManager) GetCommitIndexUnsafe() types.Index {
 	return sm.commitIndex
 }
 

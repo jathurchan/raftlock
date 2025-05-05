@@ -63,6 +63,10 @@ const (
 )
 
 const (
+	// nominalTickInterval defines the base interval between Raft ticks.
+	// Used as the time unit for election and heartbeat timeouts.
+	nominalTickInterval = 100 * time.Millisecond
+
 	// logManagerOpTimeout is the timeout used for internal log manager operations such as reading metadata
 	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
 	logManagerOpTimeout = 500 * time.Millisecond
@@ -95,4 +99,16 @@ const (
 	// defaultSnapshotStopTimeout is the timeout for completing snapshot-related operations during shutdown.
 	// Ensures the system can shut down gracefully without hanging on snapshot activity.
 	defaultSnapshotStopTimeout = 10 * time.Second
+
+	// defaultAppendEntriesTimeout is the maximum duration allowed for an AppendEntries RPC to complete.
+	defaultAppendEntriesTimeout = 2 * time.Second
+
+	// defaultLogFetchTimeout bounds the time spent fetching log entries from storage or memory.
+	defaultLogFetchTimeout = 1 * time.Second
+
+	// defaultReadIndexTimeout is the timeout for waiting on quorum confirmation in a ReadIndex operation.
+	defaultReadIndexTimeout = 1 * time.Second
+
+	// defaultTermFetchTimeout limits the time allowed for retrieving the term of a specific log index,
+	defaultTermFetchTimeout = 500 * time.Millisecond
 )

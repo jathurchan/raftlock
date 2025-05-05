@@ -44,6 +44,10 @@ type Metrics interface {
 	// Counter: raft_leader_notifications_dropped_total
 	ObserveLeaderNotificationDropped()
 
+	// ObserveApplyNotificationDropped records that an apply notification was dropped.
+	// Counter: raft_apply_notifications_dropped_total
+	ObserveApplyNotificationDropped()
+
 	// ObserveRoleChange records a Raft role transition.
 	// Counter: raft_role_changes_total (labeled by from_role, to_role)
 	ObserveRoleChange(newRole types.NodeRole, oldRole types.NodeRole, term types.Term)
@@ -103,6 +107,26 @@ type Metrics interface {
 	// Counter: raft_peer_heartbeats_total (labeled by peer_id and success)
 	// Histogram: raft_peer_heartbeat_latency_seconds (labeled by peer_id)
 	ObserveHeartbeat(peerID types.NodeID, success bool, latency time.Duration)
+
+	// ObserveHeartbeatSent records that a heartbeat was sent.
+	// Counter: raft_heartbeats_sent_total
+	ObserveHeartbeatSent()
+
+	// ObserveAppendEntriesHeartbeat records a received heartbeat (empty AppendEntries RPC).
+	// Counter: raft_heartbeats_received_total
+	ObserveAppendEntriesHeartbeat()
+
+	// ObserveAppendEntriesReplication records a received AppendEntries with entries.
+	// Counter: raft_replication_received_total
+	ObserveAppendEntriesReplication()
+
+	// ObserveEntriesReceived records the total number of entries received.
+	// Counter: raft_entries_received_total
+	ObserveEntriesReceived(count int)
+
+	// ObserveCommandBytesReceived records the total command bytes received.
+	// Counter: raft_command_bytes_received_total
+	ObserveCommandBytesReceived(bytes int)
 }
 
 // ElectionReason specifies why an election was triggered.
@@ -123,15 +147,16 @@ const (
 type ProposalResult string
 
 const (
-	ProposalResultSuccess      ProposalResult = "success"
-	ProposalResultTimeout      ProposalResult = "timeout"
-	ProposalResultNotLeader    ProposalResult = "not_leader"
-	ProposalResultDropped      ProposalResult = "dropped"
-	ProposalResultForwarded    ProposalResult = "forwarded"
-	ProposalResultStaleTerm    ProposalResult = "stale_term"
-	ProposalResultQueueFull    ProposalResult = "queue_full"
-	ProposalResultShuttingDown ProposalResult = "shutting_down"
-	ProposalResultOther        ProposalResult = "other"
+	ProposalResultSuccess         ProposalResult = "success"
+	ProposalResultTimeout         ProposalResult = "timeout"
+	ProposalResultNotLeader       ProposalResult = "not_leader"
+	ProposalResultDropped         ProposalResult = "dropped"
+	ProposalResultForwarded       ProposalResult = "forwarded"
+	ProposalResultStaleTerm       ProposalResult = "stale_term"
+	ProposalResultQueueFull       ProposalResult = "queue_full"
+	ProposalResultShuttingDown    ProposalResult = "shutting_down"
+	ProposalResultLogAppendFailed ProposalResult = "log_append_failed"
+	ProposalResultOther           ProposalResult = "other"
 )
 
 // SnapshotAction specifies the type of snapshot operation being recorded.
@@ -213,6 +238,7 @@ func (m *noOpMetrics) ObserveAppliedIndex(index types.Index)                    
 func (m *noOpMetrics) ObserveTerm(term types.Term)                                   {}
 func (m *noOpMetrics) ObserveLeaderChange(newLeader types.NodeID, term types.Term)   {}
 func (m *noOpMetrics) ObserveLeaderNotificationDropped()                             {}
+func (m *noOpMetrics) ObserveApplyNotificationDropped()                              {}
 func (m *noOpMetrics) ObserveRoleChange(newRole types.NodeRole, oldRole types.NodeRole, term types.Term) {
 }
 func (m *noOpMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {}
@@ -234,3 +260,8 @@ func (m *noOpMetrics) ObserveSnapshot(action SnapshotAction, status SnapshotStat
 func (m *noOpMetrics) ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult) {
 }
 func (m *noOpMetrics) ObserveHeartbeat(peerID types.NodeID, success bool, latency time.Duration) {}
+func (m *noOpMetrics) ObserveHeartbeatSent()                                                     {}
+func (m *noOpMetrics) ObserveAppendEntriesHeartbeat()                                            {}
+func (m *noOpMetrics) ObserveAppendEntriesReplication()                                          {}
+func (m *noOpMetrics) ObserveEntriesReceived(count int)                                          {}
+func (m *noOpMetrics) ObserveCommandBytesReceived(bytes int)                                     {}
