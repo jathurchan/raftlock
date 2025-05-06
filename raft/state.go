@@ -43,12 +43,11 @@ type StateManager interface {
 	// Returns true if the transition was successful.
 	BecomeLeader(ctx context.Context) bool
 
-	// CheckTermAndStepDown compares the given RPC term with the local term.
-	// If the RPC term is higher, it updates the local term, resets votedFor,
-	// becomes a follower, persists the state, and returns true.
-	// If the terms are equal but the node is not a follower or the RPC provides a
-	// different leader hint, it becomes a follower (updating leader hint) and returns true.
-	// Otherwise, returns false. Returns the node's term before any potential update.
+	// BecomeFollower transitions the node to follower state for the given term and leader ID.
+	// If the term is greater than the current term, updates the local term and resets votedFor.
+	// In both cases (higher or same term), updates role and known leader if they differ.
+	// Persists state only when the term is updated. No-op if already a follower in the same term and leader.
+	// This method does not return a value; failure to persist on term change results in rollback.
 	BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID)
 
 	// CheckTermAndStepDown compares the given term with the local term.
@@ -62,13 +61,11 @@ type StateManager interface {
 	GrantVote(ctx context.Context, candidateID types.NodeID, term types.Term) bool
 
 	// UpdateCommitIndex sets the commit index if the new index is higher.
-	// Returns true if the index was updated.
-	// Safe for concurrent use.
+	// Acquires a lock for thread safety. Returns true if the index was updated.
 	UpdateCommitIndex(newCommitIndex types.Index) bool
 
-	// UpdateCommitIndex sets the commit index if the new index is higher.
-	// Returns true if the index was updated.
-	// The caller must ensure thread safety.
+	// UpdateCommitIndexUnsafe sets the commit index if the new index is higher.
+	// The caller must ensure thread safety. Returns true if the index was updated.
 	UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool
 
 	// UpdateLastApplied sets the last applied index if the new index is higher.
@@ -85,6 +82,10 @@ type StateManager interface {
 
 	// GetLastApplied returns the index of the last applied log entry. Safe for concurrent use.
 	GetLastApplied() types.Index
+
+	// GetLastAppliedUnsafe rreturns the index of the last applied log entry without synchronization.
+	// The caller must ensure thread safety.
+	GetLastAppliedUnsafe() types.Index
 
 	// Stop signals the state manager to stop processing and releases resources.
 	Stop()
@@ -483,8 +484,8 @@ func (sm *stateManager) GrantVote(ctx context.Context, candidateID types.NodeID,
 	return true
 }
 
-// UpdateCommitIndex updates the commit index if the new index is higher.
-// Safe for concurrent use.
+// UpdateCommitIndex sets the commit index if the new index is higher.
+// Acquires a lock for thread safety. Returns true if the index was updated.
 func (sm *stateManager) UpdateCommitIndex(newCommitIndex types.Index) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -492,8 +493,8 @@ func (sm *stateManager) UpdateCommitIndex(newCommitIndex types.Index) bool {
 	return sm.UpdateCommitIndexUnsafe(newCommitIndex)
 }
 
-// UpdateCommitIndex updates the commit index if the new index is higher.
-// Assumes holds sm.mu.Lock()
+// UpdateCommitIndexUnsafe sets the commit index if the new index is higher.
+// Does not acquire a lock; caller must hold sm.mu.Lock(). Returns true if the index was updated.
 func (sm *stateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool {
 	if newCommitIndex <= sm.commitIndex {
 		return false
@@ -562,6 +563,12 @@ func (sm *stateManager) GetCommitIndexUnsafe() types.Index {
 func (sm *stateManager) GetLastApplied() types.Index {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+	return sm.lastApplied
+}
+
+// GetLastAppliedUnsafe returns the index of the last applied log entry without acquiring a lock.
+// Assumes the caller holds sm.mu.RLock()
+func (sm *stateManager) GetLastAppliedUnsafe() types.Index {
 	return sm.lastApplied
 }
 
