@@ -13,6 +13,22 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
+// ReplicationStateUpdater combines peer state updates and commit index advancement.
+// It represents the interface used by SnapshotManager to interact with replication logic.
+type ReplicationStateUpdater interface {
+	PeerStateUpdater
+	CommitIndexAdvancer
+}
+
+// CommitIndexAdvancer defines an abstraction for advancing the commit index
+// based on replicated log entries. It should only be used by the Raft leader.
+type CommitIndexAdvancer interface {
+	// MaybeAdvanceCommitIndex determines the highest log index replicated to a quorum
+	// and advances the commit index if it is safe to do so.
+	// Only entries from the current leader term are eligible for commitment.
+	MaybeAdvanceCommitIndex()
+}
+
 // PeerStateUpdater defines an abstraction used by SnapshotManager to update
 // the replication state of individual peers following snapshot operations.
 // This decouples snapshot logic from the concrete replication manager implementation.
@@ -27,10 +43,28 @@ type PeerStateUpdater interface {
 	SetPeerSnapshotInProgress(peerID types.NodeID, inProgress bool)
 }
 
+var _ ReplicationStateUpdater = NoOpReplicationStateUpdater{}
+
+// NoOpReplicationStateUpdater is a no-op implementation of ReplicationStateUpdater.
+// It performs no actions and is useful for testing or disabled snapshot/replication logic.
+type NoOpReplicationStateUpdater struct{}
+
+func (NoOpReplicationStateUpdater) UpdatePeerAfterSnapshotSend(peerID types.NodeID, snapshotIndex types.Index) {
+}
+
+func (NoOpReplicationStateUpdater) SetPeerSnapshotInProgress(peerID types.NodeID, inProgress bool) {}
+
+func (NoOpReplicationStateUpdater) MaybeAdvanceCommitIndex() {}
+
 // SnapshotManager defines the interface for managing Raft snapshot operations.
 // It is responsible for snapshot creation, restoration, persistence, log truncation,
 // and transferring snapshots to other Raft peers.
 type SnapshotManager interface {
+	// SetReplicationStateUpdater sets the ReplicationStateUpdater used to update follower replication
+	// state after snapshot operations and to advance the commit index when appropriate.
+	// It should be called once after initialization to wire the ReplicationManager into the SnapshotManager.
+	SetReplicationStateUpdater(updater ReplicationStateUpdater)
+
 	// Initialize loads the latest snapshot from persistent storage.
 	// If the snapshot is newer than the current applied state, it restores the
 	// state machine from the snapshot. It also truncates the log prefix up to the
@@ -55,7 +89,12 @@ type SnapshotManager interface {
 
 	// GetSnapshotMetadata returns the metadata (last included index and term)
 	// of the most recent snapshot that has been successfully saved or restored.
+	// Safe for concurrent use.
 	GetSnapshotMetadata() types.SnapshotMetadata
+
+	// GetSnapshotMetadataUnsafe returns the metadata without acquiring a lock.
+	// Caller must hold the appropriate lock.
+	GetSnapshotMetadataUnsafe() types.SnapshotMetadata
 
 	// Stop performs any necessary cleanup or shutdown logic for the snapshot manager.
 	Stop()
@@ -173,6 +212,16 @@ func NewSnapshotManager(deps SnapshotManagerDeps) (SnapshotManager, error) {
 		"logCompactionMinEntries", sm.cfg.Options.LogCompactionMinEntries)
 
 	return sm, nil
+}
+
+// SetReplicationStateUpdater sets the ReplicationStateUpdater used to update follower replication
+// state after snapshot operations and to advance the commit index when appropriate.
+// It should be called once after initialization to wire the ReplicationManager into the SnapshotManager.
+func (s *snapshotManager) SetReplicationStateUpdater(updater ReplicationStateUpdater) {
+	s.peerStateUpdater = updater
+	s.notifyCommitCheck = func() {
+		updater.MaybeAdvanceCommitIndex()
+	}
 }
 
 // Initialize loads the most recent snapshot, restores state if necessary, and truncates the log.
@@ -511,7 +560,12 @@ func (sm *snapshotManager) maybeTriggerLogCompaction(ctx context.Context, snapsh
 func (sm *snapshotManager) GetSnapshotMetadata() types.SnapshotMetadata {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+	return sm.GetSnapshotMetadataUnsafe()
+}
 
+// GetSnapshotMetadataUnsafe returns the latest snapshot metadata without acquiring a lock.
+// Caller must hold sm.mu for reading or writing.
+func (sm *snapshotManager) GetSnapshotMetadataUnsafe() types.SnapshotMetadata {
 	return types.SnapshotMetadata{
 		LastIncludedIndex: sm.lastSnapshotIndex,
 		LastIncludedTerm:  sm.lastSnapshotTerm,
@@ -720,7 +774,7 @@ func (sm *snapshotManager) SendSnapshot(ctx context.Context, targetID types.Node
 		return
 	}
 
-	sm.processSnapshotReply(ctx, targetID, term, meta, reply, start)
+	sm.processSnapshotReply(targetID, term, meta, reply, start)
 
 	sm.logger.Infow("Snapshot send process finished", "peer", targetID, "snapshotIndex", meta.LastIncludedIndex)
 }
@@ -803,7 +857,6 @@ func (sm *snapshotManager) sendInstallSnapshotRPC(ctx context.Context, peer type
 
 // processSnapshotReply handles the response from a follower after sending a snapshot.
 func (sm *snapshotManager) processSnapshotReply(
-	ctx context.Context,
 	peer types.NodeID,
 	sentTerm types.Term,
 	meta types.SnapshotMetadata,
@@ -912,7 +965,7 @@ func (sm *snapshotManager) restoreSnapshot(ctx context.Context, meta types.Snaps
 }
 
 // updateSnapshotMetadata updates the manager's internal record of the latest snapshot.
-// Must be called with sm.mu write lock held.
+// Safe for concurrent use.
 func (sm *snapshotManager) updateSnapshotMetadata(meta types.SnapshotMetadata) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
