@@ -55,7 +55,8 @@ type ReplicationManager interface {
 
 	// GetPeerReplicationStatus returns the current replication progress for each peer,
 	// primarily used for metrics, monitoring, or debugging. Requires leader role.
-	GetPeerReplicationStatus() map[types.NodeID]types.PeerState
+	// Caller must hold the appropriate lock.
+	GetPeerReplicationStatusUnsafe() map[types.NodeID]types.PeerState
 
 	// ReplicateToPeer initiates a log replication attempt to the specified peer,
 	// either by sending AppendEntries or triggering a snapshot if necessary.
@@ -226,7 +227,7 @@ func NewReplicationManager(deps ReplicationManagerDeps) (ReplicationManager, err
 			electionTicks = DefaultElectionTickCount
 		}
 
-		rm.leaseDuration = time.Duration(electionTicks) * nominalTickInterval / 2
+		rm.leaseDuration = time.Duration(electionTicks) * NominalTickInterval / 2
 
 		log.Infow("Leader lease enabled",
 			"leaseDuration", rm.leaseDuration,
@@ -405,7 +406,7 @@ func (rm *replicationManager) replicateToPeerInternal(
 			rm.logger.Debugw("Snapshot send already in progress for peer", "peerID", peerID, "nextIndex", nextIndex)
 			return
 		}
-		rm.initiateSnapshotIfNeeded(ctx, peerID, nextIndex, term, firstLogIndex)
+		rm.initiateSnapshotIfNeeded(peerID, nextIndex, term, firstLogIndex)
 		return // subsequent replication handled after snapshot completion
 	}
 
@@ -459,31 +460,13 @@ func (rm *replicationManager) getPeerReplicationState(peerID types.NodeID) (next
 }
 
 // initiateSnapshotIfNeeded attempts to start a snapshot transfer if one isn't already running.
-func (rm *replicationManager) initiateSnapshotIfNeeded(ctx context.Context, peerID types.NodeID, peerNextIndex types.Index, term types.Term, localFirstIndex types.Index) {
-	rm.mu.Lock()
-	peerState, exists := rm.peerStates[peerID]
-	if !exists {
-		rm.mu.Unlock()
-		rm.logger.Errorw("Cannot initiate snapshot: peer state not found", "peerID", peerID)
-		return
+func (rm *replicationManager) initiateSnapshotIfNeeded(peerID types.NodeID, peerNextIndex types.Index, term types.Term, localFirstIndex types.Index) {
+	if rm.startSnapshotIfNotInProgress(peerID, term) {
+		rm.logger.Infow("Initiating snapshot transfer due to log gap",
+			"peerID", peerID,
+			"peerNextIndex", peerNextIndex,
+			"localFirstIndex", localFirstIndex)
 	}
-
-	if peerState.SnapshotInProgress {
-		rm.mu.Unlock()
-		rm.logger.Debugw("Snapshot initiation skipped: already in progress", "peerID", peerID)
-		return
-	}
-
-	peerState.SnapshotInProgress = true
-	rm.mu.Unlock()
-
-	rm.logger.Infow("Initiating snapshot transfer due to log gap",
-		"peerID", peerID,
-		"peerNextIndex", peerNextIndex,
-		"localFirstIndex", localFirstIndex)
-
-	// Using context.Background() so snapshot send isn't tied to the Tick context lifetime.
-	go rm.snapshotMgr.SendSnapshot(context.Background(), peerID, term)
 }
 
 // getPrevLogInfo returns the index and term of the entry preceding nextIndex.
@@ -515,15 +498,6 @@ func (rm *replicationManager) getPrevLogInfo(ctx context.Context, peerID types.N
 		return 0, 0, false
 	}
 	return prevLogIndex, prevLogTerm, true
-}
-
-// getEntriesIfNeeded returns a slice of log entries for replication if it's not a heartbeat.
-// Returns nil if no entries are required or an error occurred.
-func (rm *replicationManager) getEntriesIfNeeded(ctx context.Context, peerID types.NodeID, isHeartbeat bool, nextIndex, lastLogIndex types.Index, term types.Term) []types.LogEntry {
-	if isHeartbeat || nextIndex > lastLogIndex {
-		return nil
-	}
-	return rm.getEntriesForPeer(ctx, peerID, nextIndex, lastLogIndex, term)
 }
 
 // getEntriesForPeer retrieves a batch of log entries [nextIndex, lastLogIndex] for a peer.
@@ -579,31 +553,39 @@ func (rm *replicationManager) getEntriesForPeer(ctx context.Context, peerID type
 	return entries
 }
 
-// startSnapshotForPeer initiates a snapshot transfer if one isn't already in progress.
-// Helper function used when log entries/terms are found to be compacted.
+// startSnapshotForPeer initiates a snapshot transfer due to log compaction or inconsistency.
 func (rm *replicationManager) startSnapshotForPeer(peerID types.NodeID, term types.Term) {
+	if rm.startSnapshotIfNotInProgress(peerID, term) {
+		rm.logger.Infow("Starting snapshot due to log compaction or error",
+			"peerID", peerID,
+			"term", term)
+	}
+}
+
+// startSnapshotIfNotInProgress is a shared helper that checks and sets the snapshot in-progress flag,
+// then starts the snapshot send in a separate goroutine if not already running.
+// Returns true if a snapshot was initiated, false if skipped.
+func (rm *replicationManager) startSnapshotIfNotInProgress(peerID types.NodeID, term types.Term) bool {
 	rm.mu.Lock()
 	peerState, exists := rm.peerStates[peerID]
 	if !exists {
 		rm.mu.Unlock()
-		rm.logger.Errorw("Cannot start snapshot: peer state not found", "peerID", peerID)
-		return
+		rm.logger.Errorw("Cannot initiate snapshot: peer state not found", "peerID", peerID)
+		return false
 	}
 
 	if peerState.SnapshotInProgress {
 		rm.mu.Unlock()
-		rm.logger.Debugw("Snapshot start skipped: already in progress", "peerID", peerID)
-		return
+		rm.logger.Debugw("Snapshot initiation skipped: already in progress", "peerID", peerID)
+		return false
 	}
 
 	peerState.SnapshotInProgress = true
 	rm.mu.Unlock()
 
-	rm.logger.Infow("Starting snapshot due to log compaction or error",
-		"peerID", peerID,
-		"term", term)
-
+	// Run snapshot send in a separate goroutine with Background context.
 	go rm.snapshotMgr.SendSnapshot(context.Background(), peerID, term)
+	return true
 }
 
 // buildAppendEntriesArgs constructs the RPC request payload for AppendEntries.
@@ -1518,22 +1500,20 @@ func (rm *replicationManager) recordAppendEntriesMetrics(entries []types.LogEntr
 
 // GetPeerReplicationStatus returns a snapshot of replication status for all peers.
 // Requires leader role. Returns an empty map if not leader or if shutdown.
-func (rm *replicationManager) GetPeerReplicationStatus() map[types.NodeID]types.PeerState {
+// Caller must hold rm.mu.
+func (rm *replicationManager) GetPeerReplicationStatusUnsafe() map[types.NodeID]types.PeerState {
 	statusMap := make(map[types.NodeID]types.PeerState)
 
 	if rm.isShutdown.Load() {
 		return statusMap
 	}
 
-	_, role, _ := rm.stateMgr.GetState()
+	_, role, _ := rm.stateMgr.GetStateUnsafe()
 	if role != types.RoleLeader {
 		return statusMap // Only leader tracks peer status
 	}
 
 	leaderLastIndex := rm.logMgr.GetLastIndexUnsafe()
-
-	rm.mu.RLock()
-	defer rm.mu.RUnlock()
 
 	for peerID, pState := range rm.peerStates {
 		var lag types.Index
