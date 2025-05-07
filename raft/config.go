@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"time"
+
 	"github.com/jathurchan/raftlock/types"
 )
 
@@ -34,9 +36,6 @@ type Config struct {
 
 	// Deps contains external components (Storage, Network, etc.).
 	Deps Dependencies
-
-	// peerList stores the original list of peers, used for convenience methods like PeersAsSlice.
-	peerList []PeerConfig
 }
 
 // Options define core Raft timing and behavior settings.
@@ -67,6 +66,12 @@ type Options struct {
 
 	// ApplyTickCount controls how frequently committed entries are applied to the state machine.
 	ApplyTickCount int
+
+	// ApplyEntryTimeout sets a maximum duration for applying a single entry to the state machine.
+	ApplyEntryTimeout time.Duration
+
+	// FetchEntriesTimeout sets a timeout for fetching log entries from a leader or peer.
+	FetchEntriesTimeout time.Duration
 }
 
 // FeatureFlags enables optional Raft features and optimizations.

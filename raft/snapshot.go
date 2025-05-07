@@ -172,6 +172,10 @@ type snapshotManager struct {
 	logger           logger.Logger
 	clock            Clock
 
+	// notifyCommitCheck is a callback invoked after snapshot operations that may affect peer replication state.
+	// It triggers a re-evaluation of the commit index (e.g., after a follower successfully applies a snapshot),
+	// ensuring that new entries are committed once quorum is achieved.
+	// Calls ReplicationManager.MaybeAdvanceCommitIndex.
 	notifyCommitCheck func()
 
 	lastSnapshotIndex types.Index // Last snapshot index (protected by mu)
