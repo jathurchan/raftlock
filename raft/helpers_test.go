@@ -7,69 +7,53 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-// mockStorage implements the storage.Storage interface
-type mockStorage struct{}
+type mockStorage struct {
+	state       types.PersistentState
+	saveErr     error
+	loadErr     error
+	saveCounter int
+	loadCounter int
+}
 
-func (m *mockStorage) SaveState(ctx context.Context, state types.PersistentState) error {
+func (ms *mockStorage) SaveState(ctx context.Context, state types.PersistentState) error {
+	ms.state = state
+	ms.saveCounter++
+	return ms.saveErr
+}
+
+func (ms *mockStorage) LoadState(ctx context.Context) (types.PersistentState, error) {
+	ms.loadCounter++
+	return ms.state, ms.loadErr
+}
+
+func (ms *mockStorage) AppendLogEntries(ctx context.Context, entries []types.LogEntry) error {
 	return nil
 }
-
-func (m *mockStorage) LoadState(ctx context.Context) (types.PersistentState, error) {
-	return types.PersistentState{}, nil
-}
-
-func (m *mockStorage) AppendLogEntries(ctx context.Context, entries []types.LogEntry) error {
-	return nil
-}
-
-func (m *mockStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+func (ms *mockStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
 	return nil, nil
 }
-
-func (m *mockStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
+func (ms *mockStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
 	return types.LogEntry{}, nil
 }
-
-func (m *mockStorage) TruncateLogSuffix(ctx context.Context, index types.Index) error {
+func (ms *mockStorage) TruncateLogSuffix(ctx context.Context, index types.Index) error {
 	return nil
 }
-
-func (m *mockStorage) TruncateLogPrefix(ctx context.Context, index types.Index) error {
+func (ms *mockStorage) TruncateLogPrefix(ctx context.Context, index types.Index) error {
 	return nil
 }
-
-func (m *mockStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+func (ms *mockStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
 	return nil
 }
-
-func (m *mockStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
+func (ms *mockStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
 	return types.SnapshotMetadata{}, nil, nil
 }
+func (ms *mockStorage) LastLogIndex() types.Index     { return 0 }
+func (ms *mockStorage) FirstLogIndex() types.Index    { return 0 }
+func (ms *mockStorage) Close() error                  { return nil }
+func (ms *mockStorage) ResetMetrics()                 {}
+func (ms *mockStorage) GetMetrics() map[string]uint64 { return nil }
+func (ms *mockStorage) GetMetricsSummary() string     { return "" }
 
-func (m *mockStorage) LastLogIndex() types.Index {
-	return 0
-}
-
-func (m *mockStorage) FirstLogIndex() types.Index {
-	return 0
-}
-
-func (m *mockStorage) Close() error {
-	return nil
-}
-
-func (m *mockStorage) ResetMetrics() {
-}
-
-func (m *mockStorage) GetMetrics() map[string]uint64 {
-	return nil
-}
-
-func (m *mockStorage) GetMetricsSummary() string {
-	return ""
-}
-
-// mockNetwork implements the NetworkManager interface
 type mockNetwork struct{}
 
 func (m *mockNetwork) Start() error {
@@ -100,7 +84,6 @@ func (m *mockNetwork) LocalAddr() string {
 	return ""
 }
 
-// mockApplier implements the Applier interface
 type mockApplier struct{}
 
 func (m *mockApplier) Apply(ctx context.Context, index types.Index, command []byte) error {
@@ -115,7 +98,6 @@ func (m *mockApplier) RestoreSnapshot(ctx context.Context, lastIncludedIndex typ
 	return nil
 }
 
-// mockClock implements the Clock interface
 type mockClock struct{}
 
 func (m *mockClock) Now() time.Time {
@@ -141,7 +123,6 @@ func (m *mockClock) NewTimer(d time.Duration) Timer {
 func (m *mockClock) Sleep(d time.Duration) {
 }
 
-// mockRand implements the Rand interface
 type mockRand struct{}
 
 func (m *mockRand) IntN(n int) int {
