@@ -44,9 +44,17 @@ type Metrics interface {
 	// Counter: raft_leader_notifications_dropped_total
 	ObserveLeaderNotificationDropped()
 
+	// ObserveLeadershipLost records when leadership is lost.
+	// Counter: raft_leadership_lost_total (labeled by term and reason)
+	ObserveLeadershipLost(term types.Term, reason string)
+
 	// ObserveApplyNotificationDropped records that an apply notification was dropped.
 	// Counter: raft_apply_notifications_dropped_total
 	ObserveApplyNotificationDropped()
+
+	// ObserveApplyLoopStopped records when the apply loop exits.
+	// Counter: raft_apply_loop_stopped_total (labeled by reason)
+	ObserveApplyLoopStopped(reason string)
 
 	// ObserveRoleChange records a Raft role transition.
 	// Counter: raft_role_changes_total (labeled by from_role, to_role)
@@ -99,6 +107,10 @@ type Metrics interface {
 	// Counter: raft_snapshot_operations_total (labeled by action and status)
 	ObserveSnapshot(action SnapshotAction, status SnapshotStatus, labels ...string)
 
+	// ObserveSnapshotRecovery records snapshot recovery outcomes.
+	// Counter: raft_snapshot_recovery_total (labeled by status and reason)
+	ObserveSnapshotRecovery(status SnapshotStatus, reason SnapshotReason)
+
 	// ObservePeerReplication records the result of a replication to a peer.
 	// Counter: raft_peer_replications_total (labeled by peer_id and result)
 	ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult)
@@ -124,9 +136,21 @@ type Metrics interface {
 	// Counter: raft_entries_received_total
 	ObserveEntriesReceived(count int)
 
+	// ObserveAppendEntriesRejected records the reason for rejecting AppendEntries.
+	// Counter: raft_append_entries_rejected_total (labeled by reason)
+	ObserveAppendEntriesRejected(reason string)
+
 	// ObserveCommandBytesReceived records the total command bytes received.
 	// Counter: raft_command_bytes_received_total
 	ObserveCommandBytesReceived(bytes int)
+
+	// ObserveTick records a tick event by role.
+	// Counter: raft_ticks_processed_total (labeled by role)
+	ObserveTick(role types.NodeRole)
+
+	// ObserveComponentStopTimeout records a component that timed out during shutdown.
+	// Counter: raft_component_stop_timeouts_total (labeled by component)
+	ObserveComponentStopTimeout(component string)
 }
 
 // ElectionReason specifies why an election was triggered.
@@ -238,7 +262,9 @@ func (m *noOpMetrics) ObserveAppliedIndex(index types.Index)                    
 func (m *noOpMetrics) ObserveTerm(term types.Term)                                   {}
 func (m *noOpMetrics) ObserveLeaderChange(newLeader types.NodeID, term types.Term)   {}
 func (m *noOpMetrics) ObserveLeaderNotificationDropped()                             {}
+func (m *noOpMetrics) ObserveLeadershipLost(term types.Term, reason string)          {}
 func (m *noOpMetrics) ObserveApplyNotificationDropped()                              {}
+func (m *noOpMetrics) ObserveApplyLoopStopped(reason string)                         {}
 func (m *noOpMetrics) ObserveRoleChange(newRole types.NodeRole, oldRole types.NodeRole, term types.Term) {
 }
 func (m *noOpMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {}
@@ -257,11 +283,17 @@ func (m *noOpMetrics) ObserveProposal(success bool, reason ProposalResult)      
 func (m *noOpMetrics) ObserveReadIndex(success bool, path string)                             {}
 func (m *noOpMetrics) ObserveSnapshot(action SnapshotAction, status SnapshotStatus, labels ...string) {
 }
+func (m *noOpMetrics) ObserveSnapshotRecovery(status SnapshotStatus, reason SnapshotReason) {
+}
 func (m *noOpMetrics) ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult) {
 }
 func (m *noOpMetrics) ObserveHeartbeat(peerID types.NodeID, success bool, latency time.Duration) {}
 func (m *noOpMetrics) ObserveHeartbeatSent()                                                     {}
 func (m *noOpMetrics) ObserveAppendEntriesHeartbeat()                                            {}
 func (m *noOpMetrics) ObserveAppendEntriesReplication()                                          {}
+func (m *noOpMetrics) ObserveAppendEntriesRejected(reason string)                                {}
 func (m *noOpMetrics) ObserveEntriesReceived(count int)                                          {}
 func (m *noOpMetrics) ObserveCommandBytesReceived(bytes int)                                     {}
+
+func (m *noOpMetrics) ObserveTick(role types.NodeRole)              {}
+func (m *noOpMetrics) ObserveComponentStopTimeout(component string) {}

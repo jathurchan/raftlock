@@ -80,18 +80,16 @@ const (
 )
 
 const (
-	// minReasonableSnapshotThreshold is the recommended lower bound for SnapshotThreshold to avoid too-frequent snapshots.
-	minReasonableSnapshotThreshold = 1000
-
-	// maxReasonableStorageSyncDelay is the recommended upper bound for StorageSyncDelayTicks to avoid risking data durability.
-	maxReasonableStorageSyncDelay = 100
-
-	// minElectionTickMultiplier ensures ElectionTickCount is sufficiently larger than HeartbeatTickCount for cluster stability.
-	minElectionTickMultiplier = 3
-
-	// nominalTickInterval defines the base interval between Raft ticks.
+	// NominalTickInterval defines the base interval between Raft ticks.
 	// Used as the time unit for election and heartbeat timeouts.
-	nominalTickInterval = 100 * time.Millisecond
+	NominalTickInterval = 100 * time.Millisecond
+
+	// defaultApplyEntryTimeout is the timeout for applying a single committed log entry to the state machine.
+	defaultApplyEntryTimeout = 5 * time.Second
+
+	// DefaultFetchEntriesTimeout is the timeout for fetching entries from the log manager.
+	// This can be made configurable.
+	defaultFetchEntriesTimeout = 5 * time.Second
 
 	// logManagerOpTimeout is the timeout used for internal log manager operations such as reading metadata
 	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
