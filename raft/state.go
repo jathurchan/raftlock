@@ -165,8 +165,7 @@ func (sm *stateManager) Initialize(ctx context.Context) error {
 	sm.logger.Infow("Loaded persistent state from storage",
 		"term", currentTerm,
 		"voted_for", votedFor)
-
-	sm.metrics.SetGauge("raft_term", float64(state.CurrentTerm))
+	sm.metrics.ObserveTerm(state.CurrentTerm)
 	return nil
 }
 
@@ -190,7 +189,7 @@ func (sm *stateManager) initializeDefaultState(ctx context.Context) error {
 	sm.logger.Infow("Initialized and persisted default state",
 		"term", initialTerm, "voted_for", initialVotedFor)
 
-	sm.metrics.SetGauge("raft_term", float64(initialTerm))
+	sm.metrics.ObserveTerm(initialTerm)
 	return nil
 }
 
@@ -255,7 +254,7 @@ func (sm *stateManager) BecomeCandidate(ctx context.Context, reason ElectionReas
 		return false
 	}
 
-	sm.metrics.SetGauge("raft_term", float64(newTerm))
+	sm.metrics.ObserveTerm(newTerm)
 	sm.metrics.ObserveElectionStart(newTerm, reason)
 
 	sm.logger.Infow("Transitioned to Candidate", "new_term", newTerm)
@@ -331,7 +330,7 @@ func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, lea
 			sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, previousTerm)
 			return
 		}
-		sm.metrics.SetGauge("raft_term", float64(sm.currentTerm))
+		sm.metrics.ObserveTerm(sm.currentTerm)
 	}
 
 	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, sm.currentTerm)
@@ -421,7 +420,7 @@ func (sm *stateManager) stepDownToHigherTermLocked(ctx context.Context, newTerm 
 	}
 
 	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderHint, newTerm)
-	sm.metrics.SetGauge("raft_term", float64(newTerm))
+	sm.metrics.ObserveTerm(newTerm)
 	return nil
 }
 
@@ -581,19 +580,19 @@ func (sm *stateManager) Stop() {
 	}
 }
 
-// applyPersistentStateLocked updates only the persistent fields (term, votedFor) in memory.
-// Must be called with sm.mu.Lock() held.
-func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor types.NodeID) {
-	sm.currentTerm = term
-	sm.votedFor = votedFor
-}
-
 // startElectionLocked increments the term and votes for self.
 // Must be called with sm.mu.Lock() held.
 func (sm *stateManager) startElectionLocked() {
 	newTerm := sm.currentTerm + 1
 	sm.applyPersistentStateLocked(newTerm, sm.id)
 	sm.setRoleAndLeaderLocked(types.RoleCandidate, unknownNodeID, newTerm)
+}
+
+// applyPersistentStateLocked updates only the persistent fields (term, votedFor) in memory.
+// Must be called with sm.mu.Lock() held.
+func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor types.NodeID) {
+	sm.currentTerm = term
+	sm.votedFor = votedFor
 }
 
 // setRoleAndLeaderLocked updates the role and leaderID, logging the change and notifying listeners.
