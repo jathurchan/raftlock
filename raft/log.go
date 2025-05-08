@@ -277,8 +277,11 @@ func (lm *logManager) getTermInternal(ctx context.Context, index types.Index, us
 
 	entry, err := lm.storage.GetLogEntry(ctx, index)
 	if err != nil {
-		if index < lm.GetFirstIndex() {
-			return 0, fmt.Errorf("requested index %d was compacted concurrently: %w", index, ErrCompacted)
+		if errors.Is(err, storage.ErrEntryNotFound) {
+			if index < lm.GetFirstIndex() {
+				return 0, fmt.Errorf("requested index %d was compacted: %w", index, ErrCompacted)
+			}
+			return 0, fmt.Errorf("requested index %d was not found: %w", index, ErrNotFound)
 		}
 		return 0, fmt.Errorf("failed to get log entry %d from storage: %w", index, err)
 	}
@@ -553,23 +556,33 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 	oldLastIndex := lm.GetLastIndexUnsafe()
 
 	if newLastIndexPlusOne > oldLastIndex {
-		lm.logger.Debugw("TruncateSuffix skipped: index is beyond last log index", "index", newLastIndexPlusOne, "lastIndex", oldLastIndex)
+		lm.logger.Debugw("TruncateSuffix skipped: index is beyond last log index",
+			"index", newLastIndexPlusOne, "lastIndex", oldLastIndex)
 		success = true
 		return nil
 	}
 
-	err = lm.storage.TruncateLogSuffix(ctx, newLastIndexPlusOne)
-	if err != nil {
-		lm.logger.Errorw("Failed to truncate log suffix in storage", "newLastIndexPlusOne", newLastIndexPlusOne, "error", err)
+	if err := lm.storage.TruncateLogSuffix(ctx, newLastIndexPlusOne); err != nil {
+		lm.logger.Errorw("Failed to truncate log suffix in storage",
+			"newLastIndexPlusOne", newLastIndexPlusOne, "error", err)
 		return fmt.Errorf("log suffix truncation from index %d failed: %w", newLastIndexPlusOne, err)
 	}
 
 	newLastIndex := lm.storage.LastLogIndex()
+
+	if newLastIndex > oldLastIndex {
+		lm.logger.Errorw("Inconsistent state: lastIndex increased after suffix truncation",
+			"oldLast", oldLastIndex, "newLast", newLastIndex)
+		lm.metrics.ObserveLogConsistencyError()
+		return fmt.Errorf("suffix truncation led to inconsistent state: newLastIndex %d > oldLastIndex %d", newLastIndex, oldLastIndex)
+	}
+
 	var newLastTerm types.Term
 	if newLastIndex > 0 {
 		newLastTerm, err = lm.fetchEntryTerm(ctx, newLastIndex)
 		if err != nil {
-			lm.logger.Errorw("Failed to get term for new last index after suffix truncation", "index", newLastIndex, "error", err)
+			lm.logger.Errorw("Failed to get term for new last index after suffix truncation",
+				"index", newLastIndex, "error", err)
 			lm.metrics.ObserveLogConsistencyError()
 			_ = lm.RebuildInMemoryState(ctx)
 			return fmt.Errorf("suffix truncation succeeded but failed to fetch new last term for index %d: %w", newLastIndex, err)
@@ -578,10 +591,6 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 
 	if newLastIndex < oldLastIndex {
 		entriesRemoved = int(oldLastIndex - newLastIndex)
-	} else if newLastIndex > oldLastIndex {
-		lm.logger.Errorw("Inconsistent state: lastIndex increased after suffix truncation", "oldLast", oldLastIndex, "newLast", newLastIndex)
-		lm.metrics.ObserveLogConsistencyError()
-		entriesRemoved = 0
 	}
 
 	firstIndex := lm.updateCachedStateAndGetFirst(newLastIndex, newLastTerm)
@@ -711,58 +720,99 @@ func (lm *logManager) FindLastEntryWithTermUnsafe(ctx context.Context, term type
 	})
 }
 
-// FindFirstIndexInTermUnsafe searches backwards for the first index of a given term.
-// It assumes log entries of the same term are stored contiguously, so it stops scanning once a different term is found.
-// searchUpToIndex defines the highest index to consider. If it's beyond the current log, it's clamped.
-// If the start of the term is at the beginning of the log, that index is returned.
-// If the region is compacted or the term isn't found, returns ErrNotFound.
-func (lm *logManager) FindFirstIndexInTermUnsafe(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error) {
+// FindFirstIndexInTermUnsafe scans backward from searchUpToIndex to find the first index
+// with the given term. It assumes entries for the same term appear contiguously.
+// The scan stops when a different term is encountered after matches begin.
+//
+// Returns the lowest index for the term, or 0 with:
+//   - ErrNotFound if the term isn't found,
+//   - ErrCompacted if the region is unavailable,
+//   - ErrShuttingDown if the node is stopping,
+//   - context errors (canceled, deadline),
+//   - or storage errors.
+//
+// Caller must ensure thread safety; no locks are acquired.
+func (lm *logManager) FindFirstIndexInTermUnsafe(
+	ctx context.Context,
+	termToFind types.Term,
+	searchUpToIndex types.Index,
+) (types.Index, error) {
 	if lm.isShutdown.Load() {
 		return 0, ErrShuttingDown
 	}
-	if term == 0 {
-		return 0, fmt.Errorf("cannot search for term 0")
+	if termToFind == 0 {
+		return 0, fmt.Errorf("cannot search for term 0 in FindFirstIndexInTermUnsafe")
 	}
 
-	firstIdx := lm.GetFirstIndex()
-	lastIdx := lm.GetLastIndexUnsafe()
-	startIdx := min(searchUpToIndex, lastIdx)
+	firstLogIdx := lm.GetFirstIndex()
+	lastLogIdx := lm.GetLastIndexUnsafe()
 
-	if startIdx < firstIdx {
+	scanStartIndex := min(searchUpToIndex, lastLogIdx)
+
+	if scanStartIndex < firstLogIdx || (lastLogIdx == 0 && scanStartIndex == 0 && firstLogIdx > 0) {
+		if scanStartIndex < firstLogIdx {
+			lm.logger.Debugw("FindFirstIndexInTermUnsafe: scan start index is before first log index",
+				"termToFind", termToFind, "searchUpToIndex", searchUpToIndex,
+				"scanStartIndex", scanStartIndex, "firstLogIdx", firstLogIdx)
+			return 0, ErrNotFound
+		}
+	}
+
+	if lastLogIdx == 0 {
 		return 0, ErrNotFound
 	}
 
-	lm.logger.Debugw("Starting FindFirstIndexInTerm", "term", term, "startIndex", startIdx, "firstIndex", firstIdx)
+	var firstIndexOfTermBlock types.Index = 0
+	var scanErr error
 
-	result, err := lm.scanLogForTermUnsafe(ctx, startIdx, firstIdx, -1, func(t types.Term, idx types.Index) (bool, bool) {
-		if t != term {
-			firstInTerm := idx + 1
-			if firstInTerm <= lastIdx {
-				lm.logger.Debugw("Term change detected", "term", term, "firstIndexInTerm", firstInTerm, "foundTerm", t, "atIndex", idx)
+	_, scanErr = lm.scanLogForTermUnsafe(ctx, scanStartIndex, firstLogIdx, -1, /* step backward */
+		func(currentEntryTerm types.Term, currentEntryIndex types.Index) (signalScanToStop bool, stopEarlyForScan bool) {
+			if currentEntryTerm == termToFind {
+				firstIndexOfTermBlock = currentEntryIndex
+				return false, false
+			}
+
+			if firstIndexOfTermBlock != 0 {
 				return true, false
 			}
-			return false, true // avoid returning out-of-bounds index
-		}
-		return false, false
-	})
 
-	if err == ErrNotFound {
-		lm.logger.Debugw("First index is start of log", "term", term, "index", firstIdx)
-		return firstIdx, nil
+			return false, false
+		})
+
+	if scanErr != nil {
+		if firstIndexOfTermBlock == 0 {
+			return 0, scanErr
+		}
+
+		isHardOperationalError := !errors.Is(scanErr, ErrNotFound) && !errors.Is(scanErr, ErrCompacted)
+		if isHardOperationalError {
+			lm.logger.Warnw("Hard error during FindFirstIndexInTermUnsafe after term block was identified",
+				"termToFind", termToFind, "firstIndexOfTermBlock", firstIndexOfTermBlock, "scanError", scanErr)
+			return 0, scanErr
+		}
 	}
-	return result, err
+
+	if firstIndexOfTermBlock == 0 {
+		if scanErr == nil {
+			lm.logger.Debugw("FindFirstIndexInTermUnsafe: scan completed without error, but no term index found.",
+				"termToFind", termToFind, "searchUpToIndex", searchUpToIndex)
+		}
+		return 0, ErrNotFound
+	}
+
+	return firstIndexOfTermBlock, nil
 }
 
-// scanLogForTermUnsafe scans log entries from start to end (inclusive) in the given direction (step must be +1 or -1).
-// It uses GetTermUnsafe to read the term at each index and applies the provided match function.
+// scanLogForTermUnsafe scans log terms from start to end (inclusive) in the given direction (+1 or -1).
+// At each index, it calls the match function, which returns:
+//   - matchFound = true to return the current index (match),
+//   - stopEarly  = true to stop early without a match.
 //
-// The match function should return:
-//   - matchFound: true to indicate a match and stop the scan.
-//   - stopEarly: true to stop scanning without a match (e.g., due to term boundary).
+// Returns:
+//   - The matching index,
+//   - Or 0 and ErrNotFound, ErrCompacted, or other errors.
 //
-// The caller is responsible for synchronization; this method does not acquire locks.
-//
-// Returns the matching index if found, or ErrNotFound if the scan completes without a match.
+// Caller must ensure thread safety; no locks are acquired.
 func (lm *logManager) scanLogForTermUnsafe(
 	ctx context.Context,
 	start, end types.Index,
@@ -778,18 +828,19 @@ func (lm *logManager) scanLogForTermUnsafe(
 		if err != nil {
 			if errors.Is(err, ErrCompacted) {
 				lm.logger.Infow("Scan encountered compacted log segment", "index", i, "start", start, "end", end)
-				return 0, ErrNotFound
+				return 0, ErrCompacted
 			}
-			lm.logger.Warnw("Error during term scan", "index", i, "error", err)
-			return 0, fmt.Errorf("term scan failed at index %d: %w", i, err)
+
+			lm.logger.Warnw("Error during term scan from GetTermUnsafe", "index", i, "error", err)
+			return 0, fmt.Errorf("term scan failed at index %d due to GetTermUnsafe: %w", i, err)
 		}
 
 		matchFound, stop := match(term, i)
 		if matchFound {
-			return i, nil
+			return i, nil // Match found, return the index where it was found.
 		}
 		if stop {
-			break
+			return 0, ErrNotFound
 		}
 	}
 
@@ -804,6 +855,7 @@ func (lm *logManager) Stop() {
 	}
 
 	lm.logger.Infow("LogManager Stop() invoked; shutdown coordinated via shared flag.")
+	lm.isShutdown.Store(true)
 }
 
 // updateCachedState updates the in-memory representation of the log’s last index and term.

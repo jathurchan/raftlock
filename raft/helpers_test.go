@@ -18,6 +18,11 @@ type mockStorage struct {
 
 	saveCounter int
 	loadCounter int
+
+	hookGetLogEntry   func(index types.Index)
+	hookGetLogEntries func(start, end types.Index) []types.LogEntry
+	hookFirstLogIndex func() types.Index
+	hookLastLogIndex  func() types.Index
 }
 
 func newMockStorage() *mockStorage {
@@ -100,6 +105,9 @@ func (ms *mockStorage) GetLogEntries(ctx context.Context, start, end types.Index
 	if err := ms.checkFailure("GetLogEntries"); err != nil {
 		return nil, err
 	}
+	if ms.hookGetLogEntries != nil {
+		return ms.hookGetLogEntries(start, end), nil
+	}
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -131,6 +139,11 @@ func (ms *mockStorage) GetLogEntry(ctx context.Context, index types.Index) (type
 	if err := ms.checkFailure("GetLogEntry"); err != nil {
 		return types.LogEntry{}, err
 	}
+
+	if ms.hookGetLogEntry != nil {
+		ms.hookGetLogEntry(index)
+	}
+
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -224,6 +237,10 @@ func (ms *mockStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata
 }
 
 func (ms *mockStorage) LastLogIndex() types.Index {
+	if ms.hookLastLogIndex != nil {
+		return ms.hookLastLogIndex()
+	}
+
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -234,6 +251,10 @@ func (ms *mockStorage) LastLogIndex() types.Index {
 }
 
 func (ms *mockStorage) FirstLogIndex() types.Index {
+	if ms.hookFirstLogIndex != nil {
+		return ms.hookFirstLogIndex()
+	}
+
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -343,6 +364,11 @@ type mockMetrics struct {
 	logReadCount      int
 	logConsistencyErr int
 	logTruncateCount  int
+
+	lastTruncateType    LogTruncateType
+	lastEntriesRemoved  int
+	lastTruncateLatency time.Duration
+	lastTruncateSuccess bool
 }
 
 func newMockMetrics() *mockMetrics {
@@ -384,6 +410,10 @@ func (mm *mockMetrics) ObserveLogConsistencyError() {
 
 func (mm *mockMetrics) ObserveLogTruncate(truncateType LogTruncateType, entriesRemoved int, latency time.Duration, success bool) {
 	mm.logTruncateCount++
+	mm.lastTruncateType = truncateType
+	mm.lastEntriesRemoved = entriesRemoved
+	mm.lastTruncateLatency = latency
+	mm.lastTruncateSuccess = success
 }
 
 func (mm *mockMetrics) ObserveElectionElapsed(nodeID types.NodeID, term types.Term, ticks int) {}
