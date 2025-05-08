@@ -54,33 +54,33 @@ func (ms *mockStorage) ResetMetrics()                 {}
 func (ms *mockStorage) GetMetrics() map[string]uint64 { return nil }
 func (ms *mockStorage) GetMetricsSummary() string     { return "" }
 
-type mockNetwork struct{}
+type mockNetworkManager struct{}
 
-func (m *mockNetwork) Start() error {
+func (m *mockNetworkManager) Start() error {
 	return nil
 }
 
-func (m *mockNetwork) Stop() error {
+func (m *mockNetworkManager) Stop() error {
 	return nil
 }
 
-func (m *mockNetwork) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+func (m *mockNetworkManager) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
 	return nil, nil
 }
 
-func (m *mockNetwork) SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+func (m *mockNetworkManager) SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 	return nil, nil
 }
 
-func (m *mockNetwork) SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+func (m *mockNetworkManager) SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
 	return nil, nil
 }
 
-func (m *mockNetwork) PeerStatus(peer types.NodeID) (types.PeerConnectionStatus, error) {
+func (m *mockNetworkManager) PeerStatus(peer types.NodeID) (types.PeerConnectionStatus, error) {
 	return types.PeerConnectionStatus{}, nil
 }
 
-func (m *mockNetwork) LocalAddr() string {
+func (m *mockNetworkManager) LocalAddr() string {
 	return ""
 }
 

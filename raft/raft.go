@@ -50,22 +50,6 @@ type raftNode struct {
 	fetchEntriesTimeout time.Duration
 }
 
-// NewRaft creates a new Raft node with the provided configuration.
-func NewRaft(cfg Config, applier Applier, networkManager NetworkManager, baseLogger logger.Logger) (Raft, error) {
-	builder := NewRaftNodeBuilder(cfg.ID).
-		WithConfig(cfg).
-		WithPeers(cfg.Peers).
-		WithApplier(applier).
-		WithNetworkManager(networkManager).
-		WithLogger(baseLogger).
-		WithMetrics(cfg.Deps.Metrics).
-		WithClock(cfg.Deps.Clock).
-		WithRand(cfg.Deps.Rand).
-		WithStorage(cfg.Deps.Storage)
-
-	return builder.Build()
-}
-
 // Start initializes the Raft node and launches background tasks.
 func (r *raftNode) Start() error {
 	if r.isShutdown.Load() {
