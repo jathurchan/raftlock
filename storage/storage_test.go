@@ -17,6 +17,29 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
+func TestNewFileStorage(t *testing.T) {
+	t.Run("Success creating new file storage", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		fs, err := NewFileStorage(StorageConfig{Dir: tempDir}, logger.NewNoOpLogger())
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertNotNil(t, fs)
+
+		fileStorage, ok := fs.(*FileStorage)
+		testutil.AssertTrue(t, ok, "Expected *FileStorage type")
+
+		testutil.AssertEqual(t, types.Index(0), fileStorage.FirstLogIndex(), "FirstLogIndex for empty log")
+		testutil.AssertEqual(t, types.Index(0), fileStorage.LastLogIndex(), "LastLogIndex for empty log")
+
+		status := fileStorage.status.Load().(storageStatus)
+		testutil.AssertEqual(t, storageStatusReady, status)
+
+		err = fs.Close()
+		testutil.AssertNoError(t, err, "Close should not fail")
+	})
+}
+
 func TestNewFileStorageWithOptions(t *testing.T) {
 	t.Run("Success with default options", func(t *testing.T) {
 		tempDir := t.TempDir()
