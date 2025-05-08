@@ -18,7 +18,7 @@ import (
 func newTestStateManager() (*stateManager, *mockStorage, chan types.NodeID) {
 	mu := &sync.RWMutex{}
 	isShutdown := &atomic.Bool{}
-	mockStore := &mockStorage{}
+	mockStore := newMockStorage()
 	leaderChangeCh := make(chan types.NodeID, 5)
 	deps := Dependencies{
 		Storage: mockStore,
@@ -77,7 +77,7 @@ func TestRaftState_Initialize(t *testing.T) {
 
 	t.Run("corrupted state", func(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
-		mockStore.loadErr = storage.ErrCorruptedState
+		mockStore.setFailure("LoadState", storage.ErrCorruptedState)
 
 		err := sm.Initialize(context.Background())
 		if err != nil {
@@ -96,7 +96,7 @@ func TestRaftState_Initialize(t *testing.T) {
 
 	t.Run("load state error (non-corruption)", func(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
-		mockStore.loadErr = errors.New("disk read failure")
+		mockStore.setFailure("LoadState", errors.New("disk read failure"))
 
 		err := sm.Initialize(context.Background())
 		if err == nil || err.Error() != "failed to load persistent state: disk read failure" {
@@ -106,8 +106,8 @@ func TestRaftState_Initialize(t *testing.T) {
 
 	t.Run("persist default state error after corrupted state", func(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
-		mockStore.loadErr = storage.ErrCorruptedState
-		mockStore.saveErr = errors.New("disk write failure")
+		mockStore.setFailure("LoadState", storage.ErrCorruptedState)
+		mockStore.setFailure("SaveState", errors.New("disk write failure"))
 
 		err := sm.Initialize(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "failed to persist initial default state") {
@@ -318,7 +318,7 @@ func TestRaftState_BecomeCandidate(t *testing.T) {
 	t.Run("storage error", func(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
 		setState(sm, 3, types.RoleFollower, "", "")
-		mockStore.saveErr = storage.ErrStorageIO
+		mockStore.setFailure("SaveState", storage.ErrStorageIO)
 
 		success := sm.BecomeCandidate(context.Background(), ElectionReasonTimeout)
 		if success {
@@ -488,7 +488,7 @@ func TestRaftState_BecomeFollower(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
 		setState(sm, 4, types.RoleCandidate, "node1", "")
 
-		mockStore.saveErr = errors.New("disk write failure")
+		mockStore.setFailure("SaveState", errors.New("disk write failure"))
 
 		sm.BecomeFollower(context.Background(), 5, "node2")
 
@@ -594,7 +594,7 @@ func TestRaftState_CheckTermAndStepDown(t *testing.T) {
 	t.Run("persistence failure during step down", func(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
 		setState(sm, 3, types.RoleLeader, "node1", "node1")
-		mockStore.saveErr = errors.New("disk write error")
+		mockStore.setFailure("SaveState", errors.New("disk write error"))
 
 		steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 4, "node2")
 		if !steppedDown || prevTerm != 3 {
@@ -688,7 +688,7 @@ func TestRaftState_GrantVote(t *testing.T) {
 	t.Run("persistence failure rolls back vote", func(t *testing.T) {
 		sm, mockStore, _ := newTestStateManager()
 		setState(sm, 6, types.RoleFollower, "", "")
-		mockStore.saveErr = errors.New("disk write failure")
+		mockStore.setFailure("SaveState", errors.New("disk write failure"))
 
 		granted := sm.GrantVote(context.Background(), "node2", 6)
 		if granted {
