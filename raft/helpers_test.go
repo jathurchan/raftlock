@@ -2,57 +2,261 @@ package raft
 
 import (
 	"context"
+	"sync"
 	"time"
 
+	"github.com/jathurchan/raftlock/storage"
 	"github.com/jathurchan/raftlock/types"
 )
 
 type mockStorage struct {
-	state       types.PersistentState
-	saveErr     error
-	loadErr     error
+	mu            sync.RWMutex
+	log           []types.LogEntry
+	firstLogIndex types.Index
+	state         types.PersistentState
+	failOps       map[string]error
+
 	saveCounter int
 	loadCounter int
 }
 
+func newMockStorage() *mockStorage {
+	return &mockStorage{
+		log:     make([]types.LogEntry, 0),
+		failOps: make(map[string]error),
+	}
+}
+
+func (ms *mockStorage) setFailure(op string, err error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.failOps[op] = err
+}
+
+func (ms *mockStorage) clearFailures() {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.failOps = make(map[string]error)
+}
+
+func (ms *mockStorage) checkFailure(op string) error {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	if err, ok := ms.failOps[op]; ok {
+		return err
+	}
+	return nil
+}
+
 func (ms *mockStorage) SaveState(ctx context.Context, state types.PersistentState) error {
+	if err := ms.checkFailure("SaveState"); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
 	ms.state = state
 	ms.saveCounter++
-	return ms.saveErr
+	return nil
 }
 
 func (ms *mockStorage) LoadState(ctx context.Context) (types.PersistentState, error) {
+	if err := ms.checkFailure("LoadState"); err != nil {
+		return types.PersistentState{}, err
+	}
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 	ms.loadCounter++
-	return ms.state, ms.loadErr
+	return ms.state, nil
 }
 
 func (ms *mockStorage) AppendLogEntries(ctx context.Context, entries []types.LogEntry) error {
+	if err := ms.checkFailure("AppendLogEntries"); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if len(entries) == 0 {
+		return storage.ErrEmptyEntries
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Index <= entries[i-1].Index {
+			return storage.ErrOutOfOrderEntries
+		}
+	}
+	if len(ms.log) > 0 {
+		if entries[0].Index != ms.log[len(ms.log)-1].Index+1 {
+			return storage.ErrNonContiguousEntries
+		}
+	} else if entries[0].Index > 1 {
+		return storage.ErrNonContiguousEntries
+	}
+
+	ms.log = append(ms.log, entries...)
 	return nil
 }
+
 func (ms *mockStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
-	return nil, nil
+	if err := ms.checkFailure("GetLogEntries"); err != nil {
+		return nil, err
+	}
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	if start >= end {
+		return nil, storage.ErrInvalidLogRange
+	}
+	if len(ms.log) == 0 {
+		return nil, storage.ErrIndexOutOfRange
+	}
+
+	firstIdx := ms.firstLogIndex
+	if firstIdx == 0 && len(ms.log) > 0 {
+		firstIdx = ms.log[0].Index
+	}
+
+	if start < firstIdx || start >= firstIdx+types.Index(len(ms.log)) {
+		return nil, storage.ErrIndexOutOfRange
+	}
+
+	startPos := int(start - firstIdx)
+	endPos := int(end - firstIdx)
+	if endPos > len(ms.log) {
+		endPos = len(ms.log)
+	}
+	return ms.log[startPos:endPos], nil
 }
+
 func (ms *mockStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
-	return types.LogEntry{}, nil
+	if err := ms.checkFailure("GetLogEntry"); err != nil {
+		return types.LogEntry{}, err
+	}
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	if len(ms.log) == 0 {
+		return types.LogEntry{}, storage.ErrEntryNotFound
+	}
+
+	firstIdx := ms.firstLogIndex
+	if firstIdx == 0 && len(ms.log) > 0 {
+		firstIdx = ms.log[0].Index
+	}
+	if index < firstIdx || index >= firstIdx+types.Index(len(ms.log)) {
+		return types.LogEntry{}, storage.ErrEntryNotFound
+	}
+
+	pos := int(index - firstIdx)
+	return ms.log[pos], nil
 }
+
 func (ms *mockStorage) TruncateLogSuffix(ctx context.Context, index types.Index) error {
+	if err := ms.checkFailure("TruncateLogSuffix"); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if len(ms.log) == 0 {
+		return nil
+	}
+
+	firstIdx := ms.firstLogIndex
+	if firstIdx == 0 && len(ms.log) > 0 {
+		firstIdx = ms.log[0].Index
+	}
+	if index <= firstIdx {
+		ms.log = []types.LogEntry{}
+		return nil
+	}
+
+	pos := int(index - firstIdx)
+	if pos > len(ms.log) {
+		return nil
+	}
+	ms.log = ms.log[:pos]
 	return nil
 }
+
 func (ms *mockStorage) TruncateLogPrefix(ctx context.Context, index types.Index) error {
+	if err := ms.checkFailure("TruncateLogPrefix"); err != nil {
+		return err
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if len(ms.log) == 0 || index <= 1 {
+		return nil
+	}
+
+	firstIdx := ms.firstLogIndex
+	if firstIdx == 0 && len(ms.log) > 0 {
+		firstIdx = ms.log[0].Index
+	}
+	if index <= firstIdx {
+		return nil
+	}
+
+	pos := int(index - firstIdx)
+	if pos >= len(ms.log) {
+		ms.log = []types.LogEntry{}
+		ms.firstLogIndex = index
+		return nil
+	}
+
+	ms.log = ms.log[pos:]
+	ms.firstLogIndex = index
 	return nil
 }
+
 func (ms *mockStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+	if err := ms.checkFailure("SaveSnapshot"); err != nil {
+		return err
+	}
 	return nil
 }
+
 func (ms *mockStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
-	return types.SnapshotMetadata{}, nil, nil
+	if err := ms.checkFailure("LoadSnapshot"); err != nil {
+		return types.SnapshotMetadata{}, nil, err
+	}
+	return types.SnapshotMetadata{}, nil, storage.ErrNoSnapshot
 }
-func (ms *mockStorage) LastLogIndex() types.Index     { return 0 }
-func (ms *mockStorage) FirstLogIndex() types.Index    { return 0 }
-func (ms *mockStorage) Close() error                  { return nil }
-func (ms *mockStorage) ResetMetrics()                 {}
-func (ms *mockStorage) GetMetrics() map[string]uint64 { return nil }
-func (ms *mockStorage) GetMetricsSummary() string     { return "" }
+
+func (ms *mockStorage) LastLogIndex() types.Index {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	if len(ms.log) == 0 {
+		return 0
+	}
+	return ms.log[len(ms.log)-1].Index
+}
+
+func (ms *mockStorage) FirstLogIndex() types.Index {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	if len(ms.log) == 0 {
+		return 0
+	}
+	if ms.firstLogIndex > 0 {
+		return ms.firstLogIndex
+	}
+	return ms.log[0].Index
+}
+
+func (ms *mockStorage) Close() error { return nil }
+
+func (ms *mockStorage) ResetMetrics() {}
+
+func (ms *mockStorage) GetMetrics() map[string]uint64 {
+	return nil
+}
+
+func (ms *mockStorage) GetMetricsSummary() string {
+	return ""
+}
 
 type mockNetworkManager struct{}
 
