@@ -336,3 +336,70 @@ func (m *mockRand) IntN(n int) int {
 func (m *mockRand) Float64() float64 {
 	return 0
 }
+
+type mockMetrics struct {
+	logStateCount     int
+	logAppendCount    int
+	logReadCount      int
+	logConsistencyErr int
+	logTruncateCount  int
+}
+
+func newMockMetrics() *mockMetrics {
+	return &mockMetrics{}
+}
+
+func (mm *mockMetrics) IncCounter(name string, labels ...string)                      {}
+func (mm *mockMetrics) AddCounter(name string, value float64, labels ...string)       {}
+func (mm *mockMetrics) SetGauge(name string, value float64, labels ...string)         {}
+func (mm *mockMetrics) ObserveHistogram(name string, value float64, labels ...string) {}
+func (mm *mockMetrics) ObserveCommitIndex(index types.Index)                          {}
+func (mm *mockMetrics) ObserveAppliedIndex(index types.Index)                         {}
+func (mm *mockMetrics) ObserveTerm(term types.Term)                                   {}
+func (mm *mockMetrics) ObserveLeaderChange(newLeader types.NodeID, term types.Term)   {}
+func (mm *mockMetrics) ObserveLeaderNotificationDropped()                             {}
+func (mm *mockMetrics) ObserveLeadershipLost(term types.Term, reason string)          {}
+func (mm *mockMetrics) ObserveApplyNotificationDropped()                              {}
+func (mm *mockMetrics) ObserveApplyLoopStopped(reason string)                         {}
+func (mm *mockMetrics) ObserveRoleChange(newRole types.NodeRole, oldRole types.NodeRole, term types.Term) {
+}
+func (mm *mockMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {}
+func (mm *mockMetrics) ObserveVoteGranted(term types.Term)                          {}
+
+func (mm *mockMetrics) ObserveLogState(firstIndex, lastIndex types.Index, lastTerm types.Term) {
+	mm.logStateCount++
+}
+
+func (mm *mockMetrics) ObserveLogAppend(entryCount int, latency time.Duration, success bool) {
+	mm.logAppendCount++
+}
+
+func (mm *mockMetrics) ObserveLogRead(readType LogReadType, latency time.Duration, success bool) {
+	mm.logReadCount++
+}
+
+func (mm *mockMetrics) ObserveLogConsistencyError() {
+	mm.logConsistencyErr++
+}
+
+func (mm *mockMetrics) ObserveLogTruncate(truncateType LogTruncateType, entriesRemoved int, latency time.Duration, success bool) {
+	mm.logTruncateCount++
+}
+
+func (mm *mockMetrics) ObserveElectionElapsed(nodeID types.NodeID, term types.Term, ticks int) {}
+func (mm *mockMetrics) ObserveProposal(success bool, reason ProposalResult)                    {}
+func (mm *mockMetrics) ObserveReadIndex(success bool, path string)                             {}
+func (mm *mockMetrics) ObserveSnapshot(action SnapshotAction, status SnapshotStatus, labels ...string) {
+}
+func (mm *mockMetrics) ObserveSnapshotRecovery(status SnapshotStatus, reason SnapshotReason) {}
+func (mm *mockMetrics) ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult) {
+}
+func (mm *mockMetrics) ObserveHeartbeat(peerID types.NodeID, success bool, latency time.Duration) {}
+func (mm *mockMetrics) ObserveHeartbeatSent()                                                     {}
+func (mm *mockMetrics) ObserveAppendEntriesHeartbeat()                                            {}
+func (mm *mockMetrics) ObserveAppendEntriesReplication()                                          {}
+func (mm *mockMetrics) ObserveEntriesReceived(count int)                                          {}
+func (mm *mockMetrics) ObserveCommandBytesReceived(bytes int)                                     {}
+func (mm *mockMetrics) ObserveAppendEntriesRejected(reason string)                                {}
+func (mm *mockMetrics) ObserveTick(role types.NodeRole)                                           {}
+func (mm *mockMetrics) ObserveComponentStopTimeout(component string)                              {}
