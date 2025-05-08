@@ -33,9 +33,6 @@ type Config struct {
 
 	// TuningParams configure advanced performance settings.
 	TuningParams TuningParams
-
-	// Deps contains external components (Storage, Network, etc.).
-	Deps Dependencies
 }
 
 // Options define core Raft timing and behavior settings.

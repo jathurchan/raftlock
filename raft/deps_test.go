@@ -11,7 +11,7 @@ import (
 func TestRaftDependencies_Validate_Success(t *testing.T) {
 	deps := Dependencies{
 		Storage: &mockStorage{},
-		Network: &mockNetwork{},
+		Network: &mockNetworkManager{},
 		Applier: &mockApplier{},
 		Clock:   &mockClock{},
 		Rand:    &mockRand{},
@@ -52,7 +52,7 @@ func TestRaftDependencies_Validate_MissingDependencies(t *testing.T) {
 			name: "Missing Storage",
 			dependencies: Dependencies{
 				Storage: nil,
-				Network: &mockNetwork{},
+				Network: &mockNetworkManager{},
 				Applier: &mockApplier{},
 				Clock:   &mockClock{},
 				Rand:    &mockRand{},
@@ -74,7 +74,7 @@ func TestRaftDependencies_Validate_MissingDependencies(t *testing.T) {
 			name: "Missing Applier",
 			dependencies: Dependencies{
 				Storage: &mockStorage{},
-				Network: &mockNetwork{},
+				Network: &mockNetworkManager{},
 				Applier: nil,
 				Clock:   &mockClock{},
 				Rand:    &mockRand{},
@@ -85,7 +85,7 @@ func TestRaftDependencies_Validate_MissingDependencies(t *testing.T) {
 			name: "Missing Clock",
 			dependencies: Dependencies{
 				Storage: &mockStorage{},
-				Network: &mockNetwork{},
+				Network: &mockNetworkManager{},
 				Applier: &mockApplier{},
 				Clock:   nil,
 				Rand:    &mockRand{},
@@ -96,7 +96,7 @@ func TestRaftDependencies_Validate_MissingDependencies(t *testing.T) {
 			name: "Missing Rand",
 			dependencies: Dependencies{
 				Storage: &mockStorage{},
-				Network: &mockNetwork{},
+				Network: &mockNetworkManager{},
 				Applier: &mockApplier{},
 				Clock:   &mockClock{},
 				Rand:    nil,

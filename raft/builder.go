@@ -5,108 +5,81 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/storage"
 	"github.com/jathurchan/raftlock/types"
 )
 
-// RaftNodeBuilder facilitates the construction of a RaftNode with appropriate defaults.
-type RaftNodeBuilder struct {
-	id                  types.NodeID
-	config              Config
-	peers               map[types.NodeID]PeerConfig
-	applier             Applier
-	networkMgr          NetworkManager
-	logger              logger.Logger
-	metrics             Metrics
-	clock               Clock
-	rand                Rand
-	storage             storage.Storage
-	applyEntryTimeout   time.Duration
-	fetchEntriesTimeout time.Duration
+// RaftBuilder facilitates the construction of a Raft with appropriate defaults.
+type RaftBuilder struct {
+	config     Config
+	applier    Applier
+	networkMgr NetworkManager
+	logger     logger.Logger
+	metrics    Metrics
+	clock      Clock
+	rand       Rand
+	storage    storage.Storage
 }
 
-// NewRaftNodeBuilder creates a new builder for RaftNode construction.
-func NewRaftNodeBuilder(id types.NodeID) *RaftNodeBuilder {
-	return &RaftNodeBuilder{
-		id:                  id,
-		peers:               make(map[types.NodeID]PeerConfig),
-		applyEntryTimeout:   defaultApplyEntryTimeout,
-		fetchEntriesTimeout: defaultFetchEntriesTimeout,
-	}
+// NewRaftBuilder creates a new builder for Raft construction.
+func NewRaftBuilder() *RaftBuilder {
+	return &RaftBuilder{}
 }
 
 // WithConfig sets the configuration for the Raft node.
-func (b *RaftNodeBuilder) WithConfig(config Config) *RaftNodeBuilder {
+// This is a primary method for providing node ID, peer info, and options.
+func (b *RaftBuilder) WithConfig(config Config) *RaftBuilder {
 	b.config = config
 	return b
 }
 
-// WithPeers sets the peer configuration map.
-func (b *RaftNodeBuilder) WithPeers(peers map[types.NodeID]PeerConfig) *RaftNodeBuilder {
-	b.peers = peers
-	return b
-}
-
 // WithApplier sets the state machine applier.
-func (b *RaftNodeBuilder) WithApplier(applier Applier) *RaftNodeBuilder {
+func (b *RaftBuilder) WithApplier(applier Applier) *RaftBuilder {
 	b.applier = applier
 	return b
 }
 
 // WithNetworkManager sets the network manager for peer communication.
-func (b *RaftNodeBuilder) WithNetworkManager(networkMgr NetworkManager) *RaftNodeBuilder {
+func (b *RaftBuilder) WithNetworkManager(networkMgr NetworkManager) *RaftBuilder {
 	b.networkMgr = networkMgr
 	return b
 }
 
 // WithLogger sets the logger for the Raft node.
-func (b *RaftNodeBuilder) WithLogger(logger logger.Logger) *RaftNodeBuilder {
+func (b *RaftBuilder) WithLogger(logger logger.Logger) *RaftBuilder {
 	b.logger = logger
 	return b
 }
 
 // WithMetrics sets the metrics implementation.
-func (b *RaftNodeBuilder) WithMetrics(metrics Metrics) *RaftNodeBuilder {
+func (b *RaftBuilder) WithMetrics(metrics Metrics) *RaftBuilder {
 	b.metrics = metrics
 	return b
 }
 
 // WithClock sets the clock implementation.
-func (b *RaftNodeBuilder) WithClock(clock Clock) *RaftNodeBuilder {
+func (b *RaftBuilder) WithClock(clock Clock) *RaftBuilder {
 	b.clock = clock
 	return b
 }
 
 // WithRand sets the random number generator.
-func (b *RaftNodeBuilder) WithRand(rand Rand) *RaftNodeBuilder {
+func (b *RaftBuilder) WithRand(rand Rand) *RaftBuilder {
 	b.rand = rand
 	return b
 }
 
 // WithStorage sets the storage implementation.
-func (b *RaftNodeBuilder) WithStorage(storage storage.Storage) *RaftNodeBuilder {
+func (b *RaftBuilder) WithStorage(storage storage.Storage) *RaftBuilder {
 	b.storage = storage
 	return b
 }
 
-// WithApplyEntryTimeout sets the timeout for applying a single entry.
-func (b *RaftNodeBuilder) WithApplyEntryTimeout(timeout time.Duration) *RaftNodeBuilder {
-	b.applyEntryTimeout = timeout
-	return b
-}
-
-// WithFetchEntriesTimeout sets the timeout for fetching log entries.
-func (b *RaftNodeBuilder) WithFetchEntriesTimeout(timeout time.Duration) *RaftNodeBuilder {
-	b.fetchEntriesTimeout = timeout
-	return b
-}
-
-// Build constructs a RaftNode with the configured values.
+// Build constructs a Raft with the configured values.
 // Returns an error if required components are missing or invalid.
-func (b *RaftNodeBuilder) Build() (Raft, error) {
+func (b *RaftBuilder) Build() (Raft, error) {
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
@@ -117,12 +90,26 @@ func (b *RaftNodeBuilder) Build() (Raft, error) {
 		return nil, fmt.Errorf("invalid dependencies: %w", err)
 	}
 
-	log := b.logger.WithNodeID(b.id).WithComponent("raft")
+	log := b.logger.WithNodeID(b.config.ID).WithComponent("raft")
 	mu := &sync.RWMutex{}
 	shutdownFlag := &atomic.Bool{}
 
+	applyTimeout := b.config.Options.ApplyEntryTimeout
+	if applyTimeout <= 0 {
+		applyTimeout = defaultApplyEntryTimeout
+	}
+	fetchTimeout := b.config.Options.FetchEntriesTimeout
+	if fetchTimeout <= 0 {
+		fetchTimeout = defaultFetchEntriesTimeout
+	}
+
+	maxApplyBatchSize := b.config.TuningParams.MaxApplyBatchSize
+	if maxApplyBatchSize <= 0 {
+		maxApplyBatchSize = DefaultMaxApplyBatchSize
+	}
+
 	node := &raftNode{
-		id:                  b.id,
+		id:                  b.config.ID,
 		mu:                  mu,
 		logger:              log,
 		clock:               b.clock,
@@ -130,33 +117,33 @@ func (b *RaftNodeBuilder) Build() (Raft, error) {
 		networkMgr:          b.networkMgr,
 		metrics:             b.metrics,
 		stopCh:              make(chan struct{}),
-		applyCh:             make(chan types.ApplyMsg, b.config.TuningParams.MaxApplyBatchSize*2),
+		applyCh:             make(chan types.ApplyMsg, maxApplyBatchSize*2),
 		applyNotifyCh:       make(chan struct{}, 1),
-		leaderChangeCh:      make(chan types.NodeID, 1),
+		leaderChangeCh:      make(chan types.NodeID, 1), // Buffered to prevent blocking
 		applyLoopStopCh:     make(chan struct{}),
 		applyLoopDoneCh:     make(chan struct{}),
-		applyEntryTimeout:   b.config.Options.ApplyEntryTimeout,
-		fetchEntriesTimeout: b.config.Options.FetchEntriesTimeout,
+		applyEntryTimeout:   applyTimeout,
+		fetchEntriesTimeout: fetchTimeout,
 	}
 
-	stateMgr := NewStateManager(mu, shutdownFlag, deps, b.id, node.leaderChangeCh)
-	logMgr := NewLogManager(mu, shutdownFlag, deps, b.id)
+	stateMgr := NewStateManager(mu, shutdownFlag, deps, b.config.ID, node.leaderChangeCh)
+	logMgr := NewLogManager(mu, shutdownFlag, deps, b.config.ID)
 
 	node.stateMgr = stateMgr
 	node.logMgr = logMgr
 
-	quorum := calculateQuorumSize(len(b.peers))
-	if quorum == 0 && len(b.peers) > 0 {
-		log.Warnw("Quorum size is 0 for a multi-node cluster; check configuration", "peerCount", len(b.peers))
+	quorum := calculateQuorumSize(len(b.config.Peers))
+	if quorum == 0 && len(b.config.Peers) > 0 {
+		log.Warnw("Quorum size is 0 for a multi-node cluster; check configuration", "peerCount", len(b.config.Peers))
 	}
 
 	snapshotDeps := SnapshotManagerDeps{
 		Mu:                mu,
-		ID:                b.id,
+		ID:                b.config.ID,
 		Config:            b.config,
 		Storage:           b.storage,
 		Applier:           b.applier,
-		PeerStateUpdater:  NoOpReplicationStateUpdater{},
+		PeerStateUpdater:  NoOpReplicationStateUpdater{}, // Will be updated later
 		StateMgr:          stateMgr,
 		LogMgr:            logMgr,
 		NetworkMgr:        b.networkMgr,
@@ -164,7 +151,7 @@ func (b *RaftNodeBuilder) Build() (Raft, error) {
 		Logger:            log,
 		Clock:             b.clock,
 		IsShutdown:        shutdownFlag,
-		NotifyCommitCheck: func() {},
+		NotifyCommitCheck: func() {}, // Will be updated later
 	}
 	var err error
 	node.snapshotMgr, err = NewSnapshotManager(snapshotDeps)
@@ -174,8 +161,8 @@ func (b *RaftNodeBuilder) Build() (Raft, error) {
 
 	replicationDeps := ReplicationManagerDeps{
 		Mu:             mu,
-		ID:             b.id,
-		Peers:          b.peers,
+		ID:             b.config.ID,
+		Peers:          b.config.Peers,
 		QuorumSize:     quorum,
 		Cfg:            b.config,
 		StateMgr:       stateMgr,
@@ -195,15 +182,15 @@ func (b *RaftNodeBuilder) Build() (Raft, error) {
 	node.snapshotMgr.SetReplicationStateUpdater(node.replicationMgr)
 
 	electionDeps := ElectionManagerDeps{
-		ID:                b.id,
-		Peers:             b.peers,
+		ID:                b.config.ID,
+		Peers:             b.config.Peers,
 		QuorumSize:        quorum,
 		Mu:                mu,
 		IsShutdown:        shutdownFlag,
 		StateMgr:          stateMgr,
 		LogMgr:            logMgr,
 		NetworkMgr:        b.networkMgr,
-		LeaderInitializer: node.replicationMgr,
+		LeaderInitializer: node.replicationMgr, // replicationMgr implements LeaderInitializer
 		Metrics:           b.metrics,
 		Logger:            log,
 		Rand:              b.rand,
@@ -214,15 +201,15 @@ func (b *RaftNodeBuilder) Build() (Raft, error) {
 		return nil, fmt.Errorf("failed to initialize election manager: %w", err)
 	}
 
-	log.Infow("RaftNode initialized", "id", b.id, "peerCount", len(b.peers), "quorumSize", quorum)
+	log.Infow("Raft initialized", "id", b.config.ID, "peerCount", len(b.config.Peers), "quorumSize", quorum)
 	return node, nil
 }
 
 // validate checks that all required components are provided in the builder.
 // Returns an error if any essential field is missing.
-func (b *RaftNodeBuilder) validate() error {
-	if b.id == "" {
-		return errors.New("node ID cannot be empty")
+func (b *RaftBuilder) validate() error {
+	if b.config.ID == "" {
+		return errors.New("config (including node ID) must be provided using WithConfig()")
 	}
 	if b.applier == nil {
 		return errors.New("applier cannot be nil")
@@ -231,13 +218,20 @@ func (b *RaftNodeBuilder) validate() error {
 		return errors.New("network manager cannot be nil")
 	}
 	if b.logger == nil {
-		return errors.New("logger cannot be nil")
+		return errors.New("logger cannot be nil (will be defaulted if not set before Build)")
+	}
+	if b.storage == nil {
+		return errors.New("storage cannot be nil")
 	}
 	return nil
 }
 
 // setDefaults assigns default implementations for optional components.
-func (b *RaftNodeBuilder) setDefaults() {
+// Logger is also defaulted here if nil.
+func (b *RaftBuilder) setDefaults() {
+	if b.logger == nil {
+		b.logger = logger.NewNoOpLogger()
+	}
 	if b.metrics == nil {
 		b.metrics = NewNoOpMetrics()
 		b.logger.Infow("Using no-op metrics implementation")
@@ -253,7 +247,7 @@ func (b *RaftNodeBuilder) setDefaults() {
 }
 
 // createDependencies constructs a Dependencies struct using the values from the builder.
-func (b *RaftNodeBuilder) createDependencies() Dependencies {
+func (b *RaftBuilder) createDependencies() Dependencies {
 	return Dependencies{
 		Storage: b.storage,
 		Network: b.networkMgr,
