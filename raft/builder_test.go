@@ -8,7 +8,7 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-func TestNewRaftNodeBuilder(t *testing.T) {
+func TestRaftBuilder_NewRaftBuilder(t *testing.T) {
 	builder := NewRaftBuilder()
 
 	if builder == nil {
@@ -48,7 +48,7 @@ func TestNewRaftNodeBuilder(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithConfig(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithConfig(t *testing.T) {
 	builder := NewRaftBuilder()
 
 	config := Config{
@@ -78,7 +78,7 @@ func TestRaftNodeBuilder_WithConfig(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithApplier(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithApplier(t *testing.T) {
 	builder := NewRaftBuilder()
 	applier := &mockApplier{}
 
@@ -93,7 +93,7 @@ func TestRaftNodeBuilder_WithApplier(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithNetworkManager(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithNetworkManager(t *testing.T) {
 	builder := NewRaftBuilder()
 	networkMgr := &mockNetworkManager{}
 
@@ -108,7 +108,7 @@ func TestRaftNodeBuilder_WithNetworkManager(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithLogger(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithLogger(t *testing.T) {
 	builder := NewRaftBuilder()
 	logger := logger.NewNoOpLogger()
 
@@ -123,7 +123,7 @@ func TestRaftNodeBuilder_WithLogger(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithMetrics(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithMetrics(t *testing.T) {
 	builder := NewRaftBuilder()
 	metrics := NewNoOpMetrics()
 
@@ -138,7 +138,7 @@ func TestRaftNodeBuilder_WithMetrics(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithClock(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithClock(t *testing.T) {
 	builder := NewRaftBuilder()
 	clock := NewStandardClock()
 
@@ -153,7 +153,7 @@ func TestRaftNodeBuilder_WithClock(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithRand(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithRand(t *testing.T) {
 	builder := NewRaftBuilder()
 	rand := NewStandardRand()
 
@@ -168,7 +168,7 @@ func TestRaftNodeBuilder_WithRand(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_WithStorage(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_WithStorage(t *testing.T) {
 	builder := NewRaftBuilder()
 	storage := &mockStorage{}
 
@@ -183,7 +183,7 @@ func TestRaftNodeBuilder_WithStorage(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_Validate(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_Validate(t *testing.T) {
 	builder := NewRaftBuilder()
 
 	err := builder.validate()
@@ -222,7 +222,7 @@ func TestRaftNodeBuilder_Validate(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_SetDefaults(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_SetDefaults(t *testing.T) {
 	builder := NewRaftBuilder()
 
 	builder.WithConfig(Config{ID: "node1"})
@@ -282,7 +282,7 @@ func TestRaftNodeBuilder_SetDefaults(t *testing.T) {
 	}
 }
 
-func TestRaftNodeBuilder_CreateDependencies(t *testing.T) {
+func TestRaftBuilder_RaftBuilder_CreateDependencies(t *testing.T) {
 	builder := NewRaftBuilder()
 
 	storage := &mockStorage{}
@@ -332,7 +332,7 @@ func TestRaftNodeBuilder_CreateDependencies(t *testing.T) {
 	}
 }
 
-func TestCalculateQuorumSize(t *testing.T) {
+func TestRaftBuilder_CalculateQuorumSize(t *testing.T) {
 	tests := []struct {
 		clusterSize int
 		quorum      int
