@@ -56,6 +56,102 @@ func assertEntriesEqual(t *testing.T, expected, actual []types.LogEntry) {
 	}
 }
 
+func TestRaftLog_NewLogManager_Panics(t *testing.T) {
+	validDeps := Dependencies{
+		Storage: newMockStorage(),
+		Metrics: newMockMetrics(),
+		Logger:  &logger.NoOpLogger{},
+	}
+	validMu := &sync.RWMutex{}
+	validShutdown := &atomic.Bool{}
+	validNodeID := types.NodeID("test-node")
+
+	cases := []struct {
+		name     string
+		mu       *sync.RWMutex
+		shutdown *atomic.Bool
+		deps     Dependencies
+		nodeID   types.NodeID
+		wantMsg  string
+	}{
+		{
+			name:     "NilMutex",
+			mu:       nil,
+			shutdown: validShutdown,
+			deps:     validDeps,
+			nodeID:   validNodeID,
+			wantMsg:  "raft: NewLogManager requires non-nil mutex",
+		},
+		{
+			name:     "NilShutdownFlag",
+			mu:       validMu,
+			shutdown: nil,
+			deps:     validDeps,
+			nodeID:   validNodeID,
+			wantMsg:  "raft: NewLogManager requires non-nil shutdownFlag",
+		},
+		{
+			name:     "NilStorage",
+			mu:       validMu,
+			shutdown: validShutdown,
+			deps: Dependencies{
+				Storage: nil,
+				Metrics: validDeps.Metrics,
+				Logger:  validDeps.Logger,
+			},
+			nodeID:  validNodeID,
+			wantMsg: "raft: NewLogManager requires non-nil Storage dependency",
+		},
+		{
+			name:     "NilMetrics",
+			mu:       validMu,
+			shutdown: validShutdown,
+			deps: Dependencies{
+				Storage: validDeps.Storage,
+				Metrics: nil,
+				Logger:  validDeps.Logger,
+			},
+			nodeID:  validNodeID,
+			wantMsg: "raft: NewLogManager requires non-nil Metrics dependency",
+		},
+		{
+			name:     "NilLogger",
+			mu:       validMu,
+			shutdown: validShutdown,
+			deps: Dependencies{
+				Storage: validDeps.Storage,
+				Metrics: validDeps.Metrics,
+				Logger:  nil,
+			},
+			nodeID:  validNodeID,
+			wantMsg: "raft: NewLogManager requires non-nil Logger dependency",
+		},
+		{
+			name:     "EmptyNodeID",
+			mu:       validMu,
+			shutdown: validShutdown,
+			deps:     validDeps,
+			nodeID:   types.NodeID(""),
+			wantMsg:  "raft: NewLogManager requires a non-empty nodeID",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatalf("Expected panic for case %s, but no panic occurred", tc.name)
+				}
+				if r != tc.wantMsg {
+					t.Errorf("Unexpected panic message: got %q, want %q", r, tc.wantMsg)
+				}
+			}()
+			_ = NewLogManager(tc.mu, tc.shutdown, tc.deps, tc.nodeID)
+		})
+	}
+}
+
 func TestRaftLog_LogManager_Initialize_EmptyLog(t *testing.T) {
 	lm, _, metrics := setupLogManager(t)
 
