@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,29 @@ import (
 	"github.com/jathurchan/raftlock/testutil"
 	"github.com/jathurchan/raftlock/types"
 )
+
+func TestNewFileStorage(t *testing.T) {
+	t.Run("Success creating new file storage", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		fs, err := NewFileStorage(StorageConfig{Dir: tempDir}, logger.NewNoOpLogger())
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertNotNil(t, fs)
+
+		fileStorage, ok := fs.(*FileStorage)
+		testutil.AssertTrue(t, ok, "Expected *FileStorage type")
+
+		testutil.AssertEqual(t, types.Index(0), fileStorage.FirstLogIndex(), "FirstLogIndex for empty log")
+		testutil.AssertEqual(t, types.Index(0), fileStorage.LastLogIndex(), "LastLogIndex for empty log")
+
+		status := fileStorage.status.Load().(storageStatus)
+		testutil.AssertEqual(t, storageStatusReady, status)
+
+		err = fs.Close()
+		testutil.AssertNoError(t, err, "Close should not fail")
+	})
+}
 
 func TestNewFileStorageWithOptions(t *testing.T) {
 	t.Run("Success with default options", func(t *testing.T) {
@@ -2117,5 +2141,451 @@ func TestRollbackIndexMapState(t *testing.T) {
 
 		testutil.AssertTrue(t, deps.indexSvc.truncateLastCalled, "TruncateLast should have been called even with count 0")
 		testutil.AssertEqual(t, 0, deps.indexSvc.truncateLastCount, "TruncateLast should be called with count=0")
+	})
+}
+
+func TestSaveMetadataLocked(t *testing.T) {
+	t.Run("Save Metadata", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.SaveMetadataFunc = func(path string, metadata logMetadata, useAtomic bool) error {
+					testutil.AssertEqual(t, types.Index(1), metadata.FirstIndex)
+					testutil.AssertEqual(t, types.Index(1), metadata.LastIndex)
+					return nil
+				}
+			}).
+			Build()
+
+		s.logMu.Lock()
+		err := s.saveMetadataLocked()
+		s.logMu.Unlock()
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, deps.metadataSvc.saveCalled)
+	})
+
+	t.Run("Save metadata failed", func(t *testing.T) {
+		saveErr := errors.New("save metadata failed")
+		s, deps := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.SaveMetadataFunc = func(path string, metadata logMetadata, useAtomic bool) error {
+					return saveErr
+				}
+			}).
+			Build()
+
+		s.logMu.Lock()
+		err := s.saveMetadataLocked()
+		s.logMu.Unlock()
+
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, deps.metadataSvc.saveCalled)
+		testutil.AssertTrue(t, errors.Is(err, saveErr))
+		testutil.AssertContains(t, err.Error(), "failed to save metadata")
+	})
+
+	t.Run("Atomic Write", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).
+			WithOptions(FileStorageOptions{
+				Features: StorageFeatureFlags{
+					EnableAtomicWrites: true,
+				},
+			}).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.SaveMetadataFunc = func(path string, metadata logMetadata, useAtomic bool) error {
+					testutil.AssertTrue(t, useAtomic)
+					return nil
+				}
+			}).
+			Build()
+
+		s.logMu.Lock()
+		err := s.saveMetadataLocked()
+		s.logMu.Unlock()
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, deps.metadataSvc.saveCalled)
+	})
+}
+
+func TestCommitAppendChangesLocked(t *testing.T) {
+	t.Run("Commit Append", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+					return 1, 2, nil
+				}
+			}).
+			Build()
+
+		newOffsets := []types.IndexOffsetPair{
+			{Index: 1, Offset: 0},
+			{Index: 2, Offset: 100},
+		}
+
+		s.logMu.Lock()
+		err := s.commitAppendChangesLocked(newOffsets, 1, 2, 0)
+		s.logMu.Unlock()
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, types.Index(1), s.FirstLogIndex())
+		testutil.AssertEqual(t, types.Index(2), s.LastLogIndex())
+	})
+
+	t.Run("Sync Failed", func(t *testing.T) {
+		syncErr := errors.New("sync error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+					return 0, 0, syncErr
+				}
+			}).
+			Build()
+
+		newOffsets := []types.IndexOffsetPair{
+			{Index: 1, Offset: 0},
+			{Index: 2, Offset: 100},
+		}
+
+		s.logMu.Lock()
+		err := s.commitAppendChangesLocked(newOffsets, 1, 2, 0)
+		s.logMu.Unlock()
+
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, errors.Is(err, syncErr))
+		testutil.AssertContains(t, err.Error(), "log append succeeded but state sync failed")
+	})
+
+	t.Run("FirstInit", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+					return 1, 2, nil
+				}
+			}).
+			Build()
+
+		s.firstLogIndex.Store(0) // Simulate first initialization
+		s.lastLogIndex.Store(0)
+
+		newOffsets := []types.IndexOffsetPair{
+			{Index: 1, Offset: 0},
+			{Index: 2, Offset: 100},
+		}
+
+		s.logMu.Lock()
+		err := s.commitAppendChangesLocked(newOffsets, 1, 2, 0)
+		s.logMu.Unlock()
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, types.Index(1), s.FirstLogIndex())
+		testutil.AssertEqual(t, types.Index(2), s.LastLogIndex())
+	})
+}
+
+func TestGetEntryViaScan(t *testing.T) {
+	t.Run("Get Entry", func(t *testing.T) {
+		expectedEntry := types.LogEntry{Index: 2, Term: 1, Command: []byte("cmd2")}
+		s, deps := newTestStorageBuilder(t).Build()
+
+		deps.logReader.AddEntry(
+			types.LogEntry{Index: 1, Term: 1, Command: []byte("cmd1")},
+			50,
+		)
+		deps.logReader.AddEntry(expectedEntry, 50)
+
+		entry, err := s.getEntryViaScan(context.Background(), 2)
+
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, expectedEntry, entry)
+	})
+
+	t.Run("Entry not found", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).Build()
+
+		deps.logReader.AddEntry(
+			types.LogEntry{Index: 1, Term: 1, Command: []byte("cmd1")},
+			50,
+		)
+
+		_, err := s.getEntryViaScan(context.Background(), 2)
+
+		testutil.AssertError(t, err)
+		testutil.AssertErrorIs(t, err, ErrEntryNotFound)
+	})
+
+	t.Run("Context Canceled", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).Build()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := s.getEntryViaScan(ctx, 1)
+
+		testutil.AssertError(t, err)
+		testutil.AssertErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("Open failed", func(t *testing.T) {
+		openErr := errors.New("open error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.fs.OpenFunc = func(name string) (file, error) {
+					return nil, openErr
+				}
+			}).
+			Build()
+
+		_, err := s.getEntryViaScan(context.Background(), 1)
+
+		testutil.AssertError(t, err)
+		testutil.AssertErrorIs(t, err, ErrStorageIO)
+		testutil.AssertContains(t, err.Error(), "could not open log file")
+	})
+
+	t.Run("Scan failed", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).Build()
+
+		scanErr := errors.New("scan error")
+		deps.logReader.AddError(scanErr, 50)
+
+		_, err := s.getEntryViaScan(context.Background(), 1)
+
+		testutil.AssertError(t, err)
+		testutil.AssertContains(t, err.Error(), "log scan error")
+	})
+
+	t.Run("Index exceeded", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).Build()
+
+		deps.logReader.AddEntry(
+			types.LogEntry{Index: 2, Term: 1, Command: []byte("cmd2")},
+			50,
+		)
+
+		_, err := s.getEntryViaScan(context.Background(), 1)
+
+		testutil.AssertError(t, err)
+		testutil.AssertErrorIs(t, err, ErrEntryNotFound)
+	})
+}
+
+func TestMetricsUpdates(t *testing.T) {
+	opts := DefaultFileStorageOptions()
+	opts.Features.EnableMetrics = true
+
+	t.Run("Update Metadata size metric", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).
+			WithOptions(opts).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.fs.StatFunc = func(name string) (os.FileInfo, error) {
+					if strings.Contains(name, "metadata.json") {
+						return &mockFileInfo{sizeVal: 100}, nil
+					}
+					return nil, os.ErrNotExist
+				}
+			}).
+			Build()
+
+		s.updateMetadataSizeMetricUnlocked()
+		testutil.AssertEqual(t, uint64(100), s.metrics.metadataSize.Load())
+
+		// Test stat error
+		deps.fs.StatFunc = func(name string) (os.FileInfo, error) {
+			return nil, errors.New("stat error")
+		}
+		s.updateMetadataSizeMetricUnlocked()
+		testutil.AssertEqual(t, uint64(100), s.metrics.metadataSize.Load()) // Should keep previous value
+	})
+
+	t.Run("Update index", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).
+			WithOptions(opts).
+			Build()
+
+		s.indexToOffsetMap = make([]types.IndexOffsetPair, 5)
+		s.updateIndexMapSizeMetricUnlocked()
+		testutil.AssertEqual(t, uint64(5), s.metrics.indexMapSize.Load())
+
+		s.indexToOffsetMap = nil
+		s.updateIndexMapSizeMetricUnlocked()
+		testutil.AssertEqual(t, uint64(0), s.metrics.indexMapSize.Load())
+	})
+
+	t.Run("Track metrics", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).
+			WithOptions(opts).
+			Build()
+
+		s.trackMetrics(10, 1000)
+		testutil.AssertEqual(t, uint64(1), s.metrics.readOps.Load())
+		testutil.AssertEqual(t, uint64(10), s.metrics.readEntries.Load())
+		testutil.AssertEqual(t, uint64(1000), s.metrics.readBytes.Load())
+
+		// Test with metrics disabled
+		s.options.Features.EnableMetrics = false
+		s.trackMetrics(5, 500)
+		testutil.AssertEqual(t, uint64(1), s.metrics.readOps.Load()) // Should not change
+	})
+}
+
+func TestCloseEdgeCases(t *testing.T) {
+	t.Run("Already closed with missing marker", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.recoverySvc.removeMarkerErr = os.ErrNotExist
+			}).
+			Build()
+
+		s.status.Store(storageStatusClosed)
+		err := s.Close()
+		testutil.AssertNoError(t, err)
+		testutil.AssertFalse(t, deps.recoverySvc.removeMarkerCalled)
+	})
+
+	t.Run("Unexpected status", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).Build()
+
+		s.status.Store(storageStatusCorrupted)
+		err := s.Close()
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, storageStatusClosed, s.status.Load().(storageStatus))
+	})
+}
+
+func TestEnsureMetadataLocked(t *testing.T) {
+	t.Run("Load failed", func(t *testing.T) {
+		loadErr := errors.New("load error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.LoadMetadataFunc = func(path string) (logMetadata, error) {
+					return logMetadata{}, loadErr
+				}
+			}).
+			Build()
+
+		err := s.ensureMetadataLocked()
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, errors.Is(err, loadErr))
+	})
+
+	t.Run("Init empty state", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.metadataSvc.LoadMetadataFunc = func(path string) (logMetadata, error) {
+					return logMetadata{}, os.ErrNotExist
+				}
+			}).
+			Build()
+
+		err := s.ensureMetadataLocked()
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, types.Index(0), s.FirstLogIndex())
+		testutil.AssertEqual(t, types.Index(0), s.LastLogIndex())
+	})
+}
+
+func TestBuildIndexOffsetMapLocked(t *testing.T) {
+	t.Run("Feature disabled", func(t *testing.T) {
+		s, _ := newTestStorageBuilder(t).Build()
+		s.options.Features.EnableIndexMap = false
+
+		err := s.buildIndexOffsetMapLocked()
+		testutil.AssertNoError(t, err)
+		testutil.AssertTrue(t, s.indexToOffsetMap == nil)
+	})
+
+	t.Run("Build error", func(t *testing.T) {
+		buildErr := errors.New("build error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.indexSvc.BuildFunc = func(logPath string) (buildResult, error) {
+					return buildResult{}, buildErr
+				}
+			}).
+			Build()
+
+		s.options.Features.EnableIndexMap = true
+		err := s.buildIndexOffsetMapLocked()
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, errors.Is(err, buildErr))
+	})
+}
+
+func TestGetEntriesViaIndexMap(t *testing.T) {
+	t.Run("Read error", func(t *testing.T) {
+		readErr := errors.New("read error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.indexSvc.ReadInRangeFunc = func(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
+					return nil, 0, readErr
+				}
+			}).
+			Build()
+
+		_, err := s.getEntriesViaIndexMap(context.Background(), 1, 2)
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, errors.Is(err, readErr))
+	})
+
+	t.Run("Metrics enabled", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).Build()
+		s.options.Features.EnableMetrics = true
+
+		deps.indexSvc.ReadInRangeFunc = func(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
+			return []types.LogEntry{{Index: 1}}, 100, nil
+		}
+
+		_, err := s.getEntriesViaIndexMap(context.Background(), 1, 2)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, uint64(1), s.metrics.readOps.Load())
+		testutil.AssertEqual(t, uint64(1), s.metrics.readEntries.Load())
+		testutil.AssertEqual(t, uint64(100), s.metrics.readBytes.Load())
+	})
+}
+
+func TestGetEntriesViaScan(t *testing.T) {
+	t.Run("Open error", func(t *testing.T) {
+		openErr := errors.New("open error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.fs.OpenFunc = func(name string) (file, error) {
+					return nil, openErr
+				}
+			}).
+			Build()
+
+		_, err := s.getEntriesViaScan(context.Background(), 1, 2)
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, errors.Is(err, ErrStorageIO))
+	})
+
+	t.Run("Scan error", func(t *testing.T) {
+		scanErr := errors.New("scan error")
+		s, _ := newTestStorageBuilder(t).
+			WithDeps(func(deps *mockStorageDependencies) {
+				deps.logReader.ScanRangeFunc = func(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+					return nil, scanErr
+				}
+			}).
+			Build()
+
+		_, err := s.getEntriesViaScan(context.Background(), 1, 2)
+		testutil.AssertError(t, err)
+		testutil.AssertTrue(t, errors.Is(err, scanErr))
+	})
+
+	t.Run("Metrics enabled", func(t *testing.T) {
+		s, deps := newTestStorageBuilder(t).Build()
+		s.options.Features.EnableMetrics = true
+
+		deps.logReader.ScanRangeFunc = func(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+			return []types.LogEntry{{Index: 1}}, nil
+		}
+
+		_, err := s.getEntriesViaScan(context.Background(), 1, 2)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, uint64(1), s.metrics.readOps.Load())
+		testutil.AssertEqual(t, uint64(1), s.metrics.readEntries.Load())
 	})
 }
