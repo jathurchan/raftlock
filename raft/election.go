@@ -79,6 +79,10 @@ type electionManager struct {
 
 	votesReceived map[types.NodeID]bool // Tracks votes received in the current election round (term specific)
 	voteMu        sync.Mutex            // Dedicated mutex for votesReceived map
+
+	startPreVote          func(ctx context.Context)
+	handleElectionTimeout func(ctx context.Context)
+	startElection         func(ctx context.Context)
 }
 
 // ElectionManagerDeps encapsulates the external dependencies required to construct an ElectionManager.
@@ -129,6 +133,10 @@ func NewElectionManager(deps ElectionManagerDeps) (ElectionManager, error) {
 
 		votesReceived: make(map[types.NodeID]bool),
 	}
+
+	em.startPreVote = em.defaultStartPreVote
+	em.handleElectionTimeout = em.defaultHandleElectionTimeout
+	em.startElection = em.defaultStartElection
 
 	em.applyDefaults()
 
@@ -270,9 +278,9 @@ func (em *electionManager) Tick(ctx context.Context) {
 	go em.handleElectionTimeout(ctx)
 }
 
-// handleElectionTimeout determines whether to start a pre-vote or a full election
+// defaultHandleElectionTimeout determines whether to start a pre-vote or a full election
 // based on configuration and current state. Called asynchronously after a timeout.
-func (em *electionManager) handleElectionTimeout(ctx context.Context) {
+func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		em.logger.Debugw("Election timeout handling aborted: parent context cancelled", "error", err, "nodeID", em.id)
 		return
@@ -300,9 +308,9 @@ func (em *electionManager) handleElectionTimeout(ctx context.Context) {
 	}
 }
 
-// startPreVote initiates the pre-vote phase. It sends pre-vote requests to peers
+// defaultStartPreVote initiates the pre-vote phase. It sends pre-vote requests to peers
 // without incrementing the term, aiming to gauge likelihood of winning a real election.
-func (em *electionManager) startPreVote(ctx context.Context) {
+func (em *electionManager) defaultStartPreVote(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		em.logger.Debugw("Pre-vote start aborted: context cancelled", "error", err, "nodeID", em.id)
 		return
@@ -345,9 +353,9 @@ func (em *electionManager) startPreVote(ctx context.Context) {
 	em.broadcastVoteRequests(ctx, args, term, true)
 }
 
-// startElection initiates a full election. It transitions the node to Candidate,
+// defaultStartElection initiates a full election. It transitions the node to Candidate,
 // increments the term, votes for itself, persists state, and sends RequestVote RPCs.
-func (em *electionManager) startElection(ctx context.Context) {
+func (em *electionManager) defaultStartElection(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		em.logger.Debugw("Election start aborted: context cancelled", "error", err, "nodeID", em.id)
 		return
@@ -470,7 +478,7 @@ func (em *electionManager) sendPreVoteRequest(
 		return // Do not process reply if RPC failed
 	}
 
-	em.processPreVoteReply(ctx, targetPeerID, args.Term, originatorTerm, reply)
+	em.processPreVoteReply(targetPeerID, args.Term, originatorTerm, reply)
 }
 
 // sendVoteRequest sends a single regular RequestVote RPC to a peer and handles the response.
@@ -501,7 +509,6 @@ func (em *electionManager) sendVoteRequest(ctx context.Context, targetPeerID typ
 
 // processPreVoteReply handles the response from a pre-vote request.
 func (em *electionManager) processPreVoteReply(
-	ctx context.Context,
 	fromPeerID types.NodeID,
 	preVoteTerm types.Term,
 	originatorTerm types.Term,
@@ -512,11 +519,10 @@ func (em *electionManager) processPreVoteReply(
 		return
 	}
 
-	steppedDown, localTermBeforeStepDown := em.stateMgr.CheckTermAndStepDown(ctx, reply.Term, fromPeerID) // fromPeerID might not be the leader, but provides a hint
-	if steppedDown {
-		em.logger.Infow("Stepped down due to higher term in pre-vote reply",
-			"from", fromPeerID, "replyTerm", reply.Term, "localTermBefore", localTermBeforeStepDown, "nodeID", em.id)
-		return // Stop processing as state has changed significantly
+	if reply.Term > preVoteTerm {
+		em.logger.Debugw("Ignoring higher-term pre-vote reply without stepping down",
+			"from", fromPeerID, "replyTerm", reply.Term, "localTerm", preVoteTerm)
+		return
 	}
 
 	currentTerm, _, _ := em.stateMgr.GetState()
