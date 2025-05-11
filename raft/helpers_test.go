@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -279,7 +280,12 @@ func (ms *mockStorage) GetMetricsSummary() string {
 	return ""
 }
 
-type mockNetworkManager struct{}
+type mockNetworkManager struct {
+	requestVoteSuccess bool
+	requestVoteReplies map[types.NodeID]*types.RequestVoteReply
+
+	SendRequestVoteFunc func(context.Context, types.NodeID, *types.RequestVoteArgs) (*types.RequestVoteReply, error)
+}
 
 func (m *mockNetworkManager) Start() error {
 	return nil
@@ -290,7 +296,18 @@ func (m *mockNetworkManager) Stop() error {
 }
 
 func (m *mockNetworkManager) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
-	return nil, nil
+	if m.SendRequestVoteFunc != nil {
+		return m.SendRequestVoteFunc(ctx, target, args)
+	}
+	if !m.requestVoteSuccess {
+		return nil, fmt.Errorf("mock network error")
+	}
+
+	reply, ok := m.requestVoteReplies[target]
+	if !ok {
+		return &types.RequestVoteReply{Term: args.Term, VoteGranted: true}, nil
+	}
+	return reply, nil
 }
 
 func (m *mockNetworkManager) SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
@@ -433,3 +450,112 @@ func (mm *mockMetrics) ObserveCommandBytesReceived(bytes int)                   
 func (mm *mockMetrics) ObserveAppendEntriesRejected(reason string)                                {}
 func (mm *mockMetrics) ObserveTick(role types.NodeRole)                                           {}
 func (mm *mockMetrics) ObserveComponentStopTimeout(component string)                              {}
+
+type mockLeaderInitializer struct {
+	initializeStateCalled bool
+	sendHeartbeatsCalled  bool
+}
+
+func (m *mockLeaderInitializer) InitializeLeaderState() {
+	m.initializeStateCalled = true
+}
+
+func (m *mockLeaderInitializer) SendHeartbeats(ctx context.Context) {
+	m.sendHeartbeatsCalled = true
+}
+
+type mockStateManager struct {
+	term types.Term
+	role types.NodeRole
+
+	BecomeCandidateFunc func(context.Context, ElectionReason) bool
+	GetStateFunc        func() (types.Term, types.NodeRole, types.NodeID)
+}
+
+func (m *mockStateManager) Initialize(ctx context.Context) error { return nil }
+func (m *mockStateManager) GetState() (types.Term, types.NodeRole, types.NodeID) {
+	if m.GetStateFunc != nil {
+		return m.GetStateFunc()
+	}
+	return m.term, m.role, "node1"
+}
+func (m *mockStateManager) GetStateUnsafe() (types.Term, types.NodeRole, types.NodeID) {
+	return m.term, m.role, "node1"
+}
+func (m *mockStateManager) GetLastKnownLeader() types.NodeID { return "node1" }
+func (m *mockStateManager) BecomeCandidate(ctx context.Context, reason ElectionReason) bool {
+	if m.BecomeCandidateFunc != nil {
+		return m.BecomeCandidateFunc(ctx, reason)
+	}
+	m.term++
+	m.role = types.RoleCandidate
+	return true
+}
+func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
+	m.role = types.RoleLeader
+	return true
+}
+func (m *mockStateManager) BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID) {
+	m.term = term
+	m.role = types.RoleFollower
+}
+func (m *mockStateManager) CheckTermAndStepDown(ctx context.Context, rpcTerm types.Term, rpcLeader types.NodeID) (bool, types.Term) {
+	if rpcTerm > m.term {
+		previousTerm := m.term
+		m.term = rpcTerm
+		m.role = types.RoleFollower
+		return true, previousTerm
+	}
+	return false, m.term
+}
+func (m *mockStateManager) GrantVote(ctx context.Context, candidateID types.NodeID, term types.Term) bool {
+	return true
+}
+func (m *mockStateManager) UpdateCommitIndex(newCommitIndex types.Index) bool       { return true }
+func (m *mockStateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool { return true }
+func (m *mockStateManager) UpdateLastApplied(newLastApplied types.Index) bool       { return true }
+func (m *mockStateManager) GetCommitIndex() types.Index                             { return 0 }
+func (m *mockStateManager) GetCommitIndexUnsafe() types.Index                       { return 0 }
+func (m *mockStateManager) GetLastApplied() types.Index                             { return 0 }
+func (m *mockStateManager) GetLastAppliedUnsafe() types.Index                       { return 0 }
+func (m *mockStateManager) Stop()                                                   {}
+
+type mockLogManager struct {
+	lastIndex types.Index
+	lastTerm  types.Term
+}
+
+func (m *mockLogManager) Initialize(ctx context.Context) error { return nil }
+func (m *mockLogManager) GetLastIndexUnsafe() types.Index      { return m.lastIndex }
+func (m *mockLogManager) GetLastTermUnsafe() types.Term        { return m.lastTerm }
+func (m *mockLogManager) GetConsistentLastState() (types.Index, types.Term) {
+	return m.lastIndex, m.lastTerm
+}
+func (m *mockLogManager) GetFirstIndex() types.Index { return 1 }
+func (m *mockLogManager) GetTerm(ctx context.Context, index types.Index) (types.Term, error) {
+	return 1, nil
+}
+func (m *mockLogManager) GetTermUnsafe(ctx context.Context, index types.Index) (types.Term, error) {
+	return 1, nil
+}
+func (m *mockLogManager) GetEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+	return nil, nil
+}
+func (m *mockLogManager) AppendEntries(ctx context.Context, entries []types.LogEntry) error {
+	return nil
+}
+func (m *mockLogManager) TruncatePrefix(ctx context.Context, newFirstIndex types.Index) error {
+	return nil
+}
+func (m *mockLogManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne types.Index) error {
+	return nil
+}
+func (m *mockLogManager) IsConsistentWithStorage(ctx context.Context) (bool, error) { return true, nil }
+func (m *mockLogManager) RebuildInMemoryState(ctx context.Context) error            { return nil }
+func (m *mockLogManager) FindLastEntryWithTermUnsafe(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error) {
+	return 0, nil
+}
+func (m *mockLogManager) FindFirstIndexInTermUnsafe(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error) {
+	return 0, nil
+}
+func (m *mockLogManager) Stop() {}
