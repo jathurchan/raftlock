@@ -470,7 +470,7 @@ func TestRaftElection_ElectionManager_defaultHandleElectionTimeout(t *testing.T)
 			logger:     logger.NewNoOpLogger(),
 			isShutdown: &atomic.Bool{},
 			stateMgr: &mockStateManager{
-				role: types.RoleLeader,
+				currentRole: types.RoleLeader,
 			},
 		}
 
@@ -486,7 +486,7 @@ func TestRaftElection_ElectionManager_defaultHandleElectionTimeout(t *testing.T)
 			logger:        logger.NewNoOpLogger(),
 			isShutdown:    &atomic.Bool{},
 			enablePreVote: true,
-			stateMgr:      &mockStateManager{role: types.RoleFollower},
+			stateMgr:      &mockStateManager{currentRole: types.RoleFollower},
 		}
 
 		em.startPreVote = func(_ context.Context) {
@@ -511,7 +511,7 @@ func TestRaftElection_ElectionManager_defaultHandleElectionTimeout(t *testing.T)
 			enablePreVote: true,
 			mu:            &sync.RWMutex{},
 			stateMgr: &mockStateManager{
-				role: types.RoleFollower,
+				currentRole: types.RoleFollower,
 				GetStateFunc: func() (types.Term, types.NodeRole, types.NodeID) {
 					return 1, types.RoleFollower, "node1"
 				},
@@ -586,7 +586,7 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 			}
 
 			leaderInit := &mockLeaderInitializer{}
-			stateMgr := &mockStateManager{term: 0, role: types.RoleFollower}
+			stateMgr := &mockStateManager{currentTerm: 0, currentRole: types.RoleFollower}
 
 			deps := ElectionManagerDeps{
 				ID:                "node1",
@@ -620,8 +620,8 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 
 			if tc.expectLeadership {
-				if stateMgr.role != types.RoleLeader {
-					t.Errorf("Expected leader role, got: %s", stateMgr.role)
+				if stateMgr.currentRole != types.RoleLeader {
+					t.Errorf("Expected leader role, got: %s", stateMgr.currentRole)
 				}
 				if !leaderInit.initializeStateCalled {
 					t.Error("Expected InitializeLeaderState to be called")
@@ -630,8 +630,8 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 					t.Error("Expected SendHeartbeats to be called")
 				}
 			} else {
-				if stateMgr.role != types.RoleCandidate {
-					t.Errorf("Expected candidate role, got: %s", stateMgr.role)
+				if stateMgr.currentRole != types.RoleCandidate {
+					t.Errorf("Expected candidate role, got: %s", stateMgr.currentRole)
 				}
 			}
 		})
@@ -681,7 +681,7 @@ func TestRaftElection_ElectionManager_ElectionEdgeCases(t *testing.T) {
 				shutdown.Store(true)
 			}
 
-			stateMgr := &mockStateManager{term: 0, role: types.RoleFollower}
+			stateMgr := &mockStateManager{currentTerm: 0, currentRole: types.RoleFollower}
 
 			if tc.failBecomeCandidate {
 				stateMgr.BecomeCandidateFunc = func(ctx context.Context, r ElectionReason) bool {
@@ -690,7 +690,7 @@ func TestRaftElection_ElectionManager_ElectionEdgeCases(t *testing.T) {
 			}
 			if tc.returnNonCandidate {
 				stateMgr.GetStateFunc = func() (types.Term, types.NodeRole, types.NodeID) {
-					return stateMgr.term, types.RoleFollower, "node1"
+					return stateMgr.currentTerm, types.RoleFollower, "node1"
 				}
 			}
 
@@ -803,8 +803,8 @@ func TestRaftElection_ElectionManager_PreVote_StartConditions(t *testing.T) {
 			name: "AlreadyLeader",
 			configure: func(ctx context.Context, em *electionManager) {
 				em.stateMgr = &mockStateManager{
-					term: 2,
-					role: types.RoleLeader,
+					currentTerm: 2,
+					currentRole: types.RoleLeader,
 				}
 				em.startPreVote(ctx)
 			},
@@ -847,7 +847,7 @@ func TestRaftElection_ElectionManager_PreVote_RequestFailures(t *testing.T) {
 			}
 
 			em.networkMgr = &mockNetworkManager{
-				SendRequestVoteFunc: func(_ context.Context, _ types.NodeID, _ *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+				sendRequestVoteFunc: func(_ context.Context, _ types.NodeID, _ *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
 					return nil, tt.errorToSimulate
 				},
 			}
@@ -882,8 +882,8 @@ func TestRaftElection_ElectionManager_PreVote_ProcessReplySkips(t *testing.T) {
 		em := setupTestElectionManager(t)
 
 		em.stateMgr = &mockStateManager{
-			term: 3,
-			role: types.RoleFollower,
+			currentTerm: 3,
+			currentRole: types.RoleFollower,
 			GetStateFunc: func() (types.Term, types.NodeRole, types.NodeID) {
 				return 3, types.RoleFollower, "node1"
 			},
@@ -907,7 +907,7 @@ func setupTestElectionManager(t *testing.T) *electionManager {
 		QuorumSize:        2,
 		Mu:                mu,
 		IsShutdown:        shutdown,
-		StateMgr:          &mockStateManager{term: 1, role: types.RoleFollower},
+		StateMgr:          &mockStateManager{currentTerm: 1, currentRole: types.RoleFollower},
 		LogMgr:            &mockLogManager{},
 		NetworkMgr:        &mockNetworkManager{},
 		LeaderInitializer: &mockLeaderInitializer{},

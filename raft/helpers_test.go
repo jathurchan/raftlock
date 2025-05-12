@@ -284,7 +284,34 @@ type mockNetworkManager struct {
 	requestVoteSuccess bool
 	requestVoteReplies map[types.NodeID]*types.RequestVoteReply
 
-	SendRequestVoteFunc func(context.Context, types.NodeID, *types.RequestVoteArgs) (*types.RequestVoteReply, error)
+	sendAppendEntriesFunc   func(context.Context, types.NodeID, *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)
+	sendRequestVoteFunc     func(context.Context, types.NodeID, *types.RequestVoteArgs) (*types.RequestVoteReply, error)
+	sendInstallSnapshotFunc func(context.Context, types.NodeID, *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)
+	appendEntriesCallCount  int
+	heartbeatCallCount      int
+	mu                      sync.Mutex
+}
+
+func newMockNetworkManager() *mockNetworkManager {
+	return &mockNetworkManager{
+		sendAppendEntriesFunc: func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			return &types.AppendEntriesReply{
+				Term:    args.Term,
+				Success: true,
+			}, nil
+		},
+		sendRequestVoteFunc: func(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+			return &types.RequestVoteReply{
+				Term:        args.Term,
+				VoteGranted: true,
+			}, nil
+		},
+		sendInstallSnapshotFunc: func(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+			return &types.InstallSnapshotReply{
+				Term: args.Term,
+			}, nil
+		},
+	}
 }
 
 func (m *mockNetworkManager) Start() error {
@@ -296,8 +323,8 @@ func (m *mockNetworkManager) Stop() error {
 }
 
 func (m *mockNetworkManager) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
-	if m.SendRequestVoteFunc != nil {
-		return m.SendRequestVoteFunc(ctx, target, args)
+	if m.sendRequestVoteFunc != nil {
+		return m.sendRequestVoteFunc(ctx, target, args)
 	}
 	if !m.requestVoteSuccess {
 		return nil, fmt.Errorf("mock network error")
@@ -311,19 +338,37 @@ func (m *mockNetworkManager) SendRequestVote(ctx context.Context, target types.N
 }
 
 func (m *mockNetworkManager) SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.appendEntriesCallCount++
+	if len(args.Entries) == 0 {
+		m.heartbeatCallCount++
+	}
+
+	return m.sendAppendEntriesFunc(ctx, target, args)
 }
 
 func (m *mockNetworkManager) SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
-	return nil, nil
+	return m.sendInstallSnapshotFunc(ctx, target, args)
 }
 
 func (m *mockNetworkManager) PeerStatus(peer types.NodeID) (types.PeerConnectionStatus, error) {
-	return types.PeerConnectionStatus{}, nil
+	return types.PeerConnectionStatus{Connected: true}, nil
 }
 
 func (m *mockNetworkManager) LocalAddr() string {
-	return ""
+	return "localhost:1234"
+}
+
+func (m *mockNetworkManager) getAndResetCallCounts() (appendEntries, heartbeats int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	appendEntries = m.appendEntriesCallCount
+	heartbeats = m.heartbeatCallCount
+	m.appendEntriesCallCount = 0
+	m.heartbeatCallCount = 0
+	return
 }
 
 type mockApplier struct{}
@@ -340,29 +385,90 @@ func (m *mockApplier) RestoreSnapshot(ctx context.Context, lastIncludedIndex typ
 	return nil
 }
 
-type mockClock struct{}
+type mockClock struct {
+	now time.Time
+	mu  sync.Mutex
+}
+
+func newMockClock() *mockClock {
+	return &mockClock{
+		now: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+}
 
 func (m *mockClock) Now() time.Time {
-	return time.Time{}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.now
 }
 
 func (m *mockClock) Since(t time.Time) time.Duration {
-	return 0
+	return m.Now().Sub(t)
 }
 
 func (m *mockClock) After(d time.Duration) <-chan time.Time {
-	return nil
+	ch := make(chan time.Time, 1)
+	go func() {
+		time.Sleep(1 * time.Millisecond) // Minimal real sleep
+		m.mu.Lock()
+		m.now = m.now.Add(d)
+		now := m.now
+		m.mu.Unlock()
+		ch <- now
+	}()
+	return ch
 }
 
 func (m *mockClock) NewTicker(d time.Duration) Ticker {
-	return nil
+	return &mockTicker{
+		c: make(chan time.Time),
+	}
 }
 
 func (m *mockClock) NewTimer(d time.Duration) Timer {
-	return nil
+	return &mockTimer{
+		c: make(chan time.Time),
+	}
 }
 
 func (m *mockClock) Sleep(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.now = m.now.Add(d)
+}
+
+func (m *mockClock) advanceTime(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.now = m.now.Add(d)
+}
+
+type mockTicker struct {
+	c chan time.Time
+}
+
+func (m *mockTicker) Chan() <-chan time.Time {
+	return m.c
+}
+
+func (m *mockTicker) Stop() {}
+
+func (m *mockTicker) Reset(d time.Duration) {}
+
+type mockTimer struct {
+	c chan time.Time
+}
+
+func (m *mockTimer) Chan() <-chan time.Time {
+	return m.c
+}
+
+func (m *mockTimer) Stop() bool {
+	return true
+}
+
+func (m *mockTimer) Reset(d time.Duration) bool {
+	return true
 }
 
 type mockRand struct{}
@@ -465,11 +571,27 @@ func (m *mockLeaderInitializer) SendHeartbeats(ctx context.Context) {
 }
 
 type mockStateManager struct {
-	term types.Term
-	role types.NodeRole
+	currentTerm  types.Term
+	currentRole  types.NodeRole
+	leaderID     types.NodeID
+	commitIndex  types.Index
+	lastApplied  types.Index
+	becomeLeader bool
+	mu           sync.Mutex
 
 	BecomeCandidateFunc func(context.Context, ElectionReason) bool
 	GetStateFunc        func() (types.Term, types.NodeRole, types.NodeID)
+}
+
+func newMockStateManager() *mockStateManager {
+	return &mockStateManager{
+		currentTerm:  1,
+		currentRole:  types.RoleFollower,
+		leaderID:     "",
+		commitIndex:  0,
+		lastApplied:  0,
+		becomeLeader: false,
+	}
 }
 
 func (m *mockStateManager) Initialize(ctx context.Context) error { return nil }
@@ -477,52 +599,126 @@ func (m *mockStateManager) GetState() (types.Term, types.NodeRole, types.NodeID)
 	if m.GetStateFunc != nil {
 		return m.GetStateFunc()
 	}
-	return m.term, m.role, "node1"
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.currentTerm, m.currentRole, m.leaderID
 }
 func (m *mockStateManager) GetStateUnsafe() (types.Term, types.NodeRole, types.NodeID) {
-	return m.term, m.role, "node1"
+	return m.currentTerm, m.currentRole, "node1"
 }
-func (m *mockStateManager) GetLastKnownLeader() types.NodeID { return "node1" }
+func (m *mockStateManager) GetLastKnownLeader() types.NodeID {
+	return m.leaderID
+}
 func (m *mockStateManager) BecomeCandidate(ctx context.Context, reason ElectionReason) bool {
 	if m.BecomeCandidateFunc != nil {
 		return m.BecomeCandidateFunc(ctx, reason)
 	}
-	m.term++
-	m.role = types.RoleCandidate
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.currentTerm++
+	m.currentRole = types.RoleCandidate
+	m.leaderID = ""
 	return true
 }
 func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
-	m.role = types.RoleLeader
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.currentRole = types.RoleLeader
+	m.leaderID = "node1" // Self ID hardcoded
+	m.becomeLeader = true
 	return true
 }
 func (m *mockStateManager) BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID) {
-	m.term = term
-	m.role = types.RoleFollower
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if term > m.currentTerm {
+		m.currentTerm = term
+	}
+	m.currentRole = types.RoleFollower
+	m.leaderID = leaderID
 }
 func (m *mockStateManager) CheckTermAndStepDown(ctx context.Context, rpcTerm types.Term, rpcLeader types.NodeID) (bool, types.Term) {
-	if rpcTerm > m.term {
-		previousTerm := m.term
-		m.term = rpcTerm
-		m.role = types.RoleFollower
-		return true, previousTerm
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prevTerm := m.currentTerm
+
+	if rpcTerm > m.currentTerm {
+		m.currentTerm = rpcTerm
+		m.currentRole = types.RoleFollower
+		m.leaderID = rpcLeader
+		return true, prevTerm
 	}
-	return false, m.term
+
+	return false, prevTerm
 }
 func (m *mockStateManager) GrantVote(ctx context.Context, candidateID types.NodeID, term types.Term) bool {
-	return true
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if term >= m.currentTerm {
+		m.currentTerm = term
+		return true
+	}
+	return false
 }
-func (m *mockStateManager) UpdateCommitIndex(newCommitIndex types.Index) bool       { return true }
-func (m *mockStateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool { return true }
-func (m *mockStateManager) UpdateLastApplied(newLastApplied types.Index) bool       { return true }
-func (m *mockStateManager) GetCommitIndex() types.Index                             { return 0 }
-func (m *mockStateManager) GetCommitIndexUnsafe() types.Index                       { return 0 }
-func (m *mockStateManager) GetLastApplied() types.Index                             { return 0 }
-func (m *mockStateManager) GetLastAppliedUnsafe() types.Index                       { return 0 }
-func (m *mockStateManager) Stop()                                                   {}
+func (m *mockStateManager) UpdateCommitIndex(newCommitIndex types.Index) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if newCommitIndex > m.commitIndex {
+		m.commitIndex = newCommitIndex
+		return true
+	}
+	return false
+}
+func (m *mockStateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool {
+	if newCommitIndex > m.commitIndex {
+		m.commitIndex = newCommitIndex
+		return true
+	}
+	return false
+}
+func (m *mockStateManager) UpdateLastApplied(newLastApplied types.Index) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if newLastApplied > m.lastApplied && newLastApplied <= m.commitIndex {
+		m.lastApplied = newLastApplied
+		return true
+	}
+	return false
+}
+func (m *mockStateManager) GetCommitIndex() types.Index {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.commitIndex
+}
+func (m *mockStateManager) GetCommitIndexUnsafe() types.Index {
+	return m.commitIndex
+}
+func (m *mockStateManager) GetLastApplied() types.Index {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastApplied
+}
+func (m *mockStateManager) GetLastAppliedUnsafe() types.Index {
+	return m.lastApplied
+}
+func (m *mockStateManager) Stop() {}
 
 type mockLogManager struct {
-	lastIndex types.Index
-	lastTerm  types.Term
+	lastIndex      types.Index
+	lastTerm       types.Term
+	firstIndex     types.Index
+	entries        map[types.Index]types.LogEntry
+	appendCallback func([]types.LogEntry) error
+	mu             sync.Mutex
+}
+
+func newMockLogManager() *mockLogManager {
+	return &mockLogManager{
+		lastIndex:  0,
+		lastTerm:   0,
+		firstIndex: 1,
+		entries:    make(map[types.Index]types.LogEntry),
+	}
 }
 
 func (m *mockLogManager) Initialize(ctx context.Context) error { return nil }
@@ -531,31 +727,216 @@ func (m *mockLogManager) GetLastTermUnsafe() types.Term        { return m.lastTe
 func (m *mockLogManager) GetConsistentLastState() (types.Index, types.Term) {
 	return m.lastIndex, m.lastTerm
 }
-func (m *mockLogManager) GetFirstIndex() types.Index { return 1 }
+func (m *mockLogManager) GetFirstIndex() types.Index { return m.firstIndex }
 func (m *mockLogManager) GetTerm(ctx context.Context, index types.Index) (types.Term, error) {
-	return 1, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.GetTermUnsafe(ctx, index)
 }
 func (m *mockLogManager) GetTermUnsafe(ctx context.Context, index types.Index) (types.Term, error) {
-	return 1, nil
+	if index == 0 {
+		return 0, nil
+	}
+	if index < m.firstIndex {
+		return 0, ErrCompacted
+	}
+	if index > m.lastIndex {
+		return 0, ErrNotFound
+	}
+	entry, ok := m.entries[index]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	return entry.Term, nil
 }
 func (m *mockLogManager) GetEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if start < m.firstIndex {
+		return nil, ErrCompacted
+	}
+	if start > m.lastIndex || start >= end {
+		return nil, nil
+	}
+
+	entries := make([]types.LogEntry, 0, end-start)
+	for i := start; i < end && i <= m.lastIndex; i++ {
+		entry, ok := m.entries[i]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 func (m *mockLogManager) AppendEntries(ctx context.Context, entries []types.LogEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	if m.appendCallback != nil {
+		if err := m.appendCallback(entries); err != nil {
+			return err
+		}
+	}
+
+	for _, entry := range entries {
+		m.entries[entry.Index] = entry
+		if entry.Index > m.lastIndex {
+			m.lastIndex = entry.Index
+			m.lastTerm = entry.Term
+		}
+	}
 	return nil
 }
 func (m *mockLogManager) TruncatePrefix(ctx context.Context, newFirstIndex types.Index) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if newFirstIndex <= m.firstIndex {
+		return nil
+	}
+	m.firstIndex = newFirstIndex
+
+	for i := types.Index(1); i < newFirstIndex; i++ {
+		delete(m.entries, i)
+	}
 	return nil
 }
 func (m *mockLogManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne types.Index) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if newLastIndexPlusOne > m.lastIndex+1 {
+		return nil
+	}
+
+	newLastIndex := newLastIndexPlusOne - 1
+	var newLastTerm types.Term = 0
+	if newLastIndex > 0 {
+		if entry, ok := m.entries[newLastIndex]; ok {
+			newLastTerm = entry.Term
+		}
+	}
+
+	for i := newLastIndexPlusOne; i <= m.lastIndex; i++ {
+		delete(m.entries, i)
+	}
+
+	m.lastIndex = newLastIndex
+	m.lastTerm = newLastTerm
 	return nil
 }
-func (m *mockLogManager) IsConsistentWithStorage(ctx context.Context) (bool, error) { return true, nil }
-func (m *mockLogManager) RebuildInMemoryState(ctx context.Context) error            { return nil }
+func (m *mockLogManager) IsConsistentWithStorage(ctx context.Context) (bool, error) {
+	return true, nil
+}
+func (m *mockLogManager) RebuildInMemoryState(ctx context.Context) error {
+	return nil
+}
 func (m *mockLogManager) FindLastEntryWithTermUnsafe(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error) {
-	return 0, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	startIdx := m.lastIndex
+	if searchFromHint > 0 && searchFromHint < startIdx {
+		startIdx = searchFromHint
+	}
+
+	for i := startIdx; i >= m.firstIndex; i-- {
+		entry, ok := m.entries[i]
+		if !ok {
+			continue
+		}
+		if entry.Term == term {
+			return i, nil
+		}
+		if entry.Term < term {
+			break
+		}
+	}
+	return 0, ErrNotFound
 }
 func (m *mockLogManager) FindFirstIndexInTermUnsafe(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error) {
-	return 0, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var foundIdx types.Index = 0
+	for i := searchUpToIndex; i >= m.firstIndex; i-- {
+		entry, ok := m.entries[i]
+		if !ok {
+			continue
+		}
+		if entry.Term == term {
+			foundIdx = i
+			break
+		}
+		if entry.Term < term {
+			return 0, ErrNotFound
+		}
+	}
+
+	if foundIdx == 0 {
+		return 0, ErrNotFound
+	}
+
+	for i := foundIdx - 1; i >= m.firstIndex; i-- {
+		entry, ok := m.entries[i]
+		if !ok || entry.Term != term {
+			return foundIdx, nil
+		}
+		foundIdx = i
+	}
+
+	return foundIdx, nil
 }
 func (m *mockLogManager) Stop() {}
+
+type mockSnapshotManager struct {
+	snapshots map[types.NodeID]bool
+	mu        sync.Mutex
+}
+
+func newMockSnapshotManager() *mockSnapshotManager {
+	return &mockSnapshotManager{
+		snapshots: make(map[types.NodeID]bool),
+	}
+}
+
+func (m *mockSnapshotManager) SetReplicationStateUpdater(updater ReplicationStateUpdater) {}
+
+func (m *mockSnapshotManager) Initialize(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockSnapshotManager) Tick(ctx context.Context) {}
+
+func (m *mockSnapshotManager) HandleInstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+	return &types.InstallSnapshotReply{Term: args.Term}, nil
+}
+
+func (m *mockSnapshotManager) SendSnapshot(ctx context.Context, targetID types.NodeID, term types.Term) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.snapshots[targetID] = true
+}
+
+func (m *mockSnapshotManager) GetSnapshotMetadata() types.SnapshotMetadata {
+	return types.SnapshotMetadata{
+		LastIncludedIndex: 0,
+		LastIncludedTerm:  0,
+	}
+}
+
+func (m *mockSnapshotManager) GetSnapshotMetadataUnsafe() types.SnapshotMetadata {
+	return types.SnapshotMetadata{
+		LastIncludedIndex: 0,
+		LastIncludedTerm:  0,
+	}
+}
+
+func (m *mockSnapshotManager) Stop() {}
