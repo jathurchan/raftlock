@@ -151,6 +151,14 @@ type Metrics interface {
 	// ObserveComponentStopTimeout records a component that timed out during shutdown.
 	// Counter: raft_component_stop_timeouts_total (labeled by component)
 	ObserveComponentStopTimeout(component string)
+
+	// ObserveCommitCheckTriggered records that a commit check was successfully triggered.
+	// Counter: raft_commit_check_triggered_total
+	ObserveCommitCheckTriggered()
+
+	// ObserveCommitCheckPending records that a commit check was skipped because one was already pending.
+	// Counter: raft_commit_check_pending_total
+	ObserveCommitCheckPending()
 }
 
 // ElectionReason specifies why an election was triggered.
@@ -297,3 +305,5 @@ func (m *noOpMetrics) ObserveCommandBytesReceived(bytes int)                    
 
 func (m *noOpMetrics) ObserveTick(role types.NodeRole)              {}
 func (m *noOpMetrics) ObserveComponentStopTimeout(component string) {}
+func (m *noOpMetrics) ObserveCommitCheckTriggered()                 {}
+func (m *noOpMetrics) ObserveCommitCheckPending()                   {}

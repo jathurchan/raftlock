@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -103,8 +104,16 @@ func validateReplicationManagerDeps(deps ReplicationManagerDeps) error {
 		return nil
 	}
 	checkPtr := func(ptr any, fieldName string) error {
-		if ptr == nil {
-			return fmt.Errorf("ReplicationManagerDeps: %s is required", fieldName)
+		v := reflect.ValueOf(ptr)
+		switch v.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Map, reflect.Ptr, reflect.Interface, reflect.Slice:
+			if v.IsNil() {
+				return fmt.Errorf("ReplicationManagerDeps: %s is required", fieldName)
+			}
+		default:
+			if ptr == nil {
+				return fmt.Errorf("ReplicationManagerDeps: %s is required", fieldName)
+			}
 		}
 		return nil
 	}
@@ -765,24 +774,45 @@ func (rm *replicationManager) updateLeaderLease() {
 	now := rm.clock.Now()
 	newExpiry := now.Add(rm.leaseDuration)
 
+	expiryExtended := false
 	if newExpiry.After(rm.leaseExpiry) {
 		rm.leaseExpiry = newExpiry
-		rm.lastQuorumHeartbeat = now
+		expiryExtended = true
+	}
 
-		rm.logger.Debugw("Leader lease extended",
+	rm.lastQuorumHeartbeat = now
+
+	if expiryExtended {
+		rm.logger.Debugw("Leader lease expiry extended",
 			"now", now.Format(time.RFC3339Nano),
 			"newExpiresAt", rm.leaseExpiry.Format(time.RFC3339Nano),
+			"lastQuorumHeartbeat", rm.lastQuorumHeartbeat.Format(time.RFC3339Nano),
+			"duration", rm.leaseDuration)
+	} else {
+		rm.logger.Debugw("Leader lease quorum heartbeat updated",
+			"now", now.Format(time.RFC3339Nano),
+			"currentLeaseExpiry", rm.leaseExpiry.Format(time.RFC3339Nano),
+			"lastQuorumHeartbeat", rm.lastQuorumHeartbeat.Format(time.RFC3339Nano),
 			"duration", rm.leaseDuration)
 	}
 }
 
 // triggerCommitCheck attempts to send a non-blocking signal to trigger MaybeAdvanceCommitIndex.
 func (rm *replicationManager) triggerCommitCheck() {
+	if rm.isShutdown.Load() {
+		return
+	}
+
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
 	select {
 	case rm.notifyCommitCh <- struct{}{}:
 		rm.logger.Debugw("Commit check triggered")
+		rm.metrics.ObserveCommitCheckTriggered()
 	default:
 		rm.logger.Debugw("Commit check already pending (notification channel full)")
+		rm.metrics.ObserveCommitCheckPending()
 	}
 }
 
@@ -1071,12 +1101,7 @@ func (rm *replicationManager) HasValidLease(ctx context.Context) bool {
 
 	rm.mu.RLock()
 	expiry := rm.leaseExpiry
-	enabled := rm.leaderLeaseEnabled
 	rm.mu.RUnlock()
-
-	if !enabled { // Check again under lock
-		return false
-	}
 
 	now := rm.clock.Now()
 	isValid := now.Before(expiry)
