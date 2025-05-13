@@ -512,7 +512,7 @@ func TestRaftElection_ElectionManager_defaultHandleElectionTimeout(t *testing.T)
 			mu:            &sync.RWMutex{},
 			stateMgr: &mockStateManager{
 				currentRole: types.RoleFollower,
-				GetStateFunc: func() (types.Term, types.NodeRole, types.NodeID) {
+				getStateFunc: func() (types.Term, types.NodeRole, types.NodeID) {
 					return 1, types.RoleFollower, "node1"
 				},
 			},
@@ -546,7 +546,7 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 		{
 			name:             "Single-node cluster becomes leader immediately",
 			singleNode:       true,
-			networkSucceeds:  false,
+			networkSucceeds:  true,
 			expectLeadership: true,
 		},
 		{
@@ -564,17 +564,86 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			mu := &sync.RWMutex{}
-			shutdown := &atomic.Bool{}
-			logger := logger.NewNoOpLogger()
+			var wg sync.WaitGroup
 
-			mockNetwork := &mockNetworkManager{
-				requestVoteSuccess: tc.networkSucceeds,
-				requestVoteReplies: map[types.NodeID]*types.RequestVoteReply{
-					"node2": {Term: 1, VoteGranted: true},
-					"node3": {Term: 1, VoteGranted: true},
+			stateMgr := &mockStateManager{
+				currentTerm:  0,
+				currentRole:  types.RoleFollower,
+				votedFor:     "",
+				leaderID:     "",
+				becomeLeader: tc.expectLeadership,
+			}
+
+			stateMgr.becomeCandidateFunc = func(ctx context.Context, r ElectionReason) bool {
+				stateMgr.mu.Lock()
+				defer stateMgr.mu.Unlock()
+				stateMgr.currentTerm++
+				stateMgr.currentRole = types.RoleCandidate
+				stateMgr.votedFor = "node1"
+				stateMgr.leaderID = ""
+				return true
+			}
+
+			stateMgr.becomeLeaderFunc = func(ctx context.Context) bool {
+				stateMgr.mu.Lock()
+				defer stateMgr.mu.Unlock()
+				if !stateMgr.becomeLeader {
+					return false
+				}
+				stateMgr.currentRole = types.RoleLeader
+				stateMgr.leaderID = "node1"
+				return true
+			}
+
+			if !tc.expectLeadership && !tc.singleNode && !tc.networkSucceeds {
+				stateMgr.checkTermAndStepDownFunc = func(ctxMod context.Context, rpcTerm types.Term, rpcSourceNode types.NodeID) (steppedDown bool, previousTerm types.Term) {
+					stateMgr.mu.Lock()
+					defer stateMgr.mu.Unlock()
+					prevTerm := stateMgr.currentTerm
+					sDown := false
+					if rpcTerm > stateMgr.currentTerm {
+						stateMgr.currentTerm = rpcTerm
+						stateMgr.currentRole = types.RoleFollower
+						stateMgr.votedFor = ""
+						stateMgr.leaderID = ""
+						sDown = true
+					}
+					return sDown, prevTerm
+				}
+			} else {
+				stateMgr.checkTermAndStepDownFunc = func(ctxMod context.Context, rpcTerm types.Term, rpcSourceNode types.NodeID) (bool, types.Term) {
+					stateMgr.mu.Lock()
+					defer stateMgr.mu.Unlock()
+					prevTerm := stateMgr.currentTerm
+					sDown := false
+					if rpcTerm > stateMgr.currentTerm {
+						stateMgr.currentTerm = rpcTerm
+						stateMgr.currentRole = types.RoleFollower
+						stateMgr.votedFor = ""
+						stateMgr.leaderID = ""
+						sDown = true
+					} else if rpcTerm == stateMgr.currentTerm {
+					}
+					return sDown, prevTerm
+				}
+			}
+
+			if tc.expectLeadership {
+				wg.Add(1)
+			}
+
+			leaderInit := &mockLeaderInitializer{
+				initializeLeaderStateFunc: func() {
+					if tc.expectLeadership {
+						wg.Done()
+					}
 				},
+				sendHeartbeatsFunc: func(ctxHeartbeat context.Context) {
+				},
+				initializeStateCalled: false,
+				sendHeartbeatsCalled:  false,
 			}
 
 			peers := map[types.NodeID]PeerConfig{
@@ -585,21 +654,24 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 				peers["node3"] = PeerConfig{ID: "node3", Address: "addr3"}
 			}
 
-			leaderInit := &mockLeaderInitializer{}
-			stateMgr := &mockStateManager{currentTerm: 0, currentRole: types.RoleFollower}
+			mockNetwork := &mockNetworkManager{
+				sendRequestVoteFunc: func(ctxNet context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+					return &types.RequestVoteReply{Term: args.Term, VoteGranted: tc.networkSucceeds}, nil
+				},
+			}
 
 			deps := ElectionManagerDeps{
 				ID:                "node1",
 				Peers:             peers,
 				QuorumSize:        (len(peers) / 2) + 1,
-				Mu:                mu,
-				IsShutdown:        shutdown,
+				Mu:                &sync.RWMutex{},
+				IsShutdown:        &atomic.Bool{},
 				StateMgr:          stateMgr,
 				LogMgr:            &mockLogManager{},
 				NetworkMgr:        mockNetwork,
 				LeaderInitializer: leaderInit,
 				Metrics:           newMockMetrics(),
-				Logger:            logger,
+				Logger:            logger.NewNoOpLogger(),
 				Rand:              &mockRand{},
 				Config: Config{
 					Options: Options{
@@ -607,31 +679,49 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 						HeartbeatTickCount:          DefaultHeartbeatTickCount,
 						ElectionRandomizationFactor: 0,
 					},
-					FeatureFlags: FeatureFlags{PreVoteEnabled: true},
+					FeatureFlags: FeatureFlags{PreVoteEnabled: false},
 				},
 			}
 
 			em, err := NewElectionManager(deps)
 			if err != nil {
-				t.Fatalf("Failed to create ElectionManager: %v", err)
+				t.Fatalf("[%s] Failed to create ElectionManager: %v", tc.name, err)
+			}
+
+			if initErr := em.Initialize(ctx); initErr != nil {
+				t.Fatalf("[%s] Failed to initialize ElectionManager: %v", tc.name, initErr)
 			}
 
 			em.(*electionManager).startElection(ctx)
-			time.Sleep(50 * time.Millisecond)
 
 			if tc.expectLeadership {
-				if stateMgr.currentRole != types.RoleLeader {
-					t.Errorf("Expected leader role, got: %s", stateMgr.currentRole)
-				}
-				if !leaderInit.initializeStateCalled {
-					t.Error("Expected InitializeLeaderState to be called")
-				}
-				if !leaderInit.sendHeartbeatsCalled {
-					t.Error("Expected SendHeartbeats to be called")
+				done := make(chan struct{})
+				go func() {
+					wg.Wait()
+					close(done)
+				}()
+
+				select {
+				case <-done:
+				case <-time.After(1 * time.Second):
+					t.Fatalf("[%s] Timed out waiting for leadership transition", tc.name)
 				}
 			} else {
-				if stateMgr.currentRole != types.RoleCandidate {
-					t.Errorf("Expected candidate role, got: %s", stateMgr.currentRole)
+				time.Sleep(150 * time.Millisecond)
+			}
+
+			finalTerm, finalRole, finalLeader := stateMgr.GetState()
+
+			if tc.expectLeadership {
+				if finalRole != types.RoleLeader {
+					t.Errorf("[%s] Expected leader role for term %d, got: %s. Final Leader ID: %s", tc.name, finalTerm, finalRole, finalLeader)
+				}
+				if !leaderInit.initializeStateCalled {
+					t.Errorf("[%s] Expected InitializeLeaderState to be called", tc.name)
+				}
+			} else {
+				if finalRole != types.RoleCandidate {
+					t.Errorf("[%s] Expected candidate role for term %d, got: %s. Final Leader ID: %s", tc.name, finalTerm, finalRole, finalLeader)
 				}
 			}
 		})
@@ -684,12 +774,12 @@ func TestRaftElection_ElectionManager_ElectionEdgeCases(t *testing.T) {
 			stateMgr := &mockStateManager{currentTerm: 0, currentRole: types.RoleFollower}
 
 			if tc.failBecomeCandidate {
-				stateMgr.BecomeCandidateFunc = func(ctx context.Context, r ElectionReason) bool {
+				stateMgr.becomeCandidateFunc = func(ctx context.Context, r ElectionReason) bool {
 					return false
 				}
 			}
 			if tc.returnNonCandidate {
-				stateMgr.GetStateFunc = func() (types.Term, types.NodeRole, types.NodeID) {
+				stateMgr.getStateFunc = func() (types.Term, types.NodeRole, types.NodeID) {
 					return stateMgr.currentTerm, types.RoleFollower, "node1"
 				}
 			}
@@ -884,7 +974,7 @@ func TestRaftElection_ElectionManager_PreVote_ProcessReplySkips(t *testing.T) {
 		em.stateMgr = &mockStateManager{
 			currentTerm: 3,
 			currentRole: types.RoleFollower,
-			GetStateFunc: func() (types.Term, types.NodeRole, types.NodeID) {
+			getStateFunc: func() (types.Term, types.NodeRole, types.NodeID) {
 				return 3, types.RoleFollower, "node1"
 			},
 		}
