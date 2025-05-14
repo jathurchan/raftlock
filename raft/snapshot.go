@@ -867,17 +867,33 @@ func (sm *snapshotManager) processSnapshotReply(
 	reply *types.InstallSnapshotReply,
 	start time.Time,
 ) {
-	steppedDown, _ := sm.stateMgr.CheckTermAndStepDown(context.Background(), reply.Term, peer)
-	if steppedDown {
-		sm.logger.Infow("Stepped down after sending snapshot: follower responded with higher term",
-			"peer", peer,
-			"replyTerm", reply.Term,
-			"localTerm", sentTerm,
-		)
+	sm.mu.Lock()
+	currentLocalTerm, currentRole, _ := sm.stateMgr.GetStateUnsafe()
+
+	if reply.Term > currentLocalTerm {
+		sm.logger.Infow("Stepping down: follower responded with higher term in InstallSnapshotReply",
+			"peer", peer, "replyTerm", reply.Term, "currentLocalTerm", currentLocalTerm)
+		sm.stateMgr.BecomeFollower(context.Background(), reply.Term, peer)
+		sm.mu.Unlock()
 		sm.metrics.ObserveSnapshot(SnapshotActionSend, SnapshotStatusFailure,
 			"peer", string(peer), "reason", "higher_term_reply")
 		return
 	}
+
+	if reply.Term < sentTerm || currentLocalTerm != sentTerm {
+		sm.logger.Debugw("Ignoring stale InstallSnapshotReply",
+			"peer", peer, "replyTerm", reply.Term, "sentTerm", sentTerm, "currentLocalTerm", currentLocalTerm)
+		sm.mu.Unlock()
+		return
+	}
+
+	if currentRole != types.RoleLeader {
+		sm.logger.Warnw("Snapshot reply processed, but node is no longer leader in the expected term.",
+			"peer", peer, "currentRole", currentRole.String(), "currentTerm", currentLocalTerm, "sentTerm", sentTerm)
+		sm.mu.Unlock()
+		return
+	}
+	sm.mu.Unlock()
 
 	sm.logger.Infow("Snapshot successfully acknowledged by follower",
 		"peer", peer,
@@ -887,7 +903,6 @@ func (sm *snapshotManager) processSnapshotReply(
 	)
 
 	sm.peerStateUpdater.UpdatePeerAfterSnapshotSend(peer, meta.LastIncludedIndex)
-
 	sm.notifyCommitCheck()
 
 	sm.metrics.ObserveSnapshot(SnapshotActionSend, SnapshotStatusSuccess,

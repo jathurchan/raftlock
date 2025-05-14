@@ -20,6 +20,10 @@ type mockStorage struct {
 	saveCounter int
 	loadCounter int
 
+	snapshotAttempted bool
+	snapshotSaved     bool
+	hookLoadSnapshot  func(ctx context.Context) (types.SnapshotMetadata, []byte, error)
+
 	hookGetLogEntry   func(index types.Index)
 	hookGetLogEntries func(start, end types.Index) []types.LogEntry
 	hookFirstLogIndex func() types.Index
@@ -224,13 +228,23 @@ func (ms *mockStorage) TruncateLogPrefix(ctx context.Context, index types.Index)
 }
 
 func (ms *mockStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+	fmt.Println(">>> SaveSnapshot called (attempted)")
+	ms.mu.Lock()
+	ms.snapshotAttempted = true
+	ms.mu.Unlock()
 	if err := ms.checkFailure("SaveSnapshot"); err != nil {
 		return err
 	}
+	ms.mu.Lock()
+	ms.snapshotSaved = true
+	ms.mu.Unlock()
 	return nil
 }
 
 func (ms *mockStorage) LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
+	if ms.hookLoadSnapshot != nil {
+		return ms.hookLoadSnapshot(ctx)
+	}
 	if err := ms.checkFailure("LoadSnapshot"); err != nil {
 		return types.SnapshotMetadata{}, nil, err
 	}
@@ -384,18 +398,28 @@ func (m *mockNetworkManager) setWaitGroup(wg *sync.WaitGroup) {
 	m.wg = wg
 }
 
-type mockApplier struct{}
+type mockApplier struct {
+	restoreErr      error
+	snapshotData    []byte
+	applierRestored bool
+	snapshotFunc    func(ctx context.Context) (types.Index, []byte, error)
+}
 
 func (m *mockApplier) Apply(ctx context.Context, index types.Index, command []byte) error {
 	return nil
 }
 
 func (m *mockApplier) Snapshot(ctx context.Context) (types.Index, []byte, error) {
+	if m.snapshotFunc != nil {
+		return m.snapshotFunc(ctx)
+	}
 	return 0, nil, nil
 }
 
 func (m *mockApplier) RestoreSnapshot(ctx context.Context, lastIncludedIndex types.Index, lastIncludedTerm types.Term, snapshotData []byte) error {
-	return nil
+	m.applierRestored = true
+	m.snapshotData = snapshotData
+	return m.restoreErr
 }
 
 type mockClock struct {
@@ -440,7 +464,7 @@ func (m *mockClock) NewTicker(d time.Duration) Ticker {
 
 func (m *mockClock) NewTimer(d time.Duration) Timer {
 	return &mockTimer{
-		c: make(chan time.Time),
+		Ch: make(chan time.Time),
 	}
 }
 
@@ -469,18 +493,43 @@ func (m *mockTicker) Stop() {}
 func (m *mockTicker) Reset(d time.Duration) {}
 
 type mockTimer struct {
-	c chan time.Time
+	Ch      chan time.Time
+	stopped bool
+	mu      sync.Mutex
+}
+
+func newMockTimer() *mockTimer {
+	return &mockTimer{
+		Ch: make(chan time.Time, 1),
+	}
 }
 
 func (m *mockTimer) Chan() <-chan time.Time {
-	return m.c
+	return m.Ch
 }
 
 func (m *mockTimer) Stop() bool {
-	return true
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.stopped {
+		m.stopped = true
+		select { // Try to drain Ch if a value was sent but not received
+		case <-m.Ch:
+		default:
+		}
+		return true
+	}
+	return false
 }
 
 func (m *mockTimer) Reset(d time.Duration) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopped = false
+	select { // Ensure channel is ready for a new value (drain if necessary)
+	case <-m.Ch:
+	default:
+	}
 	return true
 }
 
@@ -656,6 +705,9 @@ type mockStateManager struct {
 	lastApplied  types.Index
 	becomeLeader bool
 
+	lastAppliedUpdated bool
+	commitIndexUpdated bool
+
 	getStateFunc                func() (types.Term, types.NodeRole, types.NodeID)
 	getStateUnsafeFunc          func() (types.Term, types.NodeRole, types.NodeID)
 	checkTermAndStepDownFunc    func(ctx context.Context, rpcTerm types.Term, rpcLeader types.NodeID) (steppedDown bool, previousTerm types.Term)
@@ -666,6 +718,7 @@ type mockStateManager struct {
 	updateCommitIndexFunc       func(newCommitIndex types.Index) bool
 	updateCommitIndexUnsafeFunc func(newCommitIndex types.Index) bool
 	updateLastAppliedFunc       func(newLastApplied types.Index) bool
+	getLastAppliedFunc          func() types.Index
 }
 
 func newMockStateManager() *mockStateManager {
@@ -798,6 +851,7 @@ func (m *mockStateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) b
 	}
 	if newCommitIndex > m.commitIndex {
 		m.commitIndex = newCommitIndex
+		m.commitIndexUpdated = true
 		return true
 	}
 	return false
@@ -811,6 +865,7 @@ func (m *mockStateManager) UpdateLastApplied(newLastApplied types.Index) bool {
 	defer m.mu.Unlock()
 	if newLastApplied > m.lastApplied && newLastApplied <= m.commitIndex {
 		m.lastApplied = newLastApplied
+		m.lastAppliedUpdated = true
 		return true
 	}
 	return false
@@ -826,6 +881,9 @@ func (m *mockStateManager) GetCommitIndexUnsafe() types.Index {
 	return m.commitIndex
 }
 func (m *mockStateManager) GetLastApplied() types.Index {
+	if m.getLastAppliedFunc != nil {
+		return m.getLastAppliedFunc()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastApplied
@@ -1114,3 +1172,28 @@ func (m *mockSnapshotManager) GetSnapshotMetadataUnsafe() types.SnapshotMetadata
 }
 
 func (m *mockSnapshotManager) Stop() {}
+
+type mockReplicationStateUpdater struct {
+	peerUpdatedAfterSnapshot bool
+	snapshotProgressUpdated  bool
+	advanceCommitIndexCalled bool
+	lastPeerID               types.NodeID
+	lastSnapshotIndex        types.Index
+	lastInProgress           bool
+}
+
+func (m *mockReplicationStateUpdater) UpdatePeerAfterSnapshotSend(peerID types.NodeID, snapshotIndex types.Index) {
+	m.peerUpdatedAfterSnapshot = true
+	m.lastPeerID = peerID
+	m.lastSnapshotIndex = snapshotIndex
+}
+
+func (m *mockReplicationStateUpdater) SetPeerSnapshotInProgress(peerID types.NodeID, inProgress bool) {
+	m.snapshotProgressUpdated = true
+	m.lastPeerID = peerID
+	m.lastInProgress = inProgress
+}
+
+func (m *mockReplicationStateUpdater) MaybeAdvanceCommitIndex() {
+	m.advanceCommitIndexCalled = true
+}
