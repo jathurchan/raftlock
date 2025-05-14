@@ -1647,9 +1647,12 @@ func (rm *replicationManager) Stop() {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
+	if !rm.isShutdown.Swap(true) {
+		close(rm.notifyCommitCh)
+	}
+
 	rm.peerStates = make(map[types.NodeID]*types.PeerState)
 	rm.leaseExpiry = time.Time{}
-	close(rm.notifyCommitCh)
 
 	rm.logger.Infow("Replication manager stopped")
 }
