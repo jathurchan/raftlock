@@ -2222,7 +2222,7 @@ func TestUpdatePeerAfterSnapshotSend(t *testing.T) {
 		rm, _, _, _, _, clockMock := setupTestReplicationManager(t)
 
 		specificTime := time.Date(2025, 5, 13, 10, 0, 0, 0, time.UTC)
-		clockMock.now = specificTime
+		clockMock.nowVal = specificTime
 
 		rm.mu.Lock()
 		ps := rm.peerStates[peerID]
