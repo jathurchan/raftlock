@@ -204,10 +204,7 @@ func NewGRPCNetworkManager(
 		Time:                  opts.KeepaliveTime,
 		Timeout:               opts.KeepaliveTimeout,
 	}
-	minClientPingInterval := opts.KeepaliveTime / 2
-	if minClientPingInterval < time.Second { // Avoid setting too low
-		minClientPingInterval = time.Second
-	}
+	minClientPingInterval := max(opts.KeepaliveTime/2, time.Second)
 	enforcementPolicy := keepalive.EnforcementPolicy{
 		MinTime:             minClientPingInterval, // Disallow pings more frequent than roughly half the keepalive time
 		PermitWithoutStream: true,                  // Allow pings even when there are no active streams
@@ -250,14 +247,14 @@ func NewGRPCNetworkManager(
 func (nm *gRPCNetworkManager) Start() error {
 	nm.logger.Infow("Starting gRPC network manager", "address", nm.localAddr)
 
-	if nm.serverStarted.Load() {
-		nm.logger.Warnw("Start called but server already started")
-		return nil
-	}
-
 	if nm.isShutdown.Load() {
 		nm.logger.Warnw("Start called but manager is shut down")
 		return ErrShuttingDown
+	}
+
+	if nm.serverStarted.Load() {
+		nm.logger.Warnw("Start called but server already started")
+		return nil
 	}
 
 	listener, err := net.Listen("tcp", nm.localAddr)
@@ -297,7 +294,6 @@ func (nm *gRPCNetworkManager) Start() error {
 	}
 
 	var wg sync.WaitGroup
-	startupConnectTimeout := nm.opts.DialTimeout * 2 // Allow more time for initial startup connections
 	for peerID, peerCfg := range nm.peers {
 		if peerID == nm.id {
 			continue // Skip self
@@ -305,9 +301,7 @@ func (nm *gRPCNetworkManager) Start() error {
 		wg.Add(1)
 		go func(id types.NodeID, cfg PeerConfig) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), startupConnectTimeout)
-			defer cancel()
-			_, err := nm.getOrCreatePeerClient(ctx, id)
+			_, err := nm.getOrCreatePeerClient(id)
 			if err != nil {
 				nm.logger.Warnw("Failed initial connection attempt to peer",
 					"peer_id", id, "address", cfg.Address, "error", err)
@@ -394,7 +388,7 @@ func (nm *gRPCNetworkManager) SendRequestVote(
 		return nil, ErrShuttingDown
 	}
 
-	client, err := nm.getOrCreatePeerClient(ctx, target)
+	client, err := nm.getOrCreatePeerClient(target)
 	if err != nil {
 		return nil, fmt.Errorf("SendRequestVote: failed to get client for peer %s: %w", target, err)
 	}
@@ -450,7 +444,7 @@ func (nm *gRPCNetworkManager) SendAppendEntries(
 		return nil, ErrShuttingDown
 	}
 
-	client, err := nm.getOrCreatePeerClient(ctx, target)
+	client, err := nm.getOrCreatePeerClient(target)
 	if err != nil {
 		return nil, fmt.Errorf("SendAppendEntries: failed to get client for peer %s: %w", target, err)
 	}
@@ -549,7 +543,7 @@ func (nm *gRPCNetworkManager) SendInstallSnapshot(
 		return nil, ErrShuttingDown
 	}
 
-	client, err := nm.getOrCreatePeerClient(ctx, target)
+	client, err := nm.getOrCreatePeerClient(target)
 	if err != nil {
 		return nil, fmt.Errorf("SendInstallSnapshot: failed to get client for peer %s: %w", target, err)
 	}
@@ -633,7 +627,7 @@ func (nm *gRPCNetworkManager) LocalAddr() string {
 
 // getOrCreatePeerClient returns the client connection for a peer.
 // It handles thread-safe checking, creation, and connection establishment.
-func (nm *gRPCNetworkManager) getOrCreatePeerClient(ctx context.Context, peerID types.NodeID) (*peerConnection, error) {
+func (nm *gRPCNetworkManager) getOrCreatePeerClient(peerID types.NodeID) (*peerConnection, error) {
 	nm.mu.RLock()
 	client, exists := nm.peerClients[peerID]
 	nm.mu.RUnlock()
@@ -666,7 +660,7 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClient(ctx context.Context, peerID 
 		nm.logger.Debugw("Existing peer connection state struct found, attempting reconnect", "peer_id", peerID, "address", client.addr)
 	}
 
-	err := nm.connectToPeerLocked(ctx, client)
+	err := nm.connectToPeerLocked(client)
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +670,7 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClient(ctx context.Context, peerID 
 
 // connectToPeerLocked establishes or re-establishes a gRPC connection to a peer.
 // Assumes nm.mu (write lock) is held by the caller.
-func (nm *gRPCNetworkManager) connectToPeerLocked(ctx context.Context, client *peerConnection) error {
+func (nm *gRPCNetworkManager) connectToPeerLocked(client *peerConnection) error {
 	if client.conn != nil {
 		nm.logger.Debugw("Closing existing gRPC connection before reconnecting",
 			"peer_id", client.id, "address", client.addr)
@@ -797,7 +791,11 @@ func (h *grpcServerHandler) RequestVote(
 	if err != nil {
 		h.logger.Warnw("Internal handler failed for RPC", "rpc", rpc, "error", err, "from", args.CandidateID)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpc)
-		return nil, status.Error(codes.Internal, "internal raft handler error")
+
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, status.Error(codes.Internal, fmt.Sprintf("internal raft handler error: %v", err))
 	}
 
 	resp := &proto.RequestVoteResponse{
@@ -822,8 +820,12 @@ func (h *grpcServerHandler) AppendEntries(
 	}
 
 	if h.nm.isShutdown.Load() {
-		h.logger.Debugw("Rejecting RPC: server shutting down", "rpc", rpcType, "from", req.LeaderId)
-		h.nm.metrics.IncCounter("grpc_server_rpc_rejected_total", "rpc", rpcType, "reason", "shutdown")
+		if h.logger != nil {
+			h.logger.Debugw("Rejecting RPC: server shutting down", "rpc", rpcType, "from", req.LeaderId)
+		}
+		if h.nm != nil && h.nm.metrics != nil {
+			h.nm.metrics.IncCounter("grpc_server_rpc_rejected_total", "rpc", rpcType, "reason", "shutdown")
+		}
 		return nil, status.Error(codes.Aborted, "server shutting down")
 	}
 
@@ -869,7 +871,11 @@ func (h *grpcServerHandler) AppendEntries(
 	if err != nil {
 		h.logger.Warnw("Internal handler failed for RPC", "rpc", rpcType, "error", err, "from", args.LeaderID)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpcType)
-		return nil, status.Error(codes.Internal, "internal raft handler error")
+
+		if s, ok := status.FromError(err); ok {
+			return nil, s.Err()
+		}
+		return nil, status.Error(codes.Internal, fmt.Sprintf("internal raft handler error: %v", err))
 	}
 
 	resp := &proto.AppendEntriesResponse{
@@ -927,7 +933,10 @@ func (h *grpcServerHandler) InstallSnapshot(
 	if err != nil {
 		h.logger.Warnw("Internal handler failed for RPC", "rpc", rpc, "error", err, "from", args.LeaderID)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpc)
-		return nil, status.Error(codes.Internal, "internal raft handler error")
+		if s, ok := status.FromError(err); ok {
+			return nil, s.Err()
+		}
+		return nil, status.Error(codes.Internal, fmt.Sprintf("internal raft handler error: %v", err))
 	}
 
 	resp := &proto.InstallSnapshotResponse{
