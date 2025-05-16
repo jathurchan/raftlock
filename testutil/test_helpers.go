@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -72,6 +73,70 @@ func AssertEmpty(t testing.TB, object interface{}, msgAndArgs ...interface{}) {
 	if v.Len() != 0 {
 		t.Errorf("Expected empty but got length %d\n%s", v.Len(), FormatMsgAndArgs(msgAndArgs...))
 	}
+}
+
+func AssertNil(t *testing.T, actual interface{}, msgAndArgs ...interface{}) {
+	t.Helper()
+	if !isNil(actual) {
+		message := formatMessage(msgAndArgs...)
+		// %#v provides a more detailed representation of the non-nil value.
+		t.Fatalf("%s: Expected value to be nil, but was: %#v%s", getCallerInfo(), actual, message)
+	}
+}
+
+func formatMessage(msgAndArgs ...interface{}) string {
+	if len(msgAndArgs) == 0 || msgAndArgs[0] == nil {
+		return ""
+	}
+	if len(msgAndArgs) == 1 {
+		if msgStr, ok := msgAndArgs[0].(string); ok {
+			return ": " + msgStr
+		}
+		return fmt.Sprintf(": %v", msgAndArgs[0])
+	}
+	if format, ok := msgAndArgs[0].(string); ok {
+		return ": " + fmt.Sprintf(format, msgAndArgs[1:]...)
+	}
+	return fmt.Sprintf(": %v", msgAndArgs) // Fallback for non-string first arg
+}
+
+func isNil(value interface{}) bool {
+	if value == nil {
+		return true // Handles cases where value is explicitly nil
+	}
+	// Use reflect to check for typed nils (e.g., (*MyStruct)(nil))
+	// which are not equal to `nil` itself but are still nil pointers/interfaces.
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return rv.IsNil()
+	default:
+		// For other types (like struct, int, string), they cannot be "nil" in the same way.
+		// An empty string or zero int is not nil. A zero struct is not nil.
+		return false
+	}
+}
+
+func getCallerInfo() string {
+	// We want the caller of AssertNil/AssertNotNil, etc., so we skip:
+	// 0: getCallerInfo (this function)
+	// 1: AssertNil/AssertNotNil (the helper function)
+	// 2: The actual test function that called the helper
+	_, file, line, ok := runtime.Caller(2)
+	if !ok {
+		return ""
+	}
+	// Make file path relative to common project structures if possible,
+	// e.g., strip GOROOT or GOPATH, or find a common project root.
+	// For simplicity here, we'll just use a basic split.
+	// You might want to make this more sophisticated based on your project structure.
+	parts := strings.Split(file, "/")
+	if len(parts) > 2 { // Show last two parts (e.g., directory/file.go)
+		file = strings.Join(parts[len(parts)-2:], "/")
+	} else if len(parts) > 0 {
+		file = parts[len(parts)-1]
+	}
+	return fmt.Sprintf("%s:%d", file, line)
 }
 
 func AssertNotNil(t testing.TB, object any, msgAndArgs ...any) {

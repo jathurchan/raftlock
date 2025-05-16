@@ -8,11 +8,9 @@ coverage:
   status:
     project:
       default:
-        # basic
-        target: auto
+        target: 90%
         threshold: 0.5%
         base: auto
-        # advanced
         branches: null
         if_no_uploads: error
         if_not_found: success
@@ -22,11 +20,9 @@ coverage:
         paths: null
     patch:
       default:
-        # basic
-        target: auto
+        target: 90%
         threshold: 0.5%
         base: auto
-        # advanced
         branches: null
         if_no_uploads: error
         if_not_found: success

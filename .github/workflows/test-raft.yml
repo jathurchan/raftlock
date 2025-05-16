@@ -31,19 +31,29 @@ jobs:
       
       - name: Verify dependencies
         run: go mod verify
-      
+
       - name: Install protoc and Go plugins
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          export PATH="$PATH:$(go env GOPATH)/bin"
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
       
       - name: Generate protobuf files
         run: |
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          protoc --go_out=. --go-grpc_out=. proto/*.proto
+          echo "Generating protobuf files for ./proto/*.proto and ./raft/proto/*.proto"
+          protoc \
+            --proto_path=. \
+            --go_out=paths=source_relative:. \
+            --go-grpc_out=paths=source_relative:. \
+            ./proto/*.proto ./raft/proto/*.proto
+
+          echo "Protobuf generation complete."
+
+      - name: Tidy dependencies
+        run: go mod tidy # Ensures go.mod and go.sum are consistent
+      
       
       # - name: Run linting
       #   uses: golangci/golangci-lint-action@v4
@@ -54,27 +64,34 @@ jobs:
       #       --out-format=colored-line-number
       #       --exclude-dirs=proto
       
-      - name: Run tests with coverage (excluding testutil)
+      - name: Run tests with coverage (only ./raft)
         run: |
           go test -v ./raft -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
+
+          # Alternative: full test suite for broader changes
+          # go test -v ./... -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
         
       - name: ✅ Show test results and coverage %
         run: |
           echo "### ✅ Test Results:"
           grep -E '^(=== RUN|--- (PASS|FAIL))' test-output.txt \
-            | sed -E 's/=== RUN +/Running: /; s/--- PASS: /✅ Passed: /; s/--- FAIL: /❌ Failed: /'
+            | sed -E 's/=== RUN +/Running: /; s/--- PASS: /✅ Passed: /; s/--- FAIL: /❌ Failed: /' \
+            || echo "No test results found in output."
 
           echo ""
           echo "### 📊 Total Coverage:"
-          go tool cover -func=coverage.out | grep total
+          go tool cover -func=coverage.out | grep total \
+            || echo "Coverage data not found or 'total' line missing."
 
       - name: Generate coverage report
+        if: success() || failure()
         run: go tool cover -html=coverage.out -o coverage.html
 
       - name: Upload coverage report as artifact
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: coverage-report-${{ matrix.go-version }}
           path: coverage.html
       
       - name: Upload coverage to Codecov
