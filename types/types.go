@@ -2,6 +2,65 @@ package types
 
 import "time"
 
+// LockID is a unique identifier for a lock resource.
+type LockID string
+
+// ClientID is a unique identifier for a client interacting with the lock manager.
+type ClientID string
+
+// LockInfo represents the current state of a distributed lock.
+type LockInfo struct {
+	// LockID uniquely identifies the lock resource.
+	LockID LockID
+
+	// OwnerID is the client currently holding the lock.
+	// If empty, the lock is not currently held.
+	OwnerID ClientID
+
+	// Version is the Raft log index at which the lock was acquired.
+	// It serves as a fencing token to prevent split-brain scenarios
+	// and to ensure linearizability.
+	Version Index
+
+	// AcquiredAt is the timestamp when the current owner acquired the lock.
+	AcquiredAt time.Time
+
+	// ExpiresAt is the timestamp when the lock will expire automatically, unless renewed.
+	ExpiresAt time.Time
+
+	// WaiterCount is the number of clients currently waiting for the lock.
+	WaiterCount int
+
+	// WaitersInfo contains detailed information about clients in the wait queue.
+	// This field is populated only for detailed queries and omitted from JSON if empty.
+	WaitersInfo []WaiterInfo `json:",omitempty"`
+
+	// Metadata holds optional user-defined key-value pairs associated with the lock.
+	// Omitted from JSON if empty.
+	Metadata map[string]string `json:",omitempty"`
+
+	// LastModified is the timestamp of the most recent update to the lock state.
+	LastModified time.Time
+}
+
+// WaiterInfo represents information about a client waiting to acquire a lock.
+type WaiterInfo struct {
+	// ClientID uniquely identifies the waiting client.
+	ClientID ClientID
+
+	// EnqueuedAt is the timestamp when the client joined the wait queue.
+	EnqueuedAt time.Time
+
+	// TimeoutAt is the timestamp when the client’s wait request will expire.
+	TimeoutAt time.Time
+
+	// Priority indicates the client's wait priority (higher values mean higher priority).
+	Priority int
+
+	// Position is the client's current index in the wait queue (0 = front of the queue).
+	Position int
+}
+
 // NodeID uniquely identifies a Raft node within a cluster.
 // It should be globally unique and remain stable across restarts.
 type NodeID string
