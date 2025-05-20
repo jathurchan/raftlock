@@ -80,3 +80,30 @@ type Metrics interface {
 	// Reset clears all metrics.
 	Reset()
 }
+
+type NoOpMetrics struct{}
+
+func (n *NoOpMetrics) IncrAcquireRequest(lockID types.LockID, success bool, waitQueued bool)   {}
+func (n *NoOpMetrics) IncrReleaseRequest(lockID types.LockID, success bool, byExpiration bool) {}
+func (n *NoOpMetrics) IncrRenewRequest(lockID types.LockID, success bool)                      {}
+func (n *NoOpMetrics) IncrWaitQueueRequest(lockID types.LockID, success bool)                  {}
+func (n *NoOpMetrics) IncrWaitCancelRequest(lockID types.LockID, success bool)                 {}
+func (n *NoOpMetrics) IncrPromotedWaiter(lockID types.LockID, waitTime time.Duration)          {}
+func (n *NoOpMetrics) IncrExpiredLock(lockID types.LockID)                                     {}
+func (n *NoOpMetrics) IncrTimeoutWaiter(lockID types.LockID)                                   {}
+func (n *NoOpMetrics) IncrRaftApply(cmdType CommandType, success bool)                         {}
+func (n *NoOpMetrics) IncrSnapshotEvent(operation SnapshotOperation, success bool)             {}
+func (n *NoOpMetrics) ObserveLockHoldDuration(lockID types.LockID, holdTime time.Duration, byRelease bool) {
+}
+func (n *NoOpMetrics) ObserveAcquireLatency(lockID types.LockID, latency time.Duration, contested bool) {
+}
+func (n *NoOpMetrics) ObserveReleaseLatency(lockID types.LockID, latency time.Duration)            {}
+func (n *NoOpMetrics) ObserveRenewLatency(lockID types.LockID, latency time.Duration)              {}
+func (n *NoOpMetrics) ObserveWaitQueueLatency(lockID types.LockID, latency time.Duration)          {}
+func (n *NoOpMetrics) ObserveWaitQueueSize(lockID types.LockID, size int)                          {}
+func (n *NoOpMetrics) ObserveTickDuration(duration time.Duration, expiredCount int)                {}
+func (n *NoOpMetrics) ObserveSnapshotSize(bytes int)                                               {}
+func (n *NoOpMetrics) ObserveSnapshotDuration(operation SnapshotOperation, duration time.Duration) {}
+func (n *NoOpMetrics) SetActiveLocks(count int)                                                    {}
+func (n *NoOpMetrics) SetTotalWaiters(count int)                                                   {}
+func (n *NoOpMetrics) Reset()
