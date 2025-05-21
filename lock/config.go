@@ -31,11 +31,9 @@ type LockManagerConfig struct {
 	// instead of simple FIFO ordering.
 	EnablePriorityQueue bool
 
-	// Logger is used for logging internal events, warnings, and errors.
-	Logger logger.Logger
-
-	// Metrics collects operational and performance data from the LockManager.
-	Metrics Metrics
+	Serializer serializer
+	Logger     logger.Logger
+	Metrics    Metrics
 
 	// EnableCache enables read caching for operations like GetLockInfo.
 	// This may improve performance but can return slightly stale data.
@@ -110,6 +108,15 @@ func WithMaxWaiters(max int) LockManagerOption {
 func WithPriorityQueue(enable bool) LockManagerOption {
 	return func(cfg *LockManagerConfig) {
 		cfg.EnablePriorityQueue = enable
+	}
+}
+
+// WithSerializer sets the serializer for decoding lock commands.
+func WithSerializer(serializer serializer) LockManagerOption {
+	return func(cfg *LockManagerConfig) {
+		if serializer != nil {
+			cfg.Serializer = serializer
+		}
 	}
 }
 

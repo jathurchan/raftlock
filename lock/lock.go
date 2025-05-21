@@ -25,9 +25,10 @@ type lockManager struct {
 
 	lastAppliedIndex types.Index // Index of the last Raft log entry applied; used for state consistency.
 
-	config  LockManagerConfig
-	logger  logger.Logger
-	metrics Metrics
+	config     LockManagerConfig
+	serializer serializer
+	logger     logger.Logger
+	metrics    Metrics
 
 	lockInfoCache map[types.LockID]*types.LockInfo            // Stores cached lock information.
 	cacheTTLMap   map[types.LockID]time.Time                  // Tracks expiration times for cache entries.
@@ -43,6 +44,9 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 		opt(&config)
 	}
 
+	if config.Serializer == nil {
+		config.Serializer = &jsonSerializer{}
+	}
 	if config.Logger == nil {
 		config.Logger = &logger.NoOpLogger{}
 	}
@@ -63,6 +67,7 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 		expirationHeap:   &expHeap,
 		lastAppliedIndex: 0, // Will be updated from snapshot or applied entries.
 		config:           config,
+		serializer:       &jsonSerializer{},
 		logger:           config.Logger.WithComponent("lockmanager"),
 		metrics:          config.Metrics,
 		clock:            raft.NewStandardClock(),
