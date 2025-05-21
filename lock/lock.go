@@ -3,6 +3,7 @@ package lock
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -45,7 +46,6 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 	if config.Logger == nil {
 		config.Logger = &logger.NoOpLogger{}
 	}
-
 	if config.Metrics == nil {
 		config.Metrics = &NoOpMetrics{}
 	}
@@ -54,14 +54,18 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 	heap.Init(&expHeap)
 
 	lm := &lockManager{
+		mu:               sync.RWMutex{},
+		cacheMu:          sync.RWMutex{},
 		locks:            make(map[types.LockID]*lockState),
 		waiters:          make(map[types.LockID]*waitQueue),
 		clientLocks:      make(map[types.ClientID]map[types.LockID]struct{}),
+		pendingWaits:     make(map[types.LockID]map[types.ClientID]*waiter),
 		expirationHeap:   &expHeap,
-		lastAppliedIndex: 0,
+		lastAppliedIndex: 0, // Will be updated from snapshot or applied entries.
 		config:           config,
-		logger:           config.Logger.WithComponent("lock"),
+		logger:           config.Logger.WithComponent("lockmanager"),
 		metrics:          config.Metrics,
+		clock:            raft.NewStandardClock(),
 	}
 
 	if config.EnableCache {
@@ -69,6 +73,7 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 		lm.cacheTTLMap = make(map[types.LockID]time.Time, config.CacheSize)
 	}
 
+	lm.logger.Infow("LockManager initialized", "config", fmt.Sprintf("%+v", config))
 	return lm
 }
 
