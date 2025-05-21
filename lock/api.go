@@ -4,19 +4,18 @@ import (
 	"context"
 	"time"
 
+	"github.com/jathurchan/raftlock/raft"
 	"github.com/jathurchan/raftlock/types"
 )
 
 // LockManager defines a distributed lock management interface,
 // serving as the application-level state machine for Raft consensus.
 //
-// All `Apply*` methods must be deterministic, thread-safe, and idempotent.
-// These are invoked only after commands are committed by Raft.
+// It extends the raft.Applier interface to handle lock-specific operations
+// after commands are committed through the Raft consensus protocol.
+// All methods must be deterministic, thread-safe, and idempotent.
 type LockManager interface {
-	// Apply routes a committed Raft command to the appropriate lock operation.
-	//
-	// Returns a fatal error only if the command cannot be processed.
-	Apply(ctx context.Context, index types.Index, command []byte) error
+	raft.Applier
 
 	// ApplyAcquire attempts to acquire a lock for the specified client.
 	//
@@ -74,19 +73,6 @@ type LockManager interface {
 	//
 	// Returns the number of expired locks.
 	Tick(ctx context.Context) (expiredCount int)
-
-	// Snapshot serializes the LockManager's state for Raft snapshotting.
-	//
-	// Returns:
-	//   - The Raft index included in the snapshot.
-	//   - A byte slice of the serialized state.
-	//   - An error if the snapshot fails.
-	Snapshot(ctx context.Context) (types.Index, []byte, error)
-
-	// RestoreSnapshot loads a LockManager state from a Raft snapshot.
-	//
-	// Returns an error if the snapshot is invalid or restoration fails.
-	RestoreSnapshot(ctx context.Context, lastIndex types.Index, lastTerm types.Term, data []byte) error
 
 	// Close shuts down background routines and cleans up resources.
 	Close() error

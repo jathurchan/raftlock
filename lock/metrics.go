@@ -37,10 +37,10 @@ type Metrics interface {
 	IncrTimeoutWaiter(lockID types.LockID)
 
 	// IncrRaftApply increments counters for Raft-applied commands.
-	IncrRaftApply(cmdType CommandType, success bool)
+	IncrRaftApply(cmdType types.LockOperation, success bool)
 
 	// IncrSnapshotEvent increments counters for snapshot create/restore events.
-	IncrSnapshotEvent(operation SnapshotOperation, success bool)
+	IncrSnapshotEvent(operation types.SnapshotOperation, success bool)
 
 	// ObserveLockHoldDuration records how long a lock was held.
 	// `byRelease` is true if the lock was explicitly released.
@@ -69,7 +69,7 @@ type Metrics interface {
 	ObserveSnapshotSize(bytes int)
 
 	// ObserveSnapshotDuration records the duration of a snapshot operation.
-	ObserveSnapshotDuration(operation SnapshotOperation, duration time.Duration)
+	ObserveSnapshotDuration(operation types.SnapshotOperation, duration time.Duration)
 
 	// SetActiveLocks sets the current number of held locks.
 	SetActiveLocks(count int)
@@ -91,19 +91,20 @@ func (n *NoOpMetrics) IncrWaitCancelRequest(lockID types.LockID, success bool)  
 func (n *NoOpMetrics) IncrPromotedWaiter(lockID types.LockID, waitTime time.Duration)          {}
 func (n *NoOpMetrics) IncrExpiredLock(lockID types.LockID)                                     {}
 func (n *NoOpMetrics) IncrTimeoutWaiter(lockID types.LockID)                                   {}
-func (n *NoOpMetrics) IncrRaftApply(cmdType CommandType, success bool)                         {}
-func (n *NoOpMetrics) IncrSnapshotEvent(operation SnapshotOperation, success bool)             {}
+func (n *NoOpMetrics) IncrRaftApply(cmdType types.LockOperation, success bool)                 {}
+func (n *NoOpMetrics) IncrSnapshotEvent(operation types.SnapshotOperation, success bool)       {}
 func (n *NoOpMetrics) ObserveLockHoldDuration(lockID types.LockID, holdTime time.Duration, byRelease bool) {
 }
 func (n *NoOpMetrics) ObserveAcquireLatency(lockID types.LockID, latency time.Duration, contested bool) {
 }
-func (n *NoOpMetrics) ObserveReleaseLatency(lockID types.LockID, latency time.Duration)            {}
-func (n *NoOpMetrics) ObserveRenewLatency(lockID types.LockID, latency time.Duration)              {}
-func (n *NoOpMetrics) ObserveWaitQueueLatency(lockID types.LockID, latency time.Duration)          {}
-func (n *NoOpMetrics) ObserveWaitQueueSize(lockID types.LockID, size int)                          {}
-func (n *NoOpMetrics) ObserveTickDuration(duration time.Duration, expiredCount int)                {}
-func (n *NoOpMetrics) ObserveSnapshotSize(bytes int)                                               {}
-func (n *NoOpMetrics) ObserveSnapshotDuration(operation SnapshotOperation, duration time.Duration) {}
-func (n *NoOpMetrics) SetActiveLocks(count int)                                                    {}
-func (n *NoOpMetrics) SetTotalWaiters(count int)                                                   {}
-func (n *NoOpMetrics) Reset()
+func (n *NoOpMetrics) ObserveReleaseLatency(lockID types.LockID, latency time.Duration)   {}
+func (n *NoOpMetrics) ObserveRenewLatency(lockID types.LockID, latency time.Duration)     {}
+func (n *NoOpMetrics) ObserveWaitQueueLatency(lockID types.LockID, latency time.Duration) {}
+func (n *NoOpMetrics) ObserveWaitQueueSize(lockID types.LockID, size int)                 {}
+func (n *NoOpMetrics) ObserveTickDuration(duration time.Duration, expiredCount int)       {}
+func (n *NoOpMetrics) ObserveSnapshotSize(bytes int)                                      {}
+func (n *NoOpMetrics) ObserveSnapshotDuration(operation types.SnapshotOperation, duration time.Duration) {
+}
+func (n *NoOpMetrics) SetActiveLocks(count int)  {}
+func (n *NoOpMetrics) SetTotalWaiters(count int) {}
+func (n *NoOpMetrics) Reset()                    {}

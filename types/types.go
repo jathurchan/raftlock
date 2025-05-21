@@ -8,59 +8,6 @@ type LockID string
 // ClientID is a unique identifier for a client interacting with the lock manager.
 type ClientID string
 
-// LockInfo represents the current state of a distributed lock.
-type LockInfo struct {
-	// LockID uniquely identifies the lock resource.
-	LockID LockID
-
-	// OwnerID is the client currently holding the lock.
-	// If empty, the lock is not currently held.
-	OwnerID ClientID
-
-	// Version is the Raft log index at which the lock was acquired.
-	// It serves as a fencing token to prevent split-brain scenarios
-	// and to ensure linearizability.
-	Version Index
-
-	// AcquiredAt is the timestamp when the current owner acquired the lock.
-	AcquiredAt time.Time
-
-	// ExpiresAt is the timestamp when the lock will expire automatically, unless renewed.
-	ExpiresAt time.Time
-
-	// WaiterCount is the number of clients currently waiting for the lock.
-	WaiterCount int
-
-	// WaitersInfo contains detailed information about clients in the wait queue.
-	// This field is populated only for detailed queries and omitted from JSON if empty.
-	WaitersInfo []WaiterInfo `json:",omitempty"`
-
-	// Metadata holds optional user-defined key-value pairs associated with the lock.
-	// Omitted from JSON if empty.
-	Metadata map[string]string `json:",omitempty"`
-
-	// LastModified is the timestamp of the most recent update to the lock state.
-	LastModified time.Time
-}
-
-// WaiterInfo represents information about a client waiting to acquire a lock.
-type WaiterInfo struct {
-	// ClientID uniquely identifies the waiting client.
-	ClientID ClientID
-
-	// EnqueuedAt is the timestamp when the client joined the wait queue.
-	EnqueuedAt time.Time
-
-	// TimeoutAt is the timestamp when the client’s wait request will expire.
-	TimeoutAt time.Time
-
-	// Priority indicates the client's wait priority (higher values mean higher priority).
-	Priority int
-
-	// Position is the client's current index in the wait queue (0 = front of the queue).
-	Position int
-}
-
 // NodeID uniquely identifies a Raft node within a cluster.
 // It should be globally unique and remain stable across restarts.
 type NodeID string
@@ -72,6 +19,72 @@ type Term uint64
 // Index represents a position in the Raft log.
 // Log indices start at 1 and increase with each appended entry.
 type Index uint64
+
+// LockOperation defines the type of action that can be performed on a lock.
+type LockOperation string
+
+const (
+	// OperationAcquire represents an attempt to acquire a lock.
+	OperationAcquire LockOperation = "acquire"
+
+	// OperationRelease represents an attempt to release a previously acquired lock.
+	OperationRelease LockOperation = "release"
+
+	// OperationRenew represents an attempt to renew the TTL of an existing lock.
+	OperationRenew LockOperation = "renew"
+
+	// OperationEnqueueWaiter represents adding a client to the waiting queue for a lock.
+	OperationEnqueueWaiter LockOperation = "enqueue_waiter"
+
+	// OperationCancelWait represents removing a client from the waiting queue for a lock.
+	OperationCancelWait LockOperation = "cancel_wait"
+)
+
+// SnapshotOperation represents a type of snapshot-related operation.
+type SnapshotOperation string
+
+const (
+	// SnapshotCreate indicates a snapshot creation event.
+	SnapshotCreate SnapshotOperation = "create"
+
+	// SnapshotRestore indicates a snapshot restoration event.
+	SnapshotRestore SnapshotOperation = "restore"
+)
+
+// Command represents a client operation submitted to the lock manager.
+// These commands are serialized and applied to the state machine via Raft.
+type Command struct {
+	Op       LockOperation `json:"op"`                 // Type of operation: acquire, release, renew, etc.
+	LockID   LockID        `json:"lock_id"`            // Unique identifier for the target lock.
+	ClientID ClientID      `json:"client_id"`          // ID of the client issuing the command.
+	TTL      int64         `json:"ttl,omitempty"`      // Time-to-live for the lock in milliseconds (used with acquire/renew).
+	Version  Index         `json:"version,omitempty"`  // Raft index used for token fencing.
+	Priority int           `json:"priority,omitempty"` // Priority of the client when waiting for a lock.
+	Timeout  int64         `json:"timeout,omitempty"`  // Maximum time to wait for the lock in milliseconds.
+}
+
+// WaiterInfo provides information about a client currently waiting for a lock.
+type WaiterInfo struct {
+	ClientID   ClientID  `json:"client_id"`   // Unique identifier of the waiting client.
+	EnqueuedAt time.Time `json:"enqueued_at"` // Time the client was added to the wait queue.
+	TimeoutAt  time.Time `json:"timeout_at"`  // Time when the client's wait request will expire.
+	Priority   int       `json:"priority"`    // Priority of the client in the wait queue.
+	Position   int       `json:"position"`    // Current index in the wait queue (0 = front of the queue).
+}
+
+// LockInfo describes the current state of a lock, including ownership,
+// timing, metadata, and information about waiting clients.
+type LockInfo struct {
+	LockID       LockID            `json:"lock_id"`                // Unique identifier for the lock.
+	OwnerID      ClientID          `json:"owner_id"`               // ID of the client that currently holds the lock. Empty if unheld.
+	Version      Index             `json:"version"`                // Raft log index when the lock was acquired (used for fencing).
+	AcquiredAt   time.Time         `json:"acquired_at"`            // Timestamp when the current owner acquired the lock.
+	ExpiresAt    time.Time         `json:"expires_at"`             // Timestamp when the lock will automatically expire unless renewed.
+	WaiterCount  int               `json:"waiter_count"`           // Number of clients currently waiting to acquire the lock.
+	WaitersInfo  []WaiterInfo      `json:"waiters_info,omitempty"` // Detailed info about each waiting client (omitted if empty).
+	Metadata     map[string]string `json:"metadata,omitempty"`     // Optional user-defined metadata associated with the lock.
+	LastModified time.Time         `json:"last_modified"`          // Timestamp of the most recent modification to the lock state.
+}
 
 // NodeRole represents the possible roles of a Raft node.
 type NodeRole int
