@@ -142,6 +142,7 @@ func (lc *lockCache) Get(lockID types.LockID) (*types.LockInfo, bool) {
 		lc.metrics.IncrCacheHit(lockID)
 		return currentEntry.info, true
 	}
+
 	lc.mu.Unlock()
 	return nil, false
 }
