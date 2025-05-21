@@ -77,11 +77,42 @@ type Metrics interface {
 	// SetTotalWaiters sets the current number of clients across all wait queues.
 	SetTotalWaiters(count int)
 
+	// IncrCacheHit increments counters for successful cache hits.
+	IncrCacheHit(lockID types.LockID)
+
+	// IncrCacheMiss increments counters for failed cache lookups.
+	IncrCacheMiss(lockID types.LockID)
+
+	// IncrCacheExpired increments counters for expired cache entries.
+	IncrCacheExpired(lockID types.LockID)
+
+	// IncrCacheAdd increments counters when an entry is added to the cache.
+	IncrCacheAdd(lockID types.LockID)
+
+	// IncrCacheUpdate increments counters when an existing cache entry is updated.
+	IncrCacheUpdate(lockID types.LockID)
+
+	// IncrCacheEvict increments counters for cache evictions.
+	IncrCacheEvict(lockID types.LockID)
+
+	// IncrCacheInvalidate increments counters for explicit cache invalidation.
+	IncrCacheInvalidate(lockID types.LockID)
+
+	// IncrCacheInvalidateAll increments counters when the full cache is invalidated.
+	IncrCacheInvalidateAll(count int)
+
+	// IncrCacheCleanup increments counters when a cache cleanup run completes.
+	IncrCacheCleanup(count int)
+
 	// Reset clears all metrics.
 	Reset()
 }
 
 type NoOpMetrics struct{}
+
+func newNoOpMetrics() Metrics {
+	return &NoOpMetrics{}
+}
 
 func (n *NoOpMetrics) IncrAcquireRequest(lockID types.LockID, success bool, waitQueued bool)   {}
 func (n *NoOpMetrics) IncrReleaseRequest(lockID types.LockID, success bool, byExpiration bool) {}
@@ -93,6 +124,7 @@ func (n *NoOpMetrics) IncrExpiredLock(lockID types.LockID)                      
 func (n *NoOpMetrics) IncrTimeoutWaiter(lockID types.LockID)                                   {}
 func (n *NoOpMetrics) IncrRaftApply(cmdType types.LockOperation, success bool)                 {}
 func (n *NoOpMetrics) IncrSnapshotEvent(operation types.SnapshotOperation, success bool)       {}
+
 func (n *NoOpMetrics) ObserveLockHoldDuration(lockID types.LockID, holdTime time.Duration, byRelease bool) {
 }
 func (n *NoOpMetrics) ObserveAcquireLatency(lockID types.LockID, latency time.Duration, contested bool) {
@@ -105,6 +137,18 @@ func (n *NoOpMetrics) ObserveTickDuration(duration time.Duration, expiredCount i
 func (n *NoOpMetrics) ObserveSnapshotSize(bytes int)                                      {}
 func (n *NoOpMetrics) ObserveSnapshotDuration(operation types.SnapshotOperation, duration time.Duration) {
 }
+
 func (n *NoOpMetrics) SetActiveLocks(count int)  {}
 func (n *NoOpMetrics) SetTotalWaiters(count int) {}
-func (n *NoOpMetrics) Reset()                    {}
+
+func (n *NoOpMetrics) IncrCacheHit(lockID types.LockID)        {}
+func (n *NoOpMetrics) IncrCacheMiss(lockID types.LockID)       {}
+func (n *NoOpMetrics) IncrCacheExpired(lockID types.LockID)    {}
+func (n *NoOpMetrics) IncrCacheAdd(lockID types.LockID)        {}
+func (n *NoOpMetrics) IncrCacheUpdate(lockID types.LockID)     {}
+func (n *NoOpMetrics) IncrCacheEvict(lockID types.LockID)      {}
+func (n *NoOpMetrics) IncrCacheInvalidate(lockID types.LockID) {}
+func (n *NoOpMetrics) IncrCacheInvalidateAll(count int)        {}
+func (n *NoOpMetrics) IncrCacheCleanup(count int)              {}
+
+func (n *NoOpMetrics) Reset() {}
