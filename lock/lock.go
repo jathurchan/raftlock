@@ -17,25 +17,25 @@ import (
 // lockState encapsulates the current state of a specific lock.
 type lockState struct {
 	// Unique identifier of the lock.
-	lockID types.LockID
+	LockID types.LockID
 
 	// Identifier of the client currently holding the lock. Empty if unowned.
-	owner types.ClientID
+	Owner types.ClientID
 
 	// Raft log index when the lock was last acquired or renewed.
-	version types.Index
+	Version types.Index
 
 	// Timestamp when the lock was acquired.
-	acquiredAt time.Time
+	AcquiredAt time.Time
 
 	// Timestamp when the lock is set to expire automatically.
-	expiresAt time.Time
+	ExpiresAt time.Time
 
-	// Optional key-value metadata associated with the lock.
-	metadata map[string]string
+	// Optional key-value Metadata associated with the lock.
+	Metadata map[string]string
 
 	// Timestamp of the last modification to the lock's state.
-	lastModified time.Time
+	LastModified time.Time
 }
 
 // lockSnapshot represents a point-in-time view of the lock manager state.
@@ -226,7 +226,7 @@ func (lm *lockManager) applyAcquireLocked(lockID types.LockID, clientID types.Cl
 	switch {
 	case lm.isHeldByOther(currentLock, clientID):
 		contested = true
-		return lm.rejectAcquisitionDueToContention(lockID, currentLock.owner, clientID)
+		return lm.rejectAcquisitionDueToContention(lockID, currentLock.Owner, clientID)
 
 	case lm.isHeldBySame(currentLock, clientID):
 		success = true
@@ -243,12 +243,12 @@ func (lm *lockManager) applyAcquireLocked(lockID types.LockID, clientID types.Cl
 
 // isHeldByOther returns true if the lock exists and is currently owned by a different client.
 func (lm *lockManager) isHeldByOther(lock *lockState, clientID types.ClientID) bool {
-	return lock != nil && lock.owner != "" && lock.owner != clientID
+	return lock != nil && lock.Owner != "" && lock.Owner != clientID
 }
 
 // isHeldBySame returns true if the lock exists and is currently held by the same client.
 func (lm *lockManager) isHeldBySame(lock *lockState, clientID types.ClientID) bool {
-	return lock != nil && lock.owner == clientID
+	return lock != nil && lock.Owner == clientID
 }
 
 // rejectAcquisitionDueToContention logs and returns a standardized error
@@ -275,20 +275,20 @@ func (lm *lockManager) renewLock(
 	now time.Time,
 ) (*types.LockInfo, error) {
 	newExpiresAt := now.Add(ttl)
-	if newExpiresAt.After(lock.expiresAt) {
-		lock.expiresAt = newExpiresAt
+	if newExpiresAt.After(lock.ExpiresAt) {
+		lock.ExpiresAt = newExpiresAt
 	}
-	lock.version = version
-	lock.lastModified = now
+	lock.Version = version
+	lock.LastModified = now
 
-	lm.updateExpirationLocked(lockID, lock.expiresAt)
+	lm.updateExpirationLocked(lockID, lock.ExpiresAt)
 
 	lm.logger.Debugw("Lock renewed by current owner",
 		"lockID", lockID,
-		"clientID", lock.owner,
+		"clientID", lock.Owner,
 		"ttl", ttl,
 		"version", version,
-		"expiresAt", lock.expiresAt,
+		"expiresAt", lock.ExpiresAt,
 	)
 	return lm.createLockInfoFromState(lock), nil
 }
@@ -299,8 +299,8 @@ func (lm *lockManager) createNewLockState(lockID types.LockID) *lockState {
 		"lockID", lockID,
 	)
 	return &lockState{
-		lockID:   lockID,
-		metadata: make(map[string]string),
+		LockID:   lockID,
+		Metadata: make(map[string]string),
 	}
 }
 
@@ -314,13 +314,13 @@ func (lm *lockManager) assignLockOwnership(
 	version types.Index,
 	now time.Time,
 ) (*types.LockInfo, error) {
-	lock.owner = clientID
-	lock.version = version
-	lock.acquiredAt = now
-	lock.expiresAt = now.Add(ttl)
-	lock.lastModified = now
+	lock.Owner = clientID
+	lock.Version = version
+	lock.AcquiredAt = now
+	lock.ExpiresAt = now.Add(ttl)
+	lock.LastModified = now
 
-	lm.addToExpirationHeapLocked(lockID, lock.expiresAt)
+	lm.addToExpirationHeapLocked(lockID, lock.ExpiresAt)
 	lm.trackClientLockLocked(clientID, lockID)
 	lm.metrics.SetActiveLocks(len(lm.locks))
 
@@ -329,7 +329,7 @@ func (lm *lockManager) assignLockOwnership(
 		"clientID", clientID,
 		"ttl", ttl,
 		"version", version,
-		"expiresAt", lock.expiresAt,
+		"expiresAt", lock.ExpiresAt,
 	)
 	return lm.createLockInfoFromState(lock), nil
 }
@@ -364,7 +364,7 @@ func (lm *lockManager) applyReleaseLocked(lockID types.LockID, clientID types.Cl
 		"lockID", lockID,
 		"clientID", clientID,
 		"version", version,
-		"heldDuration", lm.clock.Now().Sub(lock.acquiredAt),
+		"heldDuration", lm.clock.Now().Sub(lock.AcquiredAt),
 	)
 
 	lm.tryPromoteWaiterLocked(lockID)
@@ -376,21 +376,21 @@ func (lm *lockManager) applyReleaseLocked(lockID types.LockID, clientID types.Cl
 // validateRelease checks if the release request is valid and returns the lock if so.
 func (lm *lockManager) validateRelease(lockID types.LockID, clientID types.ClientID, version types.Index) (*lockState, error) {
 	lock, exists := lm.locks[lockID]
-	if !exists || lock.owner == "" {
+	if !exists || lock.Owner == "" {
 		lm.logger.Warnw("Release failed: lock not found or not held",
 			"lockID", lockID, "clientID", clientID)
 		return nil, ErrLockNotHeld
 	}
 
-	if lock.owner != clientID {
+	if lock.Owner != clientID {
 		lm.logger.Warnw("Release failed: client does not own lock",
-			"lockID", lockID, "currentOwner", lock.owner, "clientID", clientID)
+			"lockID", lockID, "currentOwner", lock.Owner, "clientID", clientID)
 		return nil, ErrNotLockOwner
 	}
 
-	if version != 0 && lock.version != version {
+	if version != 0 && lock.Version != version {
 		lm.logger.Warnw("Release failed: version mismatch",
-			"lockID", lockID, "lockVersion", lock.version, "clientVersion", version)
+			"lockID", lockID, "lockVersion", lock.Version, "clientVersion", version)
 		return nil, ErrVersionMismatch
 	}
 
@@ -400,10 +400,10 @@ func (lm *lockManager) validateRelease(lockID types.LockID, clientID types.Clien
 // performRelease clears the lock owner and updates internal state and metrics.
 func (lm *lockManager) performRelease(lockID types.LockID, clientID types.ClientID, lock *lockState) {
 	now := lm.clock.Now()
-	lock.owner = ""
-	lock.lastModified = now
+	lock.Owner = ""
+	lock.LastModified = now
 
-	holdDuration := now.Sub(lock.acquiredAt)
+	holdDuration := now.Sub(lock.AcquiredAt)
 	lm.metrics.ObserveLockHoldDuration(lockID, holdDuration, true)
 
 	lm.removeFromClientLocksLocked(clientID, lockID)
@@ -444,8 +444,8 @@ func (lm *lockManager) applyRenewLocked(lockID types.LockID, clientID types.Clie
 		"lockID", lockID,
 		"clientID", clientID,
 		"newTTL", ttl,
-		"newVersion", lock.version,
-		"expiresAt", lock.expiresAt,
+		"newVersion", lock.Version,
+		"expiresAt", lock.ExpiresAt,
 	)
 	success = true
 	return nil
@@ -454,14 +454,14 @@ func (lm *lockManager) applyRenewLocked(lockID types.LockID, clientID types.Clie
 // validateRenewRequest ensures the lock exists and is currently held by the requesting client.
 func (lm *lockManager) validateRenewRequest(lockID types.LockID, clientID types.ClientID) (*lockState, error) {
 	lock, exists := lm.locks[lockID]
-	if !exists || lock.owner == "" {
+	if !exists || lock.Owner == "" {
 		lm.logger.Warnw("Renew failed: lock not found or not currently held",
 			"lockID", lockID, "clientID", clientID)
 		return nil, ErrLockNotHeld
 	}
-	if lock.owner != clientID {
+	if lock.Owner != clientID {
 		lm.logger.Warnw("Renew failed: client is not the lock owner",
-			"lockID", lockID, "currentOwner", lock.owner, "clientID", clientID)
+			"lockID", lockID, "currentOwner", lock.Owner, "clientID", clientID)
 		return nil, ErrNotLockOwner
 	}
 	return lock, nil
@@ -470,11 +470,11 @@ func (lm *lockManager) validateRenewRequest(lockID types.LockID, clientID types.
 // renewLockTTL updates the TTL and version of the lock.
 func (lm *lockManager) renewLockTTL(lockID types.LockID, lock *lockState, newVersion types.Index, ttl time.Duration) {
 	now := lm.clock.Now()
-	lock.expiresAt = now.Add(ttl)
-	lock.version = newVersion
-	lock.lastModified = now
+	lock.ExpiresAt = now.Add(ttl)
+	lock.Version = newVersion
+	lock.LastModified = now
 
-	lm.updateExpirationLocked(lockID, lock.expiresAt)
+	lm.updateExpirationLocked(lockID, lock.ExpiresAt)
 }
 
 // ApplyWaitQueue enqueues a client into the lock's wait queue, optionally with priority
@@ -540,9 +540,9 @@ func (lm *lockManager) ensureLockStateExists(lockID types.LockID) {
 	_, exists := lm.locks[lockID]
 	if !exists {
 		lock := &lockState{
-			lockID:       lockID,
-			metadata:     make(map[string]string),
-			lastModified: lm.clock.Now(),
+			LockID:       lockID,
+			Metadata:     make(map[string]string),
+			LastModified: lm.clock.Now(),
 		}
 		lm.locks[lockID] = lock
 		lm.logger.Infow("Created lock state for waiting client", "lockID", lockID)
@@ -811,22 +811,22 @@ func (lm *lockManager) processExpiredLocks(now time.Time) int {
 		item := heap.Pop(lm.expirationHeap).(*expirationItem)
 		lock, exists := lm.locks[item.lockID]
 
-		if !exists || lock.owner == "" || lock.expiresAt.After(now) {
+		if !exists || lock.Owner == "" || lock.ExpiresAt.After(now) {
 			continue // Lock was deleted, not held, or renewed since scheduled expiration.
 		}
 
 		lm.logger.Infow("Lock expired by TTL",
-			"lockID", lock.lockID, "owner", lock.owner, "expiresAt", lock.expiresAt)
+			"lockID", lock.LockID, "owner", lock.Owner, "expiresAt", lock.ExpiresAt)
 
-		holdDuration := now.Sub(lock.acquiredAt)
-		lm.metrics.ObserveLockHoldDuration(lock.lockID, holdDuration, false)
-		lm.metrics.IncrExpiredLock(lock.lockID)
+		holdDuration := now.Sub(lock.AcquiredAt)
+		lm.metrics.ObserveLockHoldDuration(lock.LockID, holdDuration, false)
+		lm.metrics.IncrExpiredLock(lock.LockID)
 
-		lm.removeFromClientLocksLocked(lock.owner, lock.lockID)
-		lock.owner = ""
-		lock.lastModified = now
+		lm.removeFromClientLocksLocked(lock.Owner, lock.LockID)
+		lock.Owner = ""
+		lock.LastModified = now
 
-		lm.tryPromoteWaiterLocked(lock.lockID)
+		lm.tryPromoteWaiterLocked(lock.LockID)
 		count++
 	}
 	return count
@@ -861,7 +861,7 @@ func (lm *lockManager) cleanupTimedOutWaiters(now time.Time) {
 func (lm *lockManager) updateActiveLockMetrics() {
 	active := 0
 	for _, lock := range lm.locks {
-		if lock.owner != "" {
+		if lock.Owner != "" {
 			active++
 		}
 	}
@@ -995,10 +995,10 @@ func (lm *lockManager) restoreWaitersUnlocked(snapshotWaiters map[types.LockID][
 func (lm *lockManager) rebuildExpirationHeapUnlocked() {
 	expHeap := make(expirationHeap, 0, len(lm.locks))
 	for lockID, lock := range lm.locks {
-		if lock.owner != "" {
+		if lock.Owner != "" {
 			expHeap = append(expHeap, &expirationItem{
 				lockID:    lockID,
-				expiresAt: lock.expiresAt,
+				expiresAt: lock.ExpiresAt,
 				index:     -1,
 			})
 		}
@@ -1012,8 +1012,8 @@ func (lm *lockManager) rebuildExpirationHeapUnlocked() {
 func (lm *lockManager) rebuildClientLocksUnlocked() {
 	lm.clientLocks = make(map[types.ClientID]map[types.LockID]struct{})
 	for lockID, lock := range lm.locks {
-		if lock.owner != "" {
-			lm.trackClientLockLocked(lock.owner, lockID)
+		if lock.Owner != "" {
+			lm.trackClientLockLocked(lock.Owner, lockID)
 		}
 	}
 }
@@ -1072,19 +1072,19 @@ func (lm *lockManager) validateTTL(ttl time.Duration) error {
 // Assumes caller holds lm.mu (read or write).
 func (lm *lockManager) createLockInfoFromState(state *lockState) *types.LockInfo {
 	info := &types.LockInfo{
-		LockID:       state.lockID,
-		OwnerID:      state.owner,
-		Version:      state.version,
-		AcquiredAt:   state.acquiredAt,
-		ExpiresAt:    state.expiresAt,
-		LastModified: state.lastModified,
-		Metadata:     make(map[string]string, len(state.metadata)),
+		LockID:       state.LockID,
+		OwnerID:      state.Owner,
+		Version:      state.Version,
+		AcquiredAt:   state.AcquiredAt,
+		ExpiresAt:    state.ExpiresAt,
+		LastModified: state.LastModified,
+		Metadata:     make(map[string]string, len(state.Metadata)),
 	}
-	for k, v := range state.metadata { // Deep copy metadata.
+	for k, v := range state.Metadata { // Deep copy metadata.
 		info.Metadata[k] = v
 	}
 
-	if wq, exists := lm.waiters[state.lockID]; exists {
+	if wq, exists := lm.waiters[state.LockID]; exists {
 		info.WaiterCount = wq.Len()
 	}
 	return info
@@ -1139,7 +1139,7 @@ func (lm *lockManager) tryPromoteWaiterLocked(lockID types.LockID) {
 	}
 
 	lock, exists := lm.locks[lockID]
-	if !exists || lock.owner != "" {
+	if !exists || lock.Owner != "" {
 		return
 	}
 
@@ -1157,8 +1157,8 @@ func (lm *lockManager) tryPromoteWaiterLocked(lockID types.LockID) {
 	lm.logger.Infow("Promoted waiter to lock owner",
 		"lockID", lockID,
 		"promotedClient", nextWaiter.clientID,
-		"newVersion", lock.version,
-		"newExpiresAt", lock.expiresAt)
+		"newVersion", lock.Version,
+		"newExpiresAt", lock.ExpiresAt)
 }
 
 // cleanupPendingWaiter removes the promoted waiter from pendingWaits.
@@ -1183,14 +1183,14 @@ func (lm *lockManager) notifyWaiter(w *waiter, lockID types.LockID) {
 // grantLockToWaiter assigns the lock to the given waiter and updates state.
 func (lm *lockManager) grantLockToWaiter(lockID types.LockID, lock *lockState, w *waiter) {
 	now := lm.clock.Now()
-	lock.owner = w.clientID
-	lock.version = lm.lastAppliedIndex
-	lock.acquiredAt = now
-	lock.expiresAt = now.Add(lm.config.DefaultTTL)
-	lock.lastModified = now
+	lock.Owner = w.clientID
+	lock.Version = lm.lastAppliedIndex
+	lock.AcquiredAt = now
+	lock.ExpiresAt = now.Add(lm.config.DefaultTTL)
+	lock.LastModified = now
 
 	lm.trackClientLockLocked(w.clientID, lockID)
-	lm.addToExpirationHeapLocked(lockID, lock.expiresAt)
+	lm.addToExpirationHeapLocked(lockID, lock.ExpiresAt)
 }
 
 // updateTotalWaitersMetric recalculates and sets the gauge for the total number of waiting clients.
