@@ -14,7 +14,7 @@ type expirationItem struct {
 	// Scheduled expiration time of the lock.
 	expiresAt time.Time
 
-	// Position of the item in the heap (used by heap.Interface).
+	// Position of the item in the heap (set in `Swap(i, j int)`).
 	index int
 }
 

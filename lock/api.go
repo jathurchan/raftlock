@@ -13,7 +13,11 @@ import (
 //
 // It extends the raft.Applier interface to handle lock-specific operations
 // after commands are committed through the Raft consensus protocol.
-// All methods must be deterministic, thread-safe, and idempotent.
+//
+// Notes:
+//   - All methods must be deterministic, thread-safe, and idempotent.
+//   - Clients waiting in the lock queue at the time of a snapshot cannot be restored.
+//     After a snapshot restore, clients must re-issue their wait requests to resume.
 type LockManager interface {
 	raft.Applier
 
@@ -61,6 +65,7 @@ type LockManager interface {
 	GetLockInfo(ctx context.Context, lockID types.LockID) (*types.LockInfo, error)
 
 	// GetLocks returns a paginated list of locks matching an optional filter.
+	// If limit <= 0, all items from offset are returned.
 	//
 	// Returns:
 	//   - A slice of *LockInfo.
@@ -70,6 +75,7 @@ type LockManager interface {
 
 	// Tick advances the internal clock to trigger TTL expirations
 	// and wait queue promotions.
+	// This should be called periodically by an external ticker.
 	//
 	// Returns the number of expired locks.
 	Tick(ctx context.Context) (expiredCount int)

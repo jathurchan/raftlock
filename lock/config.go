@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/jathurchan/raftlock/logger"
+	"github.com/jathurchan/raftlock/raft"
 )
 
 // LockManagerOption defines a function that applies a configuration setting
@@ -32,6 +33,7 @@ type LockManagerConfig struct {
 	EnablePriorityQueue bool
 
 	Serializer serializer
+	Clock      raft.Clock
 	Logger     logger.Logger
 	Metrics    Metrics
 
@@ -116,6 +118,15 @@ func WithSerializer(serializer serializer) LockManagerOption {
 	return func(cfg *LockManagerConfig) {
 		if serializer != nil {
 			cfg.Serializer = serializer
+		}
+	}
+}
+
+// WithClock sets the clock used for time-related operations in the lock manager.
+func WithClock(clock raft.Clock) LockManagerOption {
+	return func(cfg *LockManagerConfig) {
+		if clock != nil {
+			cfg.Clock = clock
 		}
 	}
 }
