@@ -8,9 +8,14 @@ import (
 
 // expirationItem represents a lock tracked for expiration within the expiration heap.
 type expirationItem struct {
-	lockID    types.LockID // Identifier of the lock being tracked.
-	expiresAt time.Time    // Scheduled expiration time of the lock.
-	index     int          // Position of the item in the heap (used by heap.Interface).
+	// Identifier of the lock being tracked.
+	lockID types.LockID
+
+	// Scheduled expiration time of the lock.
+	expiresAt time.Time
+
+	// Position of the item in the heap (used by heap.Interface).
+	index int
 }
 
 // expirationHeap is a min-heap of expirationItems, sorted by their expiresAt time.

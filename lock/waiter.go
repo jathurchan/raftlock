@@ -8,13 +8,26 @@ import (
 
 // waiter represents a client that is waiting to acquire a lock.
 type waiter struct {
-	clientID  types.ClientID // Unique identifier of the client.
-	enqueued  time.Time      // Timestamp when the client was added to the wait queue.
-	timeoutAt time.Time      // Deadline after which the wait attempt is considered timed out.
-	priority  int            // Priority of the waiter; higher values indicate higher priority.
-	version   types.Index    // Raft log index at which the wait was registered.
-	index     int            // Position of the waiter in the heap (used by heap.Interface).
-	notifyCh  chan struct{}  // Channel used to signal the client when the lock is acquired, cancelled, or timed out.
+	// Unique identifier of the client.
+	clientID types.ClientID
+
+	// Timestamp when the client was added to the wait queue.
+	enqueued time.Time
+
+	// Deadline after which the wait attempt is considered timed out.
+	timeoutAt time.Time
+
+	// Priority of the waiter; higher values indicate higher priority.
+	priority int
+
+	// Raft log index at which the wait was registered.
+	version types.Index
+
+	// Position of the waiter in the heap (used by heap.Interface).
+	index int
+
+	// Channel used to signal the client when the lock is acquired, cancelled, or timed out.
+	notifyCh chan struct{}
 }
 
 // waitQueue is a priority queue for waiters requesting a lock.
@@ -41,7 +54,7 @@ func (wq waitQueue) Swap(i, j int) {
 }
 
 // Push adds a new waiter to the priority queue and assigns its index.
-func (wq *waitQueue) Push(x interface{}) {
+func (wq *waitQueue) Push(x any) {
 	n := len(*wq)
 	item := x.(*waiter)
 	item.index = n
