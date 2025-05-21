@@ -7,7 +7,7 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-func TestFilterByOwner(t *testing.T) {
+func TestLockFilters_FilterByOwner(t *testing.T) {
 	clientA := types.ClientID("client-A")
 	clientB := types.ClientID("client-B")
 
@@ -28,7 +28,7 @@ func TestFilterByOwner(t *testing.T) {
 	}
 }
 
-func TestFilterExpiringSoon(t *testing.T) {
+func TestLockFilters_FilterExpiringSoon(t *testing.T) {
 	now := time.Now()
 
 	locks := []*types.LockInfo{
@@ -62,7 +62,7 @@ func TestFilterExpiringSoon(t *testing.T) {
 	}
 }
 
-func TestFilterAll(t *testing.T) {
+func TestLockFilters_FilterAll(t *testing.T) {
 	locks := []*types.LockInfo{
 		{},
 		{LockID: "held", OwnerID: "client-1"},

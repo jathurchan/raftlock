@@ -7,7 +7,7 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-func TestNoOpMetrics(t *testing.T) {
+func TestLockMetrics_NoOpMetrics(t *testing.T) {
 	metrics := newNoOpMetrics()
 
 	lockID := types.LockID("test-lock-1")
