@@ -65,9 +65,12 @@ jobs:
       #       --out-format=colored-line-number
       #       --exclude-dirs=proto
       
-      - name: Run tests with coverage (entire repo)
+      - name: Run tests with coverage (entire repo, excluding .pb.go)
         run: |
-          go test -v ./... -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
+          go test -v ./... -race -coverprofile=coverage.tmp.out -covermode=atomic | tee test-output.txt
+          # Remove lines with *.pb.go from coverage report
+          grep -v '\.pb\.go:' coverage.tmp.out > coverage.out
+          
         
       - name: ✅ Show test results and coverage %
         run: |
