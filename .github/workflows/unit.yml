@@ -9,11 +9,6 @@ on:
       - go.sum
       - proto/**
   pull_request:
-    paths:
-      - '**.go'
-      - go.mod
-      - go.sum
-      - proto/**
   workflow_dispatch:  # Allow manual workflow runs
 
 jobs:
