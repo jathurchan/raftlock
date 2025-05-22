@@ -1,13 +1,19 @@
-name: Test Raft
+name: Unit Tests
 
 on:
   push:
     branches: [main]
     paths:
-      - 'raft/**'
+      - '**.go'
+      - go.mod
+      - go.sum
+      - proto/**
   pull_request:
     paths:
-      - 'raft/**'
+      - '**.go'
+      - go.mod
+      - go.sum
+      - proto/**
   workflow_dispatch:  # Allow manual workflow runs
 
 jobs:
@@ -66,10 +72,7 @@ jobs:
       
       - name: Run tests with coverage (only ./raft)
         run: |
-          go test -v ./raft -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
-
-          # Alternative: full test suite for broader changes
-          # go test -v ./... -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
+          go test -v ./... -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
         
       - name: ✅ Show test results and coverage %
         run: |
