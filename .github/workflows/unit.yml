@@ -53,7 +53,7 @@ jobs:
             --proto_path=. \
             --go_out=paths=source_relative:. \
             --go-grpc_out=paths=source_relative:. \
-            ./proto/*.proto ./raft/proto/*.proto
+            $(find . -name '*.proto')
 
           echo "Protobuf generation complete."
 
@@ -70,7 +70,7 @@ jobs:
       #       --out-format=colored-line-number
       #       --exclude-dirs=proto
       
-      - name: Run tests with coverage (only ./raft)
+      - name: Run tests with coverage (entire repo)
         run: |
           go test -v ./... -race -coverprofile=coverage.out -covermode=atomic | tee test-output.txt
         
