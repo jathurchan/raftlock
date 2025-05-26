@@ -4,31 +4,595 @@ package raftlock;
 
 option go_package = "./proto";
 
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// RaftLock service provides distributed locking functionality with strong consistency guarantees,
+// achieved via the Raft consensus algorithm.
 service RaftLock {
-    // Acquire a lock
-    rpc Lock (LockRequest) returns (LockResponse);
+  // Acquire attempts to acquire a distributed lock.
+  // If the lock is already held and wait=true, the client will be enqueued.
+  rpc Acquire(AcquireRequest) returns (AcquireResponse);
 
-    // Release a lock
-    rpc Unlock (UnlockRequest) returns (UnlockResponse);
+  // Release releases a previously acquired lock using the provided version (fencing token).
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // Renew extends the TTL of an existing lock.
+  rpc Renew(RenewRequest) returns (RenewResponse);
+
+  // GetLockInfo retrieves information about a specific lock without acquiring it.
+  rpc GetLockInfo(GetLockInfoRequest) returns (GetLockInfoResponse);
+
+  // GetLocks returns a list of locks matching the provided filter criteria.
+  rpc GetLocks(GetLocksRequest) returns (GetLocksResponse);
+
+  // EnqueueWaiter adds a client to the wait queue for a contested lock.
+  rpc EnqueueWaiter(EnqueueWaiterRequest) returns (EnqueueWaiterResponse);
+
+  // CancelWait removes a client from a lock's wait queue.
+  rpc CancelWait(CancelWaitRequest) returns (CancelWaitResponse);
+
+  // GetBackoffAdvice returns adaptive backoff parameters for handling contention.
+  rpc GetBackoffAdvice(BackoffAdviceRequest) returns (BackoffAdviceResponse);
+
+  // GetStatus returns the current status of the RaftLock cluster node.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // Health returns the health status of the server (for load balancer health checks).
+  rpc Health(HealthRequest) returns (HealthResponse);
 }
 
-message LockRequest {
-    string resource_id = 1; // Identifier of the resource to be locked
-    string client_id = 2;   // Unique identifier for the requesting client
-    int64 ttl_seconds = 3;  // (Optional) Time-to-live for the lock in seconds
+// Lock acquisition request
+message AcquireRequest {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the client requesting the lock
+  string client_id = 2;
+
+  // Time-to-live for the lock (e.g., "30s", "5m"). If not set, server default is used.
+  google.protobuf.Duration ttl = 3;
+
+  // Whether to wait in queue if lock is currently held
+  bool wait = 4;
+
+  // Maximum time to wait in queue (e.g., "1m", "10s"). If not set, server default is used.
+  google.protobuf.Duration wait_timeout = 5;
+
+  // Priority in wait queue (higher numbers = higher priority, 0 = default)
+  int32 priority = 6;
+
+  // Optional metadata to associate with the lock
+  map<string, string> metadata = 7;
+
+  // Lock mode for shared/exclusive locking
+  LockMode mode = 8;
+
+  // Optional client-generated request ID for idempotency.
+  // If provided, the server can detect and handle retries of this acquire operation.
+  string request_id = 9;
 }
 
-message LockResponse {
-    bool success = 1;       // Indicates whether the lock was successfully acquired
-    string message = 2;     // Provides additional details or failure reason, if applicable
+// Lock acquisition response
+message AcquireResponse {
+  // Whether the lock was successfully acquired
+  bool acquired = 1;
+
+  // Lock information (populated if acquired=true)
+  Lock lock = 2;
+
+  // Adaptive backoff advice for retries (populated if acquired=false and not waiting)
+  BackoffAdvice backoff_advice = 3;
+
+  // Error details, if any (populated if acquired=false)
+  ErrorDetail error = 4;
+
+  // Position in wait queue (populated if wait=true and lock was contested, making the client wait)
+  int32 queue_position = 5;
+
+  // Estimated wait time if enqueued (e.g., "5s", "100ms"). Only populated if queue_position > 0.
+  google.protobuf.Duration estimated_wait_duration = 6;
 }
 
-message UnlockRequest {
-    string resource_id = 1;
-    string client_id = 2;
+// Lock release request
+message ReleaseRequest {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the client releasing the lock
+  string client_id = 2;
+
+  // Version/fencing token from when the lock was acquired
+  int64 version = 3;
 }
 
-message UnlockResponse {
-    bool success = 1;
+// Lock release response
+message ReleaseResponse {
+  // Whether the lock was successfully released
+  bool released = 1;
+
+  // Error details, if any (populated if released=false)
+  ErrorDetail error = 2;
+
+  // Whether a waiter was promoted to lock holder as a result of this release
+  bool waiter_promoted = 3;
+}
+
+// Lock renewal request
+message RenewRequest {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the client renewing the lock
+  string client_id = 2;
+
+  // Version/fencing token from when the lock was acquired
+  int64 version = 3;
+
+  // New TTL for the lock (e.g., "30s", "5m").
+  google.protobuf.Duration new_ttl = 4;
+}
+
+// Lock renewal response
+message RenewResponse {
+  // Whether the lock was successfully renewed
+  bool renewed = 1;
+
+  // Updated lock information (populated if renewed=true)
+  Lock lock = 2;
+
+  // Error details, if any (populated if renewed=false)
+  ErrorDetail error = 3;
+}
+
+// Get lock information request
+message GetLockInfoRequest {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Whether to include detailed waiter information
+  bool include_waiters = 2;
+}
+
+// Get lock information response
+message GetLockInfoResponse {
+  // Lock information (null if lock doesn't exist)
+  LockInfo lock_info = 1;
+
+  // Error details if the lock is not found or another error occurs.
+  ErrorDetail error = 2;
+}
+
+// Get multiple locks request
+message GetLocksRequest {
+  // Filter criteria for locks to return
+  LockFilter filter = 1;
+
+  // Maximum number of locks to return (0 = no limit)
+  int32 limit = 2;
+
+  // Number of locks to skip (for pagination)
+  int32 offset = 3;
+
+  // Whether to include detailed waiter information
+  bool include_waiters = 4;
+}
+
+// Get multiple locks response
+message GetLocksResponse {
+  // List of locks matching the filter
+  repeated LockInfo locks = 1;
+
+  // Total number of locks matching the filter (for pagination)
+  int32 total_matching_filter = 2;
+
+  // Indicates if there are more results available beyond the current 'limit' and 'offset'.
+  bool has_more = 3;
+}
+
+// Enqueue waiter request
+message EnqueueWaiterRequest {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the client
+  string client_id = 2;
+
+  // Maximum time to wait in queue (e.g., "1m", "10s")
+  google.protobuf.Duration timeout = 3;
+
+  // Priority in wait queue (higher numbers = higher priority)
+  int32 priority = 4;
+
+  // Version/fencing token for this wait request
+  int64 version = 5;
+}
+
+// Enqueue waiter response
+message EnqueueWaiterResponse {
+  // Whether the client was successfully enqueued
+  bool enqueued = 1;
+
+  // Position in the wait queue (0 = front of queue)
+  int32 position = 2;
+
+  // Estimated wait time (e.g., "5s", "100ms")
+  google.protobuf.Duration estimated_wait_duration = 3;
+
+  // Error details, if any (populated if enqueued=false)
+  ErrorDetail error = 4;
+}
+
+// Cancel wait request
+message CancelWaitRequest {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the client
+  string client_id = 2;
+
+  // Version/fencing token for the wait request to cancel
+  int64 version = 3;
+}
+
+// Cancel wait response
+message CancelWaitResponse {
+  // Whether the wait was successfully cancelled
+  bool cancelled = 1;
+
+  // Error details, if any (populated if cancelled=false)
+  ErrorDetail error = 2;
+}
+
+// Backoff advice request
+message BackoffAdviceRequest {
+  // Unique identifier for the lock resource for which advice is sought
+  string lock_id = 1;
+}
+
+// Backoff advice response
+message BackoffAdviceResponse {
+  // Initial backoff duration (e.g., "50ms", "100ms")
+  google.protobuf.Duration initial_backoff = 1;
+
+  // Maximum backoff duration (e.g., "1s", "5s")
+  google.protobuf.Duration max_backoff = 2;
+
+  // Multiplier for exponential backoff (e.g., 1.5, 2.0)
+  double multiplier = 3;
+
+  // Jitter factor (0.0 to 1.0, e.g., 0.2 for +/- 20% jitter)
+  double jitter_factor = 4;
+
+  // Estimated wait time until lock might become available (e.g., "5s", "100ms").
+  // This is purely an estimate.
+  google.protobuf.Duration estimated_availability_in = 5;
+}
+
+// Get status request
+message GetStatusRequest {
+  // Whether to include detailed replication information in RaftStatus
+  bool include_replication_details = 1;
+}
+
+// Get status response
+message GetStatusResponse {
+  // Current Raft status
+  RaftStatus raft_status = 1;
+
+  // Lock manager statistics
+  LockManagerStats lock_stats = 2;
+
+  // Server health information
+  HealthStatus health = 3;
+}
+
+// Health check request
+message HealthRequest {
+  // Optional service name for health check, can be used for specific sub-service checks.
+  string service_name = 1;
+}
+
+// Health check response
+message HealthResponse {
+  // Health status
+  HealthStatus.ServingStatus status = 1;
+
+  // Human-readable status message, potentially including more details on failure.
+  string message = 2;
+
+  // Additional health information, could include detailed checks for dependencies.
+  HealthStatus health_info = 3;
+}
+
+// Filter criteria for querying locks
+message LockFilter {
+  // Pattern to match lock IDs (e.g., "user-*", "job-123"). Supports wildcards.
+  string lock_id_pattern = 1;
+
+  // Pattern to match owner IDs (e.g., "client-abc-*"). Supports wildcards.
+  string owner_id_pattern = 2;
+
+  // If true, only return locks that are currently held by an owner.
+  bool only_held = 3;
+
+  // If true, only return locks that have at least one client in their wait queue.
+  bool only_contested = 4;
+
+  // Only return locks that are set to expire before this specific time.
+  google.protobuf.Timestamp expires_before = 5;
+
+  // Only return locks that are set to expire after this specific time.
+  google.protobuf.Timestamp expires_after = 6;
+
+  // Only return locks with this specific mode (e.g., EXCLUSIVE or SHARED).
+  LockMode mode = 7;
+
+  // Only return locks that contain all of these key-value pairs in their metadata.
+  map<string, string> metadata_filter = 8;
+}
+
+// Represents an acquired lock
+message Lock {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the lock owner
+  string owner_id = 2;
+
+  // Version/fencing token for this lock acquisition
+  int64 version = 3;
+
+  // Timestamp indicating when the lock was acquired
+  google.protobuf.Timestamp acquired_at = 4;
+
+  // Timestamp indicating when the lock will expire if not renewed
+  google.protobuf.Timestamp expires_at = 5;
+
+  // Lock mode (e.g., EXCLUSIVE, SHARED)
+  LockMode mode = 6;
+
+  // Optional metadata associated with the lock
+  map<string, string> metadata = 7;
+}
+
+// Detailed information about a lock
+message LockInfo {
+  // Unique identifier for the lock resource
+  string lock_id = 1;
+
+  // Unique identifier for the current owner (empty if not held)
+  string owner_id = 2;
+
+  // Version/fencing token for the current lock acquisition
+  int64 version = 3;
+
+  // Timestamp indicating when the lock was acquired
+  google.protobuf.Timestamp acquired_at = 4;
+
+  // Timestamp indicating when the lock will expire if not renewed
+  google.protobuf.Timestamp expires_at = 5;
+
+  // Number of clients waiting for this lock
+  int32 waiter_count = 6;
+
+  // Detailed information about waiters (if requested in GetLockInfoRequest)
+  repeated WaiterInfo waiters_info = 7;
+
+  // Optional metadata associated with the lock
+  map<string, string> metadata = 8;
+
+  // Timestamp indicating when the lock state was last modified
+  google.protobuf.Timestamp last_modified_at = 9;
+
+  // Lock mode (e.g., EXCLUSIVE, SHARED)
+  LockMode mode = 10;
+}
+
+// Information about a client waiting for a lock
+message WaiterInfo {
+  // Unique identifier for the waiting client
+  string client_id = 1;
+
+  // Timestamp indicating when the client was added to the queue
+  google.protobuf.Timestamp enqueued_at = 2;
+
+  // Timestamp indicating when the client's wait request will expire
+  google.protobuf.Timestamp timeout_at = 3;
+
+  // Priority of the client in the wait queue
+  int32 priority = 4;
+
+  // Current position in the queue (0 = front)
+  int32 position = 5;
+}
+
+// Adaptive backoff advice for handling contention
+message BackoffAdvice {
+  // Recommended initial backoff duration (e.g., "50ms", "100ms")
+  google.protobuf.Duration initial_backoff = 1;
+
+  // Recommended maximum backoff duration (e.g., "1s", "5s")
+  google.protobuf.Duration max_backoff = 2;
+
+  // Recommended multiplier for exponential backoff (e.g., 1.5, 2.0)
+  double multiplier = 3;
+
+  // Recommended jitter factor (0.0 to 1.0, e.g., 0.2 for +/- 20% jitter)
+  double jitter_factor = 4;
+}
+
+// Current Raft cluster status
+message RaftStatus {
+  // This node's identifier
+  string node_id = 1;
+
+  // Current node role (Leader, Follower, Candidate)
+  string role = 2;
+
+  // Current Raft term
+  uint64 term = 3;
+
+  // Current leader's identifier (empty if unknown)
+  string leader_id = 4;
+
+  // Highest log entry index
+  uint64 last_log_index = 5;
+
+  // Term of the highest log entry
+  uint64 last_log_term = 6;
+
+  // Highest index known to be committed
+  uint64 commit_index = 7;
+
+  // Highest index applied to state machine
+  uint64 last_applied = 8;
+
+  // Index of the last snapshot
+  uint64 snapshot_index = 9;
+
+  // Term of the last snapshot
+  uint64 snapshot_term = 10;
+
+  // Replication state for each peer (only populated for leaders if include_replication_details is true)
+  map<string, PeerState> replication = 11;
+}
+
+// Replication state for a single peer
+message PeerState {
+  // Next index to send to this peer
+  uint64 next_index = 1;
+
+  // Highest log entry known to be replicated on this peer
+  uint64 match_index = 2;
+
+  // Whether the peer is currently responding
+  bool is_active = 3;
+
+  // Timestamp indicating when the peer was last known to be active
+  google.protobuf.Timestamp last_active_at = 4;
+
+  // Whether a snapshot transfer is in progress for this peer
+  bool snapshot_in_progress = 5;
+
+  // How far behind this peer is (leader's lastIndex - matchIndex)
+  uint64 replication_lag = 6;
+}
+
+// Lock manager statistics
+message LockManagerStats {
+  // Total number of locks currently held
+  int32 active_locks_count = 1;
+
+  // Total number of clients currently in all wait queues
+  int32 total_waiters_count = 2;
+
+  // Number of distinct locks that currently have waiters
+  int32 contested_locks_count = 3;
+
+  // Average lock hold time (e.g., "250ms", "1.5s")
+  google.protobuf.Duration average_hold_duration = 4;
+
+  // Rate of lock acquisitions (e.g., locks per second)
+  double acquisition_rate_per_second = 5;
+
+  // Rate of lock releases (e.g., locks per second)
+  double release_rate_per_second = 6;
+
+  // Number of locks that expired in the last statistics reporting period
+  int32 expired_locks_last_period = 7;
+}
+
+// Health status information
+message HealthStatus {
+  enum ServingStatus {
+    UNKNOWN = 0; // Status cannot be determined.
+    SERVING = 1; // Server is healthy and handling requests.
+    NOT_SERVING = 2; // Server is not handling requests or is unhealthy.
+  }
+
+  // Overall serving status
+  ServingStatus status = 1;
+
+  // Human-readable status message, potentially including more details on failure.
+  string message = 2;
+
+  // Whether this node believes it is the Raft leader.
+  bool is_raft_leader = 3; 
+
+  // Address of the current Raft leader (if known).
+  string raft_leader_address = 4;
+
+  // Current Raft term as seen by this node.
+  uint64 raft_term = 5;
+
+  // Last log index applied by this node's state machine.
+  uint64 raft_last_applied = 6; 
+
+  // Number of currently held locks on this node.
+  int32 current_active_locks = 7;
+
+  // Total number of clients in wait queues on this node.
+  int32 current_total_waiters = 8;
+
+  // Server uptime duration (e.g., "3h20m15s").
+  google.protobuf.Duration uptime = 9;
+
+  // Timestamp of the last health check.
+  google.protobuf.Timestamp last_health_check_at = 10;
+}
+
+
+message ErrorDetail {
+    // Machine-readable error code indicating the type of error
+    ErrorCode code = 1;
+
+    // Human-readable description of the error, suitable for logging or user display
     string message = 2;
+
+    // Optional developer-facing context for debugging (e.g., stack trace, internal state, problematic lock_id)
+    map<string, string> details = 3; // Changed from string to map for structured details
+}
+
+// Lock modes for shared/exclusive locking
+enum LockMode {
+    // Default unspecified lock mode, could be treated as EXCLUSIVE or error by server
+    LOCK_MODE_UNSPECIFIED = 0;
+
+    // Exclusive lock mode (only one owner allowed)
+    EXCLUSIVE = 1;
+    
+    // Shared lock mode (multiple owners allowed, typically for read access)
+    SHARED = 2;
+}
+
+// Error codes for detailed error handling
+enum ErrorCode {
+    // Default error code, should not be used explicitly by server.
+    ERROR_CODE_UNSPECIFIED = 0;
+    
+    OK = 1; // Kept for consistency, but often implicit.
+
+    // Lock-specific errors
+    LOCK_HELD = 101; // Lock is currently held by another client
+    LOCK_NOT_HELD = 102; // Lock is not currently held by any client
+    NOT_LOCK_OWNER = 103; // Operation failed because the client does not own the lock
+    VERSION_MISMATCH = 104; // Version or fencing token does not match expected value
+    LOCK_NOT_FOUND = 105; // Specified lock does not exist
+    INVALID_TTL = 106; // Provided TTL (time-to-live) value is invalid
+    WAIT_QUEUE_FULL = 107; // Wait queue has reached its maximum capacity
+    NOT_WAITING = 108; // Client is not in the wait queue (e.g., for CancelWait)
+
+    // Raft/Cluster related errors
+    NOT_LEADER = 201; // Server is not currently the cluster leader
+    NO_LEADER = 202; // No cluster leader is currently available or elected
+    REPLICATION_FAILURE = 203; // Failed to replicate operation via Raft
+
+    // General server/request errors
+    TIMEOUT = 301; // Operation exceeded its allowed time limit
+    RATE_LIMITED = 302; // Operation was rejected due to rate limiting
+    UNAVAILABLE = 303; // Server is currently unavailable or unreachable
+    INTERNAL_ERROR = 304; // An unexpected internal server error occurred
+    INVALID_ARGUMENT = 305; // A request argument was invalid
+    PERMISSION_DENIED = 306; // Client does not have permission for the operation
 }
