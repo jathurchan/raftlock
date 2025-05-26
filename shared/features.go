@@ -11,45 +11,45 @@ type FeatureFlags struct {
 
 // PerformanceFlags groups performance-related optimizations.
 type PerformanceFlags struct {
-	// EnableLeaderLeaseFastPath allows the leader to grant uncontested locks
-	// without a full Raft round trip if it holds a valid lease.
+	// EnableLeaderLeaseFastPath allows a leader with a valid lease to grant uncontended locks
+	// without performing a full consensus round, reducing latency.
 	EnableLeaderLeaseFastPath bool
 
-	// EnableReadOptimizedPaths enables fast, concurrent execution paths
-	// for read-only and shared-lock operations.
+	// EnableReadOptimizedPaths activates fast read paths (e.g., using ReadIndex)
+	// for lock status and other read-only operations, avoiding unnecessary log replication.
 	EnableReadOptimizedPaths bool
 
-	// EnableAdaptiveBackoff lets clients adjust retry strategies
-	// based on server-reported contention metrics.
+	// EnableAdaptiveBackoff enables clients to dynamically adjust their retry intervals
+	// based on contention metrics reported by the server.
 	EnableAdaptiveBackoff bool
 }
 
 // StorageFlags groups storage-related optimizations.
 type StorageFlags struct {
-	// EnableBinaryLogFormat uses a compact binary format instead of JSON
-	// for internal log entries to reduce storage and I/O.
+	// EnableBinaryLogFormat stores Raft log entries in a compact binary format
+	// rather than JSON, reducing space and serialization overhead.
 	EnableBinaryLogFormat bool
 
-	// EnableIndexMapping maintains an in-memory map of log index to offset
-	// to speed up log lookups.
+	// EnableIndexMapping maintains an in-memory index from log indices to file offsets,
+	// improving random-access performance for log lookups.
 	EnableIndexMapping bool
 }
 
 // CoreFeatureFlags groups core functional features.
 type CoreFeatureFlags struct {
-	// EnableFencingTokens issues incrementing version numbers for lock operations
-	// to prevent split-brain behavior caused by stale clients.
+	// EnableFencingTokens assigns a monotonically increasing token to each lock acquisition,
+	// preventing stale clients from issuing conflicting operations (i.e., protects against split-brain).
 	EnableFencingTokens bool
 
-	// EnableWaitQueues allows clients to wait for locks rather than failing immediately
-	// when a lock is held by another client.
+	// EnableWaitQueues allows clients to wait asynchronously for a lock to become available
+	// rather than immediately failing if it's already held.
 	EnableWaitQueues bool
 }
 
 // ObservabilityFlags groups observability-related features.
 type ObservabilityFlags struct {
-	// EnableMetrics records metrics for lock management,
-	// consensus, and storage performance.
+	// EnableMetrics exposes performance, lock, and consensus metrics
+	// for collection by observability systems.
 	EnableMetrics bool
 }
 
@@ -93,7 +93,7 @@ func DefaultServerFeatureFlags() *FeatureFlags {
 	}
 }
 
-// FeatureFlagOption defines a functional option for customizing feature flags.
+// FeatureFlagOption is a functional option for modifying FeatureFlags at construction time.
 type FeatureFlagOption func(*FeatureFlags)
 
 // WithLeaderLeaseFastPath sets the leader lease optimization flag.
