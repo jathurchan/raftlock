@@ -69,7 +69,7 @@ jobs:
         run: |
           go test -v ./... -race -coverprofile=coverage.tmp.out -covermode=atomic | tee test-output.txt
           # Remove lines with *.pb.go and testutil/ from coverage report
-          grep -vE '\.pb\.go:|/testutil/' coverage.tmp.out > coverage.out
+          grep -vE '\.pb\.go:|(^|/)testutil/' coverage.tmp.out > coverage.out
           
         
       - name: ✅ Show test results and coverage %
