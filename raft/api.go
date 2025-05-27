@@ -47,6 +47,9 @@ type Raft interface {
 	// The caller must ensure the application's state machine reflects at least the returned commit index
 	// before reading any application state for linearizability.
 	//
+	// This operation can be significantly faster when the leader holds a valid lease (configurable via FeatureFlags),
+	// potentially avoiding a full quorum round-trip.
+	//
 	// Errors:
 	//   - ErrNotLeader if the node is not leader.
 	//   - ErrTimeout if the operation times out.
