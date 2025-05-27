@@ -26,9 +26,9 @@ This Raft implementation includes the following key features:
 
 ### Performance Optimizations
 
-* **ReadIndex Protocol:** Provides a mechanism for linearizable reads (`ReadIndex` method) without the overhead of full log replication for every read request, ensuring data consistency with reduced latency.
-* **Leader Lease:** An optional optimization (enabled by `EnableLeaderLease` flag) that allows the leader to serve `ReadIndex` requests even faster under stable network conditions by relying on a time-based lease, further reducing read latency.
-* **PreVote Protocol:** An optional feature (enabled by `PreVoteEnabled` flag) that helps prevent unnecessary elections and term increments in networks prone to transient partitions, improving cluster stability.
+* **ReadIndex Protocol:** [Mechanism](#optimizations) for linearizable reads (`ReadIndex` method) without the overhead of full log replication for every read request, ensuring data consistency with reduced latency.
+* **Leader Lease:** [Time-based optimization](#optimizations) (enabled by `EnableLeaderLease` flag) that allows the leader to serve `ReadIndex` requests even faster under stable network conditions by relying on a time-based lease, further reducing read latency.
+* **PreVote Protocol:** [Optional Enhancement](#optimizations) (enabled by `PreVoteEnabled` flag) that helps prevent unnecessary elections and term increments in networks prone to transient partitions, improving cluster stability.
 * **Batched Operations:** Log entries can be batched for replication (`MaxLogEntriesPerRequest`) and application to the state machine (`MaxApplyBatchSize`), improving throughput for write-heavy workloads.
 
 ### Production-Ready Features
@@ -46,7 +46,7 @@ The `raft` package employs a modular architecture centered around a `raftNode` t
 graph TB
     %% Client Request Flow
     CLIENT[Client Request] --> GRPC[gRPC API Layer]
-    GRPC --> LOCKAPI[Lock Manager API]
+    GRPC --> LOCKAPI[RaftLock API]
     
     %% Lock Manager Integration
     LOCKAPI --> RAFTAPI[Raft.Propose]
