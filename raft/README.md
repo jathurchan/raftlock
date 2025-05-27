@@ -79,7 +79,7 @@ graph TB
     end
     
     %% Application State Machine
-    SM --> APPLIER[Lock Manager]
+    RAFTCORE --> APPLIER[Lock Manager]
     
     %% External Dependencies
     subgraph "External Services"
