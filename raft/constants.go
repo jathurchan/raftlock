@@ -17,7 +17,7 @@ const (
 	DefaultElectionTickCount = 10
 
 	// ElectionRandomizationFactor randomizes election timeouts to reduce split votes. Range: [0.0, 1.0].
-	DefaultElectionRandomizationFact = 0.2
+	DefaultElectionRandomizationFactor = 0.2
 
 	// MaxLogEntriesPerRequest limits the number of log entries sent in one AppendEntries RPC.
 	DefaultMaxLogEntriesPerRequest = 100
@@ -48,6 +48,13 @@ const (
 
 	// MaxSnapshotChunkSize is the maximum size in bytes of a snapshot chunk. 0 disables chunking (sends entire snapshot).
 	DefaultMaxSnapshotChunkSize = 0
+
+	// DefaultApplyEntryTimeout is the timeout for applying a single committed log entry to the state machine.
+	DefaultApplyEntryTimeout = 5 * time.Second
+
+	// DefaultFetchEntriesTimeout is the timeout for fetching entries from the log manager.
+	// This can be made configurable.
+	DefaultFetchEntriesTimeout = 5 * time.Second
 )
 
 const (
@@ -83,13 +90,6 @@ const (
 	// NominalTickInterval defines the base interval between Raft ticks.
 	// Used as the time unit for election and heartbeat timeouts.
 	NominalTickInterval = 100 * time.Millisecond
-
-	// defaultApplyEntryTimeout is the timeout for applying a single committed log entry to the state machine.
-	defaultApplyEntryTimeout = 5 * time.Second
-
-	// DefaultFetchEntriesTimeout is the timeout for fetching entries from the log manager.
-	// This can be made configurable.
-	defaultFetchEntriesTimeout = 5 * time.Second
 
 	// logManagerOpTimeout is the timeout used for internal log manager operations such as reading metadata
 	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.

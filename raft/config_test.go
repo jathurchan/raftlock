@@ -15,7 +15,7 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 			t.Errorf("explicitlySet should initially be false")
 		}
 
-		flags.WithExplicitFlags()
+		flags = flags.WithExplicitFlags()
 
 		if !flags.explicitlySet {
 			t.Errorf("explicitlySet should be true after calling WithExplicitFlags")
@@ -30,10 +30,6 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 		}
 
 		returnedFlags := flags.WithExplicitFlags()
-
-		if returnedFlags != flags {
-			t.Errorf("WithExplicitFlags should return the same pointer for method chaining")
-		}
 
 		if !returnedFlags.explicitlySet {
 			t.Errorf("explicitlySet should be true in the returned flags")

@@ -96,11 +96,11 @@ func (b *RaftBuilder) Build() (Raft, error) {
 
 	applyTimeout := b.config.Options.ApplyEntryTimeout
 	if applyTimeout <= 0 {
-		applyTimeout = defaultApplyEntryTimeout
+		applyTimeout = DefaultApplyEntryTimeout
 	}
 	fetchTimeout := b.config.Options.FetchEntriesTimeout
 	if fetchTimeout <= 0 {
-		fetchTimeout = defaultFetchEntriesTimeout
+		fetchTimeout = DefaultFetchEntriesTimeout
 	}
 
 	maxApplyBatchSize := b.config.TuningParams.MaxApplyBatchSize

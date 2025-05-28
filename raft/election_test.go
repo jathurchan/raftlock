@@ -87,7 +87,7 @@ func TestRaftElection_ElectionManager_Initialize(t *testing.T) {
 					Options: Options{
 						ElectionTickCount:           DefaultElectionTickCount,
 						HeartbeatTickCount:          DefaultHeartbeatTickCount,
-						ElectionRandomizationFactor: DefaultElectionRandomizationFact,
+						ElectionRandomizationFactor: DefaultElectionRandomizationFactor,
 					},
 					FeatureFlags: FeatureFlags{PreVoteEnabled: true},
 				},

@@ -200,8 +200,8 @@ func (em *electionManager) applyDefaults() {
 		em.logger.Warnw("ElectionTickCount should be greater than HeartbeatTickCount", "electionTicks", em.electionTickCount, "heartbeatTicks", DefaultHeartbeatTickCount)
 	}
 	if em.randomizationFactor < 0.0 || em.randomizationFactor > 1.0 {
-		em.logger.Warnw("Invalid ElectionRandomizationFactor, using default", "provided", em.randomizationFactor, "default", DefaultElectionRandomizationFact)
-		em.randomizationFactor = DefaultElectionRandomizationFact
+		em.logger.Warnw("Invalid ElectionRandomizationFactor, using default", "provided", em.randomizationFactor, "default", DefaultElectionRandomizationFactor)
+		em.randomizationFactor = DefaultElectionRandomizationFactor
 	}
 }
 
