@@ -9,8 +9,8 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-// ServerConfig holds the configuration settings for a RaftLock server instance.
-type ServerConfig struct {
+// RaftLockServerConfig holds the configuration settings for a RaftLock server instance.
+type RaftLockServerConfig struct {
 	// NodeID uniquely identifies this node in the Raft cluster.
 	NodeID types.NodeID
 
@@ -47,10 +47,10 @@ type ServerConfig struct {
 	RedirectTimeout      time.Duration // Timeout when attempting leader redirection
 }
 
-// DefaultServerConfig returns a ServerConfig pre-populated with safe defaults.
+// DefaultRaftLockServerConfig returns a ServerConfig pre-populated with safe defaults.
 // Callers must explicitly set NodeID, Peers, DataDir, and RaftConfig.ID.
-func DefaultServerConfig() ServerConfig {
-	return ServerConfig{
+func DefaultRaftLockServerConfig() RaftLockServerConfig {
+	return RaftLockServerConfig{
 		ListenAddress: "0.0.0.0:8080",
 		Peers:         make(map[types.NodeID]raft.PeerConfig),
 		RaftConfig: raft.Config{
@@ -95,7 +95,7 @@ func DefaultServerConfig() ServerConfig {
 }
 
 // Validate checks if the server configuration is valid.
-func (c *ServerConfig) Validate() error {
+func (c *RaftLockServerConfig) Validate() error {
 	if c.NodeID == "" {
 		return NewConfigError("NodeID cannot be empty")
 	}

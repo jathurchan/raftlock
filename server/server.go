@@ -22,7 +22,7 @@ type raftLockServer struct {
 	pb.UnimplementedRaftLockServer
 
 	// Configuration used to set up and run the server.
-	config ServerConfig
+	config RaftLockServerConfig
 
 	raftNode    raft.Raft        // Raft consensus instance.
 	lockManager lock.LockManager // Manages application-level lock state.
@@ -45,7 +45,7 @@ type raftLockServer struct {
 // NewRaftLockServer creates a new RaftLock server instance using the given config.
 // The server is not started automatically—call Start() to initialize components
 // and begin serving requests.
-func NewRaftLockServer(config ServerConfig) (RaftLockServer, error) {
+func NewRaftLockServer(config RaftLockServerConfig) (RaftLockServer, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid server configuration: %w", err)
 	}
