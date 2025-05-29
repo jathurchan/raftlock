@@ -23,7 +23,7 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 	})
 
 	t.Run("supports method chaining", func(t *testing.T) {
-		flags := &FeatureFlags{
+		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
 			PreVoteEnabled:    true,
@@ -37,14 +37,14 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 	})
 
 	t.Run("preserves other fields", func(t *testing.T) {
-		flags := &FeatureFlags{
+		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
 			PreVoteEnabled:    true,
 			explicitlySet:     false,
 		}
 
-		flags.WithExplicitFlags()
+		flags = flags.WithExplicitFlags()
 
 		if !flags.EnableReadIndex {
 			t.Errorf("EnableReadIndex should remain true")

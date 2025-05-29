@@ -28,6 +28,9 @@ type LeaderInitializer interface {
 // in the Raft consensus algorithm. It handles election timeouts,
 // vote requests and responses, and transitions to the leader role.
 type ElectionManager interface {
+	// SetNetworkManager allows late injection of the network manager after the Raft node is built.
+	SetNetworkManager(nm NetworkManager)
+
 	// Initialize prepares the election manager for operation,
 	// setting the initial randomized election timeout.
 	Initialize(ctx context.Context) error
@@ -171,9 +174,6 @@ func validateElectionManagerDeps(deps ElectionManagerDeps) error {
 	if deps.LogMgr == nil {
 		return errors.New("log manager (LogMgr) must not be nil")
 	}
-	if deps.NetworkMgr == nil {
-		return errors.New("network manager (NetworkMgr) must not be nil")
-	}
 	if deps.LeaderInitializer == nil {
 		return errors.New("leader initializer (LeaderInitializer) must not be nil")
 	}
@@ -203,6 +203,11 @@ func (em *electionManager) applyDefaults() {
 		em.logger.Warnw("Invalid ElectionRandomizationFactor, using default", "provided", em.randomizationFactor, "default", DefaultElectionRandomizationFactor)
 		em.randomizationFactor = DefaultElectionRandomizationFactor
 	}
+}
+
+// SetNetworkManager injects the network manager dependency into the election manager.
+func (s *electionManager) SetNetworkManager(nm NetworkManager) {
+	s.networkMgr = nm
 }
 
 // Initialize sets up the election manager, primarily by calculating the initial randomized election timeout.

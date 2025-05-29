@@ -168,11 +168,6 @@ func TestRaftElection_ValidateElectionManagerDeps(t *testing.T) {
 			return d
 		}, "log manager (LogMgr) must not be nil"},
 
-		{"nil NetworkMgr", func(d ElectionManagerDeps) ElectionManagerDeps {
-			d.NetworkMgr = nil
-			return d
-		}, "network manager (NetworkMgr) must not be nil"},
-
 		{"nil LeaderInitializer", func(d ElectionManagerDeps) ElectionManagerDeps {
 			d.LeaderInitializer = nil
 			return d

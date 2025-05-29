@@ -13,14 +13,13 @@ import (
 
 // RaftBuilder facilitates the construction of a Raft with appropriate defaults.
 type RaftBuilder struct {
-	config     Config
-	applier    Applier
-	networkMgr NetworkManager
-	logger     logger.Logger
-	metrics    Metrics
-	clock      Clock
-	rand       Rand
-	storage    storage.Storage
+	config  Config
+	applier Applier
+	logger  logger.Logger
+	metrics Metrics
+	clock   Clock
+	rand    Rand
+	storage storage.Storage
 }
 
 // NewRaftBuilder creates a new builder for Raft construction.
@@ -38,12 +37,6 @@ func (b *RaftBuilder) WithConfig(config Config) *RaftBuilder {
 // WithApplier sets the state machine applier.
 func (b *RaftBuilder) WithApplier(applier Applier) *RaftBuilder {
 	b.applier = applier
-	return b
-}
-
-// WithNetworkManager sets the network manager for peer communication.
-func (b *RaftBuilder) WithNetworkManager(networkMgr NetworkManager) *RaftBuilder {
-	b.networkMgr = networkMgr
 	return b
 }
 
@@ -114,7 +107,6 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		logger:              log,
 		clock:               b.clock,
 		applier:             b.applier,
-		networkMgr:          b.networkMgr,
 		metrics:             b.metrics,
 		stopCh:              make(chan struct{}),
 		applyCh:             make(chan types.ApplyMsg, maxApplyBatchSize*2),
@@ -146,7 +138,6 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		PeerStateUpdater:  NoOpReplicationStateUpdater{}, // Will be updated later
 		StateMgr:          stateMgr,
 		LogMgr:            logMgr,
-		NetworkMgr:        b.networkMgr,
 		Metrics:           b.metrics,
 		Logger:            log,
 		Clock:             b.clock,
@@ -168,7 +159,6 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		StateMgr:       stateMgr,
 		LogMgr:         logMgr,
 		SnapshotMgr:    node.snapshotMgr,
-		NetworkMgr:     b.networkMgr,
 		Metrics:        b.metrics,
 		Logger:         log,
 		Clock:          b.clock,
@@ -189,7 +179,6 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		IsShutdown:        shutdownFlag,
 		StateMgr:          stateMgr,
 		LogMgr:            logMgr,
-		NetworkMgr:        b.networkMgr,
 		LeaderInitializer: node.replicationMgr, // replicationMgr implements LeaderInitializer
 		Metrics:           b.metrics,
 		Logger:            log,
@@ -213,9 +202,6 @@ func (b *RaftBuilder) validate() error {
 	}
 	if b.applier == nil {
 		return errors.New("applier cannot be nil")
-	}
-	if b.networkMgr == nil {
-		return errors.New("network manager cannot be nil")
 	}
 	if b.logger == nil {
 		return errors.New("logger cannot be nil (will be defaulted if not set before Build)")
@@ -250,7 +236,6 @@ func (b *RaftBuilder) setDefaults() {
 func (b *RaftBuilder) createDependencies() Dependencies {
 	return Dependencies{
 		Storage: b.storage,
-		Network: b.networkMgr,
 		Applier: b.applier,
 		Logger:  b.logger,
 		Metrics: b.metrics,

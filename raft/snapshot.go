@@ -65,6 +65,9 @@ type SnapshotManager interface {
 	// It should be called once after initialization to wire the ReplicationManager into the SnapshotManager.
 	SetReplicationStateUpdater(updater ReplicationStateUpdater)
 
+	// SetNetworkManager allows late injection of the network manager after the Raft node is built.
+	SetNetworkManager(nm NetworkManager)
+
 	// Initialize loads the latest snapshot from persistent storage.
 	// If the snapshot is newer than the current applied state, it restores the
 	// state machine from the snapshot. It also truncates the log prefix up to the
@@ -132,8 +135,6 @@ func validateSnapshotManagerDeps(deps SnapshotManagerDeps) error {
 		return fmt.Errorf("SnapshotManagerDeps: Applier is required")
 	case deps.LogMgr == nil:
 		return fmt.Errorf("SnapshotManagerDeps: LogMgr is required")
-	case deps.NetworkMgr == nil:
-		return fmt.Errorf("SnapshotManagerDeps: NetworkMgr is required")
 	case deps.StateMgr == nil:
 		return fmt.Errorf("SnapshotManagerDeps: StateMgr is required")
 	case deps.PeerStateUpdater == nil:
@@ -216,6 +217,11 @@ func NewSnapshotManager(deps SnapshotManagerDeps) (SnapshotManager, error) {
 		"logCompactionMinEntries", sm.cfg.Options.LogCompactionMinEntries)
 
 	return sm, nil
+}
+
+// SetNetworkManager injects the network manager dependency into the snapshot manager.
+func (s *snapshotManager) SetNetworkManager(nm NetworkManager) {
+	s.networkMgr = nm
 }
 
 // SetReplicationStateUpdater sets the ReplicationStateUpdater used to update follower replication
