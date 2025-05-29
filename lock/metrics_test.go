@@ -8,7 +8,7 @@ import (
 )
 
 func TestLockMetrics_NoOpMetrics(t *testing.T) {
-	metrics := newNoOpMetrics()
+	metrics := NewNoOpMetrics()
 
 	lockID := types.LockID("test-lock-1")
 
