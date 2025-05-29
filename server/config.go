@@ -97,43 +97,43 @@ func DefaultRaftLockServerConfig() RaftLockServerConfig {
 // Validate checks if the server configuration is valid.
 func (c *RaftLockServerConfig) Validate() error {
 	if c.NodeID == "" {
-		return NewConfigError("NodeID cannot be empty")
+		return NewRaftLockServerConfigError("NodeID cannot be empty")
 	}
 	if c.ListenAddress == "" {
-		return NewConfigError("ListenAddress cannot be empty")
+		return NewRaftLockServerConfigError("ListenAddress cannot be empty")
 	}
 	if c.DataDir == "" {
-		return NewConfigError("DataDir cannot be empty")
+		return NewRaftLockServerConfigError("DataDir cannot be empty")
 	}
 	if c.Peers == nil {
-		return NewConfigError("Peers map cannot be nil")
+		return NewRaftLockServerConfigError("Peers map cannot be nil")
 	}
 	if _, ok := c.Peers[c.NodeID]; !ok {
-		return NewConfigError(fmt.Sprintf("Peers must include an entry for NodeID %q", c.NodeID))
+		return NewRaftLockServerConfigError(fmt.Sprintf("Peers must include an entry for NodeID %q", c.NodeID))
 	}
 	if c.RaftConfig.ID != "" && c.RaftConfig.ID != c.NodeID {
-		return NewConfigError(fmt.Sprintf("RaftConfig.ID (%s) must match NodeID (%s)", c.RaftConfig.ID, c.NodeID))
+		return NewRaftLockServerConfigError(fmt.Sprintf("RaftConfig.ID (%s) must match NodeID (%s)", c.RaftConfig.ID, c.NodeID))
 	}
 
 	for peerID, cfg := range c.Peers {
 		if peerID == "" {
-			return NewConfigError("Peer ID cannot be empty")
+			return NewRaftLockServerConfigError("Peer ID cannot be empty")
 		}
 		if cfg.Address == "" {
-			return NewConfigError(fmt.Sprintf("Peer %q must have a non-empty address", peerID))
+			return NewRaftLockServerConfigError(fmt.Sprintf("Peer %q must have a non-empty address", peerID))
 		}
 	}
 
 	checkPositiveDuration := func(val time.Duration, name string) error {
 		if val <= 0 {
-			return NewConfigError(fmt.Sprintf("%s must be positive", name))
+			return NewRaftLockServerConfigError(fmt.Sprintf("%s must be positive", name))
 		}
 		return nil
 	}
 
 	checkPositiveInt := func(val int, name string) error {
 		if val <= 0 {
-			return NewConfigError(fmt.Sprintf("%s must be positive", name))
+			return NewRaftLockServerConfigError(fmt.Sprintf("%s must be positive", name))
 		}
 		return nil
 	}
@@ -181,17 +181,17 @@ func (c *RaftLockServerConfig) Validate() error {
 	return nil
 }
 
-// ConfigError represents a validation error in ServerConfig.
-type ConfigError struct {
+// RaftLockServerConfigError represents a validation error in ServerConfig.
+type RaftLockServerConfigError struct {
 	Message string
 }
 
-// NewConfigError returns a new ConfigError instance.
-func NewConfigError(msg string) *ConfigError {
-	return &ConfigError{Message: msg}
+// NewRaftLockServerConfigError returns a new ConfigError instance.
+func NewRaftLockServerConfigError(msg string) *RaftLockServerConfigError {
+	return &RaftLockServerConfigError{Message: msg}
 }
 
 // Error implements the error interface.
-func (e *ConfigError) Error() string {
+func (e *RaftLockServerConfigError) Error() string {
 	return "server config error: " + e.Message
 }
