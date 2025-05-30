@@ -45,7 +45,7 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 	t.Run("Success with default options", func(t *testing.T) {
 		tempDir := t.TempDir()
 
-		fs, err := newFileStorageWithOptions(StorageConfig{Dir: tempDir}, DefaultFileStorageOptions(), logger.NewNoOpLogger())
+		fs, err := NewFileStorageWithOptions(StorageConfig{Dir: tempDir}, DefaultFileStorageOptions(), logger.NewNoOpLogger())
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertNotNil(t, fs)
@@ -64,7 +64,7 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 	})
 
 	t.Run("Failure with empty directory", func(t *testing.T) {
-		fs, err := newFileStorageWithOptions(StorageConfig{Dir: ""}, DefaultFileStorageOptions(), logger.NewNoOpLogger())
+		fs, err := NewFileStorageWithOptions(StorageConfig{Dir: ""}, DefaultFileStorageOptions(), logger.NewNoOpLogger())
 
 		testutil.AssertError(t, err)
 		testutil.AssertTrue(t, fs == nil)
@@ -79,7 +79,7 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 		customOpts.Features.EnableBinaryFormat = false
 		customOpts.Features.EnableMetrics = false
 
-		fs, err := newFileStorageWithOptions(StorageConfig{Dir: tempDir}, customOpts, logger.NewNoOpLogger())
+		fs, err := NewFileStorageWithOptions(StorageConfig{Dir: tempDir}, customOpts, logger.NewNoOpLogger())
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertNotNil(t, fs)
