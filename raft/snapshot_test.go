@@ -133,14 +133,6 @@ func TestRaftSnapshot_NewSnapshotManager(t *testing.T) {
 			expectedError: true,
 		},
 		{
-			name: "nil network manager",
-			modifyDeps: func(d SnapshotManagerDeps) SnapshotManagerDeps {
-				d.NetworkMgr = nil
-				return d
-			},
-			expectedError: true,
-		},
-		{
 			name: "nil state manager",
 			modifyDeps: func(d SnapshotManagerDeps) SnapshotManagerDeps {
 				d.StateMgr = nil

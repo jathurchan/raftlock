@@ -15,7 +15,7 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 			t.Errorf("explicitlySet should initially be false")
 		}
 
-		flags.WithExplicitFlags()
+		flags = flags.WithExplicitFlags()
 
 		if !flags.explicitlySet {
 			t.Errorf("explicitlySet should be true after calling WithExplicitFlags")
@@ -23,7 +23,7 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 	})
 
 	t.Run("supports method chaining", func(t *testing.T) {
-		flags := &FeatureFlags{
+		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
 			PreVoteEnabled:    true,
@@ -31,24 +31,20 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 
 		returnedFlags := flags.WithExplicitFlags()
 
-		if returnedFlags != flags {
-			t.Errorf("WithExplicitFlags should return the same pointer for method chaining")
-		}
-
 		if !returnedFlags.explicitlySet {
 			t.Errorf("explicitlySet should be true in the returned flags")
 		}
 	})
 
 	t.Run("preserves other fields", func(t *testing.T) {
-		flags := &FeatureFlags{
+		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
 			PreVoteEnabled:    true,
 			explicitlySet:     false,
 		}
 
-		flags.WithExplicitFlags()
+		flags = flags.WithExplicitFlags()
 
 		if !flags.EnableReadIndex {
 			t.Errorf("EnableReadIndex should remain true")

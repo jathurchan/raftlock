@@ -12,9 +12,6 @@ type Dependencies struct {
 	// Storage persists Raft log entries, state, and snapshots.
 	Storage storage.Storage
 
-	// Network handles RPC communication between Raft peers.
-	Network NetworkManager
-
 	// Applier applies committed entries to the user state machine and handles snapshots.
 	Applier Applier
 
@@ -39,9 +36,6 @@ func (d *Dependencies) Validate() error {
 	}
 	if d.Storage == nil {
 		return fmt.Errorf("%w: Storage dependency cannot be nil", ErrMissingDependencies)
-	}
-	if d.Network == nil {
-		return fmt.Errorf("%w: Network dependency cannot be nil", ErrMissingDependencies)
 	}
 	if d.Applier == nil {
 		return fmt.Errorf("%w: Applier dependency cannot be nil", ErrMissingDependencies)

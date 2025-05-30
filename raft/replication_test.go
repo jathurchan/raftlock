@@ -174,11 +174,6 @@ func TestRaftReplication_ValidateReplicationManagerDeps(t *testing.T) {
 			return d
 		}, true, "ID"},
 
-		{"missing NetworkMgr", func(d ReplicationManagerDeps) ReplicationManagerDeps {
-			d.NetworkMgr = nil
-			return d
-		}, true, "NetworkMgr"},
-
 		{"missing StateMgr", func(d ReplicationManagerDeps) ReplicationManagerDeps {
 			d.StateMgr = nil
 			return d

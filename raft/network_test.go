@@ -196,7 +196,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 		id               types.NodeID
 		addr             string
 		peers            map[types.NodeID]PeerConfig
-		rpcHandler       rpcHandler
+		rpcHandler       RPCHandler
 		isShutdown       *atomic.Bool
 		logger           logger.Logger
 		metrics          Metrics
@@ -530,7 +530,7 @@ func mockNMForHandler(t *testing.T) *gRPCNetworkManager {
 	}
 }
 
-func setupPeerServer(t *testing.T, addr string, actualRPCHandler rpcHandler) (actualAddr string, cleanupFunc func()) {
+func setupPeerServer(t *testing.T, addr string, actualRPCHandler RPCHandler) (actualAddr string, cleanupFunc func()) {
 	t.Helper()
 	l, err := net.Listen("tcp", addr)
 	if err != nil {

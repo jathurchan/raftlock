@@ -96,7 +96,7 @@ func NewLockCache(config LockCacheConfig) LockCache {
 		config.Logger = logger.NewNoOpLogger()
 	}
 	if config.Metrics == nil {
-		config.Metrics = newNoOpMetrics()
+		config.Metrics = NewNoOpMetrics()
 	}
 
 	return &lockCache{

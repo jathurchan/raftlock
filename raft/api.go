@@ -14,7 +14,11 @@ import (
 // The Raft implementation expects the application to drive logical time progression
 // by calling Tick() periodically at a configured interval ("tick interval").
 type Raft interface {
-	rpcHandler
+	RPCHandler
+
+	// SetNetworkManager allows late injection of the network manager after the Raft node is built.
+	// Must be called before Start().
+	SetNetworkManager(nm NetworkManager)
 
 	// Start initializes the Raft node and launches background tasks such as elections, replication, and applying entries.
 	// Must complete successfully before other methods are called.
@@ -89,9 +93,9 @@ type Raft interface {
 	LeaderChangeChannel() <-chan types.NodeID
 }
 
-// rpcHandler defines how a Raft node processes incoming RPCs from peers.
+// RPCHandler defines how a Raft node processes incoming RPCs from peers.
 // It controls the node’s behavior when interacting with candidates and leaders.
-type rpcHandler interface {
+type RPCHandler interface {
 	// RequestVote handles a RequestVote RPC from a candidate.
 	// It checks whether the candidate’s term is at least as recent as the receiver’s term
 	// and whether the candidate’s log is sufficiently up-to-date to grant a vote.

@@ -62,7 +62,7 @@ type gRPCNetworkManager struct {
 
 	id         types.NodeID // ID of the local node
 	localAddr  string       // Address the local gRPC server listens on
-	rpcHandler rpcHandler   // Handler for incoming Raft RPCs
+	rpcHandler RPCHandler   // Handler for incoming Raft RPCs
 
 	logger  logger.Logger
 	metrics Metrics
@@ -127,7 +127,7 @@ func NewGRPCNetworkManager(
 	id types.NodeID,
 	addr string,
 	peers map[types.NodeID]PeerConfig,
-	rpcHandler rpcHandler,
+	rpcHandler RPCHandler,
 	isShutdown *atomic.Bool,
 	logger logger.Logger,
 	metrics Metrics,
@@ -753,7 +753,7 @@ func formatGRPCError(err error) error {
 type grpcServerHandler struct {
 	proto.UnimplementedRaftServer
 	nm         *gRPCNetworkManager
-	rpcHandler rpcHandler
+	rpcHandler RPCHandler
 	logger     logger.Logger
 }
 

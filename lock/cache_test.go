@@ -18,7 +18,7 @@ func createTestCache(size int, ttl time.Duration, clock *mockClock) LockCache {
 		DefaultTTL: ttl,
 		Clock:      clock,
 		Logger:     logger.NewNoOpLogger(),
-		Metrics:    newNoOpMetrics(),
+		Metrics:    NewNoOpMetrics(),
 	}
 	return NewLockCache(config)
 }

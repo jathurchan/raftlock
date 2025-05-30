@@ -97,7 +97,7 @@ type TuningParams struct {
 }
 
 // WithExplicitFlags marks feature flags as explicitly set by the user
-func (f *FeatureFlags) WithExplicitFlags() *FeatureFlags {
+func (f FeatureFlags) WithExplicitFlags() FeatureFlags {
 	f.explicitlySet = true
 	return f
 }

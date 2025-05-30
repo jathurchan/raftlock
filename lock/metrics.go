@@ -110,7 +110,7 @@ type Metrics interface {
 
 type NoOpMetrics struct{}
 
-func newNoOpMetrics() Metrics {
+func NewNoOpMetrics() Metrics {
 	return &NoOpMetrics{}
 }
 

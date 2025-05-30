@@ -23,10 +23,6 @@ func TestRaftBuilder_NewRaftBuilder(t *testing.T) {
 		t.Error("Expected nil applier")
 	}
 
-	if builder.networkMgr != nil {
-		t.Error("Expected nil networkMgr")
-	}
-
 	if builder.logger != nil {
 		t.Error("Expected nil logger")
 	}
@@ -90,21 +86,6 @@ func TestRaftBuilder_RaftBuilder_WithApplier(t *testing.T) {
 
 	if builder.applier != applier {
 		t.Error("Applier not properly set")
-	}
-}
-
-func TestRaftBuilder_RaftBuilder_WithNetworkManager(t *testing.T) {
-	builder := NewRaftBuilder()
-	networkMgr := &mockNetworkManager{}
-
-	result := builder.WithNetworkManager(networkMgr)
-
-	if result != builder {
-		t.Error("WithNetworkManager should return the builder for chaining")
-	}
-
-	if builder.networkMgr != networkMgr {
-		t.Error("NetworkManager not properly set")
 	}
 }
 
@@ -203,12 +184,6 @@ func TestRaftBuilder_RaftBuilder_Validate(t *testing.T) {
 		t.Error("Expected error with config and applier set")
 	}
 
-	builder.WithNetworkManager(&mockNetworkManager{})
-	err = builder.validate()
-	if err == nil {
-		t.Error("Expected error with config, applier, and network manager set")
-	}
-
 	builder.WithLogger(logger.NewNoOpLogger())
 	err = builder.validate()
 	if err == nil {
@@ -227,7 +202,6 @@ func TestRaftBuilder_RaftBuilder_SetDefaults(t *testing.T) {
 
 	builder.WithConfig(Config{ID: "node1"})
 	builder.WithApplier(&mockApplier{})
-	builder.WithNetworkManager(&mockNetworkManager{})
 	builder.WithStorage(&mockStorage{})
 
 	builder.setDefaults()
@@ -256,7 +230,6 @@ func TestRaftBuilder_RaftBuilder_SetDefaults(t *testing.T) {
 	builder = NewRaftBuilder()
 	builder.WithConfig(Config{ID: "node1"})
 	builder.WithApplier(&mockApplier{})
-	builder.WithNetworkManager(&mockNetworkManager{})
 	builder.WithLogger(customLogger)
 	builder.WithMetrics(customMetrics)
 	builder.WithClock(customClock)
@@ -286,7 +259,6 @@ func TestRaftBuilder_RaftBuilder_CreateDependencies(t *testing.T) {
 	builder := NewRaftBuilder()
 
 	storage := &mockStorage{}
-	networkMgr := &mockNetworkManager{}
 	applier := &mockApplier{}
 	logger := logger.NewNoOpLogger()
 	metrics := NewNoOpMetrics()
@@ -294,7 +266,6 @@ func TestRaftBuilder_RaftBuilder_CreateDependencies(t *testing.T) {
 	rand := NewStandardRand()
 
 	builder.WithStorage(storage)
-	builder.WithNetworkManager(networkMgr)
 	builder.WithApplier(applier)
 	builder.WithLogger(logger)
 	builder.WithMetrics(metrics)
@@ -305,10 +276,6 @@ func TestRaftBuilder_RaftBuilder_CreateDependencies(t *testing.T) {
 
 	if deps.Storage != storage {
 		t.Error("Storage not correctly set in dependencies")
-	}
-
-	if deps.Network != networkMgr {
-		t.Error("Network not correctly set in dependencies")
 	}
 
 	if deps.Applier != applier {
@@ -373,7 +340,6 @@ func TestRaftNodeBuilder_BuildSucceedsWithAllComponents(t *testing.T) {
 		},
 	})
 	builder.WithApplier(&mockApplier{})
-	builder.WithNetworkManager(&mockNetworkManager{})
 	builder.WithLogger(logger.NewNoOpLogger())
 	builder.WithMetrics(NewNoOpMetrics())
 	builder.WithClock(NewStandardClock())
@@ -405,7 +371,6 @@ func TestRaftNodeBuilder_BuildWithTimeoutDefaults(t *testing.T) {
 		},
 	})
 	builder.WithApplier(&mockApplier{})
-	builder.WithNetworkManager(&mockNetworkManager{})
 	builder.WithLogger(logger.NewNoOpLogger())
 	builder.WithStorage(&mockStorage{})
 

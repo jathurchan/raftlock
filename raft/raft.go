@@ -33,11 +33,13 @@ type raftNode struct {
 	snapshotMgr    SnapshotManager
 	replicationMgr ReplicationManager
 
-	networkMgr NetworkManager // For peer-to-peer RPC communication
-	applier    Applier        // For applying committed entries to state machine
-	logger     logger.Logger
-	metrics    Metrics
-	clock      Clock
+	networkMgrSet atomic.Bool
+	networkMgr    NetworkManager // For peer-to-peer RPC communication
+
+	applier Applier // For applying committed entries to state machine
+	logger  logger.Logger
+	metrics Metrics
+	clock   Clock
 
 	stopCh          chan struct{}       // Signals global shutdown
 	applyCh         chan types.ApplyMsg // Delivers committed entries/snapshots
@@ -50,8 +52,31 @@ type raftNode struct {
 	fetchEntriesTimeout time.Duration
 }
 
+// SetNetworkManager injects the network manager dependency into the replication manager.
+// Must be called before Start().
+func (r *raftNode) SetNetworkManager(nm NetworkManager) {
+	if !r.networkMgrSet.CompareAndSwap(false, true) {
+		r.logger.Warnw("SetNetworkManager called more than once; ignoring")
+		return
+	}
+
+	if r.snapshotMgr != nil {
+		r.snapshotMgr.SetNetworkManager(nm)
+	}
+	if r.replicationMgr != nil {
+		r.replicationMgr.SetNetworkManager(nm)
+	}
+	if r.electionMgr != nil {
+		r.electionMgr.SetNetworkManager(nm)
+	}
+}
+
 // Start initializes the Raft node and launches background tasks.
 func (r *raftNode) Start() error {
+	if r.networkMgr == nil {
+		return fmt.Errorf("network manager must be set before starting raft node")
+	}
+
 	if r.isShutdown.Load() {
 		r.logger.Warnw("Start called on shutting down node")
 		return ErrShuttingDown

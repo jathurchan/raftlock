@@ -29,7 +29,7 @@ func createTestLockManager(t *testing.T) (*lockManager, *mockClock) {
 		Serializer:          &jsonSerializer{},
 		Clock:               clock,
 		Logger:              logger.NewNoOpLogger(),
-		Metrics:             newNoOpMetrics(),
+		Metrics:             NewNoOpMetrics(),
 	}
 
 	expHeap := make(expirationHeap, 0)
