@@ -26,6 +26,122 @@ The **`storage`** package is RaftLock's durable *persistence layer*. It provides
 
 All operations use ***atomic file operations*** and ***fine‑grained locking*** to guarantee consistency, even under crashes or high concurrency. The package serves as the bridge between Raft's in-memory state and durable storage, ensuring critical consensus data survives node restarts and failures.
 
+```mermaid
+graph TB
+    subgraph "Architecture Overview"
+        subgraph "Raft Layer"
+            RL[Raft Leader]
+            RF[Raft Follower]
+            RSM[Raft State Machine]
+        end
+        
+        subgraph "Storage Package"
+            direction TB
+            FS[FileStorage Facade]
+            
+            subgraph "Core Services"
+                LA[LogAppender]
+                LR[LogReader]
+                LRW[LogRewriter]
+                SW[SnapshotWriter]
+                SR[SnapshotReader]
+                MS[MetadataService]
+                RS[RecoveryService]
+                IS[IndexService]
+            end
+            
+            subgraph "Concurrency & Safety"
+                SM[StateMutex]
+                LM[LogMutex]
+                SNM[SnapshotMutex]
+                OL[OperationLocker]
+            end
+            
+            subgraph "Serialization"
+                BS[BinarySerializer]
+                JS[JSONSerializer]
+            end
+        end
+        
+        subgraph "Filesystem Layer"
+            direction LR
+            STATE_FILE[state.json]
+            LOG_FILE[log.dat]
+            META_FILE[metadata.json]
+            SNAP_META_FILE[snapshot_meta.json]
+            SNAP_DATA_FILE[snapshot.dat]
+            MARKER_FILES[Recovery Markers]
+        end
+    end
+    
+    %% Connections from Raft to Storage
+    RL -->|SaveState, AppendEntries| FS
+    RF -->|LoadState, GetEntries| FS
+    RSM -->|SaveSnapshot, LoadSnapshot| FS
+    
+    %% Internal Storage connections: Facade to Core Services
+    FS --> LA
+    FS --> LR
+    FS --> LRW
+    FS --> SW
+    FS --> SR
+    FS --> MS
+    FS --> RS
+    FS --> IS
+    
+    %% Concurrency controls: Facade uses Mutexes; Services may use OperationLocker
+    FS -.-> SM
+    FS -.-> LM
+    FS -.-> SNM
+    LA -.-> OL
+    LR -.-> OL
+    LRW -.-> OL
+    SW -.-> OL
+    SR -.-> OL
+    MS -.-> OL
+    
+    %% Serialization: Core services use Serializers
+    LA --> BS
+    LA --> JS
+    LR --> BS
+    LR --> JS
+    SW --> BS
+    SW --> JS
+    SR --> BS
+    SR --> JS
+    MS --> JS
+    
+    %% File operations: Core services interact with Filesystem Layer
+    LA -->|Writes to| LOG_FILE
+    LR -->|Reads from| LOG_FILE
+    LRW -->|Reads/Writes| LOG_FILE
+    MS -->|Reads/Writes| META_FILE
+    FS -->|Manages access to| STATE_FILE 
+    SW -->|Writes to| SNAP_META_FILE
+    SW -->|Writes to| SNAP_DATA_FILE
+    SR -->|Reads from| SNAP_META_FILE
+    SR -->|Reads from| SNAP_DATA_FILE
+    RS -->|Manages| MARKER_FILES
+    RS -->|Interacts with| LOG_FILE
+    RS -->|Interacts with| META_FILE
+    RS -->|Interacts with| SNAP_META_FILE
+        
+    %% Styling
+    classDef raftLayer fill:#e1f5fe,stroke:#5aa,stroke-width:2px;
+    classDef storagePackage fill:#fffde7,stroke:#fbc02d,stroke-width:2px;
+    classDef storageCore fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
+    classDef concurrency fill:#fff3e0,stroke:#f57c00,stroke-width:1px;
+    classDef serialization fill:#fce4ec,stroke:#d81b60,stroke-width:1px;
+    classDef filesystem fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    
+    class RL,RF,RSM raftLayer;
+    class FS storagePackage;
+    class LA,LR,LRW,SW,SR,MS,RS,IS storageCore;
+    class SM,LM,SNM,OL concurrency;
+    class STATE_FILE,LOG_FILE,META_FILE,SNAP_META_FILE,SNAP_DATA_FILE,MARKER_FILES filesystem;
+    class BS,JS serialization;
+```
+
 ## 2. Key Features
 
 The `storage` package is designed for **resilient persistence**, **high concurrency**, and **operational insight**, making it ideal for consensus-based systems like Raft.
