@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // LockID is a unique identifier for a lock resource.
 type LockID string
@@ -19,6 +22,10 @@ type Term uint64
 // Index represents a position in the Raft log.
 // Log indices start at 1 and increase with each appended entry.
 type Index uint64
+
+// ProposalID uniquely identifies a Raft proposal within the system.
+// It must be unique across all active proposals to ensure correct tracking and resolution.
+type ProposalID string
 
 // LockOperation defines the type of action that can be performed on a lock.
 type LockOperation string
@@ -239,4 +246,41 @@ type PeerConnectionStatus struct {
 	LastError   error     // Last significant error; nil if none.
 	LastActive  time.Time // Last successful communication timestamp.
 	PendingRPCs int       // Number of in-flight RPCs.
+}
+
+// PendingProposal represents a Raft proposal awaiting completion.
+type PendingProposal struct {
+	ID        ProposalID          // Unique identifier for the proposal (e.g., "{term}-{index}")
+	Index     Index               // Raft log index of the proposal
+	Term      Term                // Raft log term of the proposal
+	Operation LockOperation       // Type of lock operation being proposed
+	StartTime time.Time           // When the proposal was initiated by the client request
+	ResultCh  chan ProposalResult // Buffered channel to send the result back to the requester
+	Context   context.Context     // Client's context for cancellation and timeout tracking
+	Command   []byte              // The marshalled command data submitted to Raft
+
+	ClientID ClientID // Client that initiated the proposal
+	LockID   LockID   // Lock being operated on
+}
+
+// ProposalResult contains the outcome of a Raft proposal after it has been
+// processed (or has failed/timed out).
+type ProposalResult struct {
+	Success   bool          // True if the operation was successfully applied by the state machine
+	Error     error         // Error if the operation failed, was cancelled, or invalidated
+	Data      any           // Operation-specific result data (e.g., *types.LockInfo for acquire)
+	AppliedAt time.Time     // Timestamp when the proposal was actually applied or finalized
+	Duration  time.Duration // Total duration from submission to completion/failure
+}
+
+// ProposalStats provides aggregated statistics about proposal handling.
+type ProposalStats struct {
+	TotalProposals      int64
+	PendingProposals    int64
+	SuccessfulProposals int64
+	FailedProposals     int64
+	CancelledProposals  int64
+	ExpiredProposals    int64
+	AverageLatency      time.Duration
+	MaxLatency          time.Duration
 }

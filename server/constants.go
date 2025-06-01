@@ -157,6 +157,14 @@ const (
 	ErrMsgMetadataKeyTooLong = "metadata key length cannot exceed %d characters"
 	// ErrMsgMetadataValueTooLong is the error message for metadata values that are too long.
 	ErrMsgMetadataValueTooLong = "metadata value length cannot exceed %d characters"
+
+	// --- Proposal tracker defaults ---
+
+	// DefaultProposalMaxPendingAge is the default max duration a proposal can remain pending before expiration.
+	DefaultProposalMaxPendingAge = 5 * time.Minute
+
+	// DefaultProposalCleanupInterval is the default interval for proposal tracker cleanup tasks.
+	DefaultProposalCleanupInterval = 30 * time.Second
 )
 
 // ServerOperationalState defines the possible operational states of the server.
