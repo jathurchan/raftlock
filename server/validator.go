@@ -79,7 +79,7 @@ func (v *requestValidator) ValidateAcquireRequest(req *pb.AcquireRequest) error 
 	if err := v.validateMetadata(req.Metadata); err != nil {
 		return err
 	}
-	if err := v.validateRequestID(req.RequestId); err != nil { // Assuming RequestId is a string
+	if err := v.validateRequestID(req.RequestId); err != nil {
 		return err
 	}
 	return nil
