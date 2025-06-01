@@ -99,11 +99,11 @@ type FileStorage struct {
 
 // NewFileStorage creates a new FileStorage with default options.
 func NewFileStorage(cfg StorageConfig, logger logger.Logger) (Storage, error) {
-	return newFileStorageWithOptions(cfg, DefaultFileStorageOptions(), logger)
+	return NewFileStorageWithOptions(cfg, DefaultFileStorageOptions(), logger)
 }
 
-// newFileStorageWithOptions creates a new FileStorage with custom options.
-func newFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, logger logger.Logger) (Storage, error) {
+// NewFileStorageWithOptions creates a new FileStorage with custom options.
+func NewFileStorageWithOptions(cfg StorageConfig, options FileStorageOptions, logger logger.Logger) (Storage, error) {
 	deps, err := DefaultFileStorageDeps(cfg, options, logger)
 	if err != nil {
 		return nil, err
