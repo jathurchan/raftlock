@@ -162,24 +162,10 @@ func WithCleanupInterval(interval time.Duration) ProposalTrackerOption {
 	}
 }
 
-// WithLogger sets a custom logger for the proposal tracker.
-func WithLogger(l logger.Logger) ProposalTrackerOption {
-	return func(pt *proposalTracker) {
-		pt.logger = l
-	}
-}
-
 // WithClock injects a custom clock implementation used for time-based operations such as expiration.
 func WithClock(clock raft.Clock) ProposalTrackerOption {
 	return func(pt *proposalTracker) {
 		pt.clock = clock
-	}
-}
-
-// WithTickerFactory injects a factory function to create custom tickers.
-func WithTickerFactory(factory func(d time.Duration) raft.Ticker) ProposalTrackerOption {
-	return func(pt *proposalTracker) {
-		pt.tickerFactory = factory
 	}
 }
 
