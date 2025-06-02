@@ -77,6 +77,9 @@ const (
 	// If a client doesn't respond within this time after a ping, the connection may be considered dead.
 	DefaultGRPCKeepaliveTimeout = 5 * time.Second
 
+	// DefaultGRPCMinClientPingInterval is the minimum interval a client should wait before sending pings.
+	DefaultGRPCMinClientPingInterval = 10 * time.Second
+
 	// --- Validation limits for client-provided data ---
 
 	// MaxLockIDLength is the maximum allowed length for lock IDs.
@@ -107,6 +110,26 @@ const (
 
 	// MaxWaitTimeout is the maximum allowed wait timeout for queue operations.
 	MaxWaitTimeout = 10 * time.Minute
+
+	// --- Backoff advice defaults ---
+
+	// MinBackoffAdvice is the minimum backoff duration advised before retrying a lock acquisition.
+	MinBackoffAdvice = 1 * time.Second
+
+	// MaxBackoffAdvice is the maximum backoff duration advised before retrying a lock acquisition.
+	MaxBackoffAdvice = 30 * time.Second
+
+	// DefaultBackoffInitial is the initial backoff delay when retrying a lock.
+	DefaultBackoffInitial = 50 * time.Millisecond
+
+	// DefaultBackoffMax is the maximum backoff for retrying a lock when no info is available.
+	DefaultBackoffMax = 1 * time.Second
+
+	// DefaultBackoffMultiplier controls exponential growth of retry delays.
+	DefaultBackoffMultiplier = 1.5
+
+	// DefaultBackoffJitterFactor controls randomization to avoid thundering herd.
+	DefaultBackoffJitterFactor = 0.2
 
 	// --- Priority bounds for lock wait queues ---
 

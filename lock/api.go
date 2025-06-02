@@ -82,4 +82,10 @@ type LockManager interface {
 
 	// Close shuts down background routines and cleans up resources.
 	Close() error
+
+	// GetActiveLockCount returns the number of currently held locks.
+	GetActiveLockCount(ctx context.Context) (int, error)
+
+	// GetTotalWaiterCount returns the total number of clients waiting across all locks.
+	GetTotalWaiterCount(ctx context.Context) (int, error)
 }

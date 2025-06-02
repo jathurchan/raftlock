@@ -632,13 +632,14 @@ func (pt *proposalTracker) sendResult(entry *proposalEntry, result types.Proposa
 	}()
 
 	select {
-	case entry.ResultCh <- result:
+	case entry.ResultCh <- result: // Attempts to send the result
 		pt.logger.Debugw("Successfully sent proposal result",
 			"id", entry.ID, "op", entry.Operation, "success", result.Success)
-	case <-entry.Context.Done():
+	case <-entry.Context.Done(): // Handles client context cancellation
 		pt.logger.Infow("Client context done while attempting to send result",
 			"id", entry.ID, "op", entry.Operation, "contextError", entry.Context.Err())
-	default:
+	default: // This case is hit if ResultCh is unbuffered and receiver isn't ready,
+		// or if ResultCh is buffered but full.
 		pt.logger.Warnw("Could not send result to proposal channel (full or no listener)",
 			"id", entry.ID, "op", entry.Operation)
 	}

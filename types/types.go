@@ -3,6 +3,8 @@ package types
 import (
 	"context"
 	"time"
+
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // LockID is a unique identifier for a lock resource.
@@ -61,13 +63,17 @@ const (
 // Command represents a client operation submitted to the lock manager.
 // These commands are serialized and applied to the state machine via Raft.
 type Command struct {
-	Op       LockOperation `json:"op"`                 // Type of operation: acquire, release, renew, etc.
-	LockID   LockID        `json:"lock_id"`            // Unique identifier for the target lock.
-	ClientID ClientID      `json:"client_id"`          // ID of the client issuing the command.
-	TTL      int64         `json:"ttl,omitempty"`      // Time-to-live for the lock in milliseconds (used with acquire/renew).
-	Version  Index         `json:"version,omitempty"`  // Raft index used for token fencing.
-	Priority int           `json:"priority,omitempty"` // Priority of the client when waiting for a lock.
-	Timeout  int64         `json:"timeout,omitempty"`  // Maximum time to wait for the lock in milliseconds.
+	Op          LockOperation     `json:"op"`                     // Type of operation: acquire, release, renew, etc.
+	LockID      LockID            `json:"lock_id"`                // Unique identifier for the target lock.
+	ClientID    ClientID          `json:"client_id"`              // ID of the client issuing the command.
+	TTL         int64             `json:"ttl,omitempty"`          // Time-to-live in ms (used for acquire/renew).
+	Version     Index             `json:"version,omitempty"`      // Raft index used for fencing.
+	Priority    int               `json:"priority,omitempty"`     // Priority when waiting for a lock.
+	Timeout     int64             `json:"timeout,omitempty"`      // Optional general timeout in ms
+	Wait        bool              `json:"wait,omitempty"`         // Whether to wait in queue if lock is held.
+	WaitTimeout int64             `json:"wait_timeout,omitempty"` // Max time to wait in queue (in ms).
+	RequestID   string            `json:"request_id,omitempty"`   // Optional request ID for idempotency.
+	Metadata    map[string]string `json:"metadata,omitempty"`     // Optional metadata for the lock request.
 }
 
 // WaiterInfo provides information about a client currently waiting for a lock.
@@ -283,4 +289,22 @@ type ProposalStats struct {
 	ExpiredProposals    int64
 	AverageLatency      time.Duration
 	MaxLatency          time.Duration
+}
+
+// BackoffAdvice provides guidance to clients on how to back off before retrying a lock request.
+type BackoffAdvice struct {
+	// InitialBackoff is the recommended starting backoff duration.
+	InitialBackoff *durationpb.Duration
+
+	// MaxBackoff is the maximum backoff duration the client should apply.
+	MaxBackoff *durationpb.Duration
+
+	// Multiplier determines how the backoff increases after each failed attempt.
+	Multiplier float64
+
+	// JitterFactor introduces randomness to reduce contention during retries.
+	JitterFactor float64
+
+	// EstimatedAvailabilityIn is the estimated time until the lock might become available.
+	EstimatedAvailabilityIn *durationpb.Duration
 }

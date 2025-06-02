@@ -1202,3 +1202,31 @@ func (lm *lockManager) updateTotalWaitersMetric() {
 	}
 	lm.metrics.SetTotalWaiters(totalWaiters)
 }
+
+// GetActiveLockCount returns the number of locks that are currently held by a client.
+func (lm *lockManager) GetActiveLockCount(ctx context.Context) (int, error) {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	count := 0
+	for _, lockState := range lm.locks {
+		if lockState.Owner != "" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// GetTotalWaiterCount returns the total number of clients currently waiting across all locks.
+func (lm *lockManager) GetTotalWaiterCount(ctx context.Context) (int, error) {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	totalWaiters := 0
+	for _, wq := range lm.waiters {
+		if wq != nil {
+			totalWaiters += wq.Len()
+		}
+	}
+	return totalWaiters, nil
+}

@@ -28,6 +28,9 @@ const (
 
 	// MaxWaitQueueTimeout is the maximum allowed timeout for waiting in a lock queue.
 	MaxWaitQueueTimeout = 10 * time.Minute
+
+	// MinWaitQueueTimeout is the minimum allowed timeout for waiting in a lock queue.
+	MinWaitQueueTimeout = 1 * time.Second
 )
 
 // Capacity
