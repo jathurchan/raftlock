@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jathurchan/raftlock/lock"
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/raft"
 	"github.com/jathurchan/raftlock/types"
@@ -139,6 +140,13 @@ func (b *RaftLockServerBuilder) WithMetrics(metrics ServerMetrics) *RaftLockServ
 	return b
 }
 
+// WithSerializer sets the lock.Serializer used for encoding/decoding lock commands.
+// If nil, the default JSON serializer is used.
+func (b *RaftLockServerBuilder) WithSerializer(serializer lock.Serializer) *RaftLockServerBuilder {
+	b.config.Serializer = serializer
+	return b
+}
+
 // WithLeaderRedirect enables or disables automatic leader redirection.
 func (b *RaftLockServerBuilder) WithLeaderRedirect(enabled bool) *RaftLockServerBuilder {
 	b.config.EnableLeaderRedirect = enabled
@@ -167,6 +175,12 @@ func (b *RaftLockServerBuilder) prepareConfig() {
 	}
 	if b.config.Metrics == nil {
 		b.config.Metrics = NewNoOpServerMetrics()
+	}
+	if b.config.Clock == nil {
+		b.config.Clock = raft.NewStandardClock()
+	}
+	if b.config.Serializer == nil {
+		b.config.Serializer = &lock.JSONSerializer{}
 	}
 
 	if !b.hasListenAddr && b.config.NodeID != "" && b.config.Peers != nil {

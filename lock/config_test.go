@@ -208,7 +208,7 @@ func TestLockConfig_BooleanOptions(t *testing.T) {
 }
 
 func TestWithDependencies(t *testing.T) {
-	serializer := &jsonSerializer{}
+	serializer := &JSONSerializer{}
 	clock := raft.NewStandardClock()
 	logger := logger.NewNoOpLogger()
 	metrics := &NoOpMetrics{}

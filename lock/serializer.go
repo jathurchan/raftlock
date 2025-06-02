@@ -6,8 +6,11 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-// serializer defines the interface for encoding and decoding data.
-type serializer interface {
+// Serializer defines the interface for encoding and decoding data.
+type Serializer interface {
+	// EncodeCommand marshals a types.Command into a byte slice.
+	EncodeCommand(cmd types.Command) ([]byte, error)
+
 	// DecodeCommand unmarshals a byte slice into a types.Command.
 	DecodeCommand(data []byte) (types.Command, error)
 
@@ -18,23 +21,28 @@ type serializer interface {
 	DecodeSnapshot(data []byte) (lockSnapshot, error)
 }
 
-// jsonSerializer implements the serializer interface using JSON encoding.
-type jsonSerializer struct{}
+// JSONSerializer implements the serializer interface using JSON encoding.
+type JSONSerializer struct{}
+
+// EncodeCommand marshals a Raft command.
+func (s *JSONSerializer) EncodeCommand(cmd types.Command) ([]byte, error) {
+	return json.Marshal(cmd)
+}
 
 // DecodeCommand unmarshals a Raft command.
-func (s *jsonSerializer) DecodeCommand(cmdData []byte) (types.Command, error) {
+func (s *JSONSerializer) DecodeCommand(cmdData []byte) (types.Command, error) {
 	var cmd types.Command
 	err := json.Unmarshal(cmdData, &cmd)
 	return cmd, err
 }
 
 // EncodeSnapshot marshals a snapshot of the lock manager state.
-func (s *jsonSerializer) EncodeSnapshot(snapshot lockSnapshot) ([]byte, error) {
+func (s *JSONSerializer) EncodeSnapshot(snapshot lockSnapshot) ([]byte, error) {
 	return json.Marshal(snapshot)
 }
 
 // DecodeSnapshot deserializes a byte slice into a lockSnapshot.
-func (s *jsonSerializer) DecodeSnapshot(data []byte) (lockSnapshot, error) {
+func (s *JSONSerializer) DecodeSnapshot(data []byte) (lockSnapshot, error) {
 	var snapshot lockSnapshot
 	err := json.Unmarshal(data, &snapshot)
 	return snapshot, err

@@ -32,7 +32,7 @@ type LockManagerConfig struct {
 	// instead of simple FIFO ordering.
 	EnablePriorityQueue bool
 
-	Serializer serializer
+	Serializer Serializer
 	Clock      raft.Clock
 	Logger     logger.Logger
 	Metrics    Metrics
@@ -114,7 +114,7 @@ func WithPriorityQueue(enable bool) LockManagerOption {
 }
 
 // WithSerializer sets the serializer for decoding lock commands.
-func WithSerializer(serializer serializer) LockManagerOption {
+func WithSerializer(serializer Serializer) LockManagerOption {
 	return func(cfg *LockManagerConfig) {
 		if serializer != nil {
 			cfg.Serializer = serializer

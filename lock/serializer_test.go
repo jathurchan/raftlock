@@ -45,7 +45,7 @@ func TestLockSerializer_Json_DecodeCommand(t *testing.T) {
 		},
 	}
 
-	s := &jsonSerializer{}
+	s := &JSONSerializer{}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestLockSerializer_Json_EncodeSnapshot(t *testing.T) {
 		Version: 1,
 	}
 
-	s := &jsonSerializer{}
+	s := &JSONSerializer{}
 
 	data, err := s.EncodeSnapshot(snapshot)
 	testutil.AssertNoError(t, err, "Failed to encode snapshot")
@@ -137,7 +137,7 @@ func TestJsonSerializer_DecodeSnapshot(t *testing.T) {
 		},
 	}
 
-	s := &jsonSerializer{}
+	s := &JSONSerializer{}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

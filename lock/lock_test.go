@@ -26,7 +26,7 @@ func createTestLockManager(t *testing.T) (*lockManager, *mockClock) {
 		CacheTTL:            5 * time.Second,
 		MaxLocks:            10000,
 		CacheSize:           5000,
-		Serializer:          &jsonSerializer{},
+		Serializer:          &JSONSerializer{},
 		Clock:               clock,
 		Logger:              logger.NewNoOpLogger(),
 		Metrics:             NewNoOpMetrics(),

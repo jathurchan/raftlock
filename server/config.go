@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jathurchan/raftlock/lock"
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/raft"
 	"github.com/jathurchan/raftlock/types"
@@ -37,8 +38,10 @@ type RaftLockServerConfig struct {
 	RateLimitBurst  int           // Burst capacity for client requests
 	RateLimitWindow time.Duration // Time window used for rate calculation
 
-	Logger  logger.Logger
-	Metrics ServerMetrics
+	Logger     logger.Logger
+	Metrics    ServerMetrics
+	Clock      raft.Clock
+	Serializer lock.Serializer
 
 	HealthCheckInterval time.Duration // Frequency of internal health checks
 	HealthCheckTimeout  time.Duration // Timeout for individual health checks
@@ -87,6 +90,8 @@ func DefaultRaftLockServerConfig() RaftLockServerConfig {
 		RateLimitWindow:      DefaultRateLimitWindow,
 		Logger:               logger.NewNoOpLogger(),
 		Metrics:              NewNoOpServerMetrics(),
+		Clock:                raft.NewStandardClock(),
+		Serializer:           &lock.JSONSerializer{},
 		HealthCheckInterval:  DefaultHealthCheckInterval,
 		HealthCheckTimeout:   DefaultHealthCheckTimeout,
 		EnableLeaderRedirect: true,

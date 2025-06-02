@@ -70,7 +70,7 @@ type lockManager struct {
 	lastAppliedIndex types.Index
 
 	config     LockManagerConfig
-	serializer serializer
+	serializer Serializer
 	clock      raft.Clock
 	logger     logger.Logger
 	metrics    Metrics
@@ -90,7 +90,7 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 	}
 
 	if config.Serializer == nil {
-		config.Serializer = &jsonSerializer{}
+		config.Serializer = &JSONSerializer{}
 	}
 	if config.Logger == nil {
 		config.Logger = &logger.NoOpLogger{}
