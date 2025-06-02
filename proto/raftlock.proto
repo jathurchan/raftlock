@@ -65,12 +65,9 @@ message AcquireRequest {
   // Optional metadata to associate with the lock
   map<string, string> metadata = 7;
 
-  // Lock mode for shared/exclusive locking
-  LockMode mode = 8;
-
   // Optional client-generated request ID for idempotency.
   // If provided, the server can detect and handle retries of this acquire operation.
-  string request_id = 9;
+  string request_id = 8;
 }
 
 // Lock acquisition response
@@ -325,11 +322,8 @@ message LockFilter {
   // Only return locks that are set to expire after this specific time.
   google.protobuf.Timestamp expires_after = 6;
 
-  // Only return locks with this specific mode (e.g., EXCLUSIVE or SHARED).
-  LockMode mode = 7;
-
   // Only return locks that contain all of these key-value pairs in their metadata.
-  map<string, string> metadata_filter = 8;
+  map<string, string> metadata_filter = 7;
 }
 
 // Represents an acquired lock
@@ -349,11 +343,8 @@ message Lock {
   // Timestamp indicating when the lock will expire if not renewed
   google.protobuf.Timestamp expires_at = 5;
 
-  // Lock mode (e.g., EXCLUSIVE, SHARED)
-  LockMode mode = 6;
-
   // Optional metadata associated with the lock
-  map<string, string> metadata = 7;
+  map<string, string> metadata = 6;
 }
 
 // Detailed information about a lock
@@ -384,9 +375,6 @@ message LockInfo {
 
   // Timestamp indicating when the lock state was last modified
   google.protobuf.Timestamp last_modified_at = 9;
-
-  // Lock mode (e.g., EXCLUSIVE, SHARED)
-  LockMode mode = 10;
 }
 
 // Information about a client waiting for a lock
@@ -552,18 +540,6 @@ message ErrorDetail {
 
     // Optional developer-facing context for debugging (e.g., stack trace, internal state, problematic lock_id)
     map<string, string> details = 3; // Changed from string to map for structured details
-}
-
-// Lock modes for shared/exclusive locking
-enum LockMode {
-    // Default unspecified lock mode, could be treated as EXCLUSIVE or error by server
-    LOCK_MODE_UNSPECIFIED = 0;
-
-    // Exclusive lock mode (only one owner allowed)
-    EXCLUSIVE = 1;
-    
-    // Shared lock mode (multiple owners allowed, typically for read access)
-    SHARED = 2;
 }
 
 // Error codes for detailed error handling

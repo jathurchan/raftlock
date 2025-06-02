@@ -42,15 +42,6 @@ const (
 	DefaultCacheSize = 5000
 )
 
-// Lock modes
-const (
-	// LockModeExclusive represents an exclusive (write) lock.
-	LockModeExclusive = "exclusive"
-
-	// LockModeShared represents a shared (read) lock.
-	LockModeShared = "shared"
-)
-
 // Wait queue
 const (
 	// WaitQueuePriorityDefault is the default priority for waiters.
