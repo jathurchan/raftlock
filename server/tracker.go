@@ -274,8 +274,10 @@ func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg) {
 	proposalID := types.ProposalID(fmt.Sprintf("%d-%d", applyMsg.CommandTerm, applyMsg.CommandIndex))
 	now := pt.clock.Now()
 
-	entry, duration, exists := pt.finalizeProposalMetadata(proposalID, applyMsg.CommandResultError, now)
+	pt.mu.Lock()
+	entry, exists := pt.proposals[proposalID]
 	if !exists {
+		pt.mu.Unlock()
 		pt.logger.Debugw("No pending proposal found for applied command",
 			"id", proposalID,
 			"cmd_idx", applyMsg.CommandIndex,
@@ -283,46 +285,42 @@ func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg) {
 		return
 	}
 
-	if entry.Context != nil && entry.Context.Err() != nil {
+	var isContextCancelled bool
+	if entry.Context != nil {
+		select {
+		case <-entry.Context.Done():
+			isContextCancelled = true
+		default:
+		}
+	}
+
+	delete(pt.proposals, proposalID)
+	entry.finalizedAt = now
+	duration := now.Sub(entry.submittedAt)
+
+	if isContextCancelled {
+		pt.stats.PendingProposals--
+		pt.stats.CancelledProposals++
+		entry.status = proposalStatusClientCancelled
+		pt.updateLatencyStatsLocked(duration)
+		pt.mu.Unlock()
+
 		pt.handleCancelledProposal(entry, applyMsg.CommandResultError, now, duration)
 		return
 	}
 
-	pt.deliverAppliedResult(entry, applyMsg.CommandResultData, applyMsg.CommandResultError, now, duration)
-}
-
-// finalizeProposalMetadata looks up and removes a proposal from the tracker by ID,
-// marks it as successfully or unsuccessfully applied based on the commandError,
-// and updates internal metrics (including latency stats).
-func (pt *proposalTracker) finalizeProposalMetadata(
-	proposalID types.ProposalID,
-	commandError error,
-	now time.Time,
-) (*proposalEntry, time.Duration, bool) {
-	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
-	entry, exists := pt.proposals[proposalID]
-	if !exists {
-		return nil, 0, false
-	}
-
-	delete(pt.proposals, proposalID)
-	pt.stats.PendingProposals--
-
-	entry.finalizedAt = now
-	duration := now.Sub(entry.submittedAt)
-
-	if commandError == nil {
+	if applyMsg.CommandResultError == nil {
 		pt.stats.SuccessfulProposals++
 		entry.status = proposalStatusAppliedSuccess
 	} else {
 		pt.stats.FailedProposals++
 		entry.status = proposalStatusAppliedFailure
 	}
+	pt.stats.PendingProposals--
 	pt.updateLatencyStatsLocked(duration)
+	pt.mu.Unlock()
 
-	return entry, duration, true
+	pt.deliverAppliedResult(entry, applyMsg.CommandResultData, applyMsg.CommandResultError, now, duration)
 }
 
 // handleCancelledProposal sends a failure result for a proposal whose client context
@@ -620,27 +618,32 @@ func (pt *proposalTracker) updateLatencyStatsLocked(duration time.Duration) {
 	}
 }
 
-// sendResult attempts to deliver the final result of a proposal to the client via its ResultCh.
-// It uses a non-blocking send to prevent stalling the Raft apply loop or cleanup routines.
+// sendResult tries to deliver the proposal result to the client via ResultCh.
+// Uses a non-blocking send to avoid stalling Raft's apply loop or cleanup routines.
 func (pt *proposalTracker) sendResult(entry *proposalEntry, result types.ProposalResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			pt.logger.Warnw("Panic recovered while sending proposal result (likely channel closed)",
+			pt.logger.Warnw("Recovered from panic while sending proposal result (likely due to closed channel)",
 				"id", entry.ID, "op", entry.Operation, "panic", r)
 		}
 	}()
 
 	select {
-	case entry.ResultCh <- result: // Attempts to send the result
-		pt.logger.Debugw("Successfully sent proposal result",
-			"id", entry.ID, "op", entry.Operation, "success", result.Success)
-	case <-entry.Context.Done(): // Handles client context cancellation
-		pt.logger.Infow("Client context done while attempting to send result",
-			"id", entry.ID, "op", entry.Operation, "contextError", entry.Context.Err())
-	default: // This case is hit if ResultCh is unbuffered and receiver isn't ready,
-		// or if ResultCh is buffered but full.
-		pt.logger.Warnw("Could not send result to proposal channel (full or no listener)",
-			"id", entry.ID, "op", entry.Operation)
+	case entry.ResultCh <- result:
+		pt.logger.Debugw("Sent proposal result (non-blocking)", "id", entry.ID, "op", entry.Operation)
+		return
+	default:
+		// Channel is full or unbuffered with no receiver.
+		// Fall back to a blocking send, respecting the client's context.
+		pt.logger.Debugw("Non-blocking send failed; retrying with blocking send using context", "id", entry.ID, "op", entry.Operation)
+		select {
+		case entry.ResultCh <- result:
+			pt.logger.Debugw("Sent proposal result (blocking with context)", "id", entry.ID, "op", entry.Operation)
+		case <-entry.Context.Done():
+			// Context cancelled before or during send; result likely not delivered.
+			pt.logger.Warnw("Context cancelled before result could be sent",
+				"id", entry.ID, "op", entry.Operation, "error", entry.Context.Err(), "resultErrorIfNotSent", result.Error)
+		}
 	}
 }
 
