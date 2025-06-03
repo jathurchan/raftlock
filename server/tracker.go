@@ -22,8 +22,7 @@ type ProposalTracker interface {
 
 	// HandleAppliedCommand is called when a Raft log entry has been successfully
 	// applied to the state machine. It resolves the associated pending proposal.
-	// 'commandResultData' and 'commandError' represent the result of the state machine's application.
-	HandleAppliedCommand(applyMsg types.ApplyMsg, commandResultData interface{}, commandError error)
+	HandleAppliedCommand(applyMsg types.ApplyMsg)
 
 	// HandleSnapshotApplied is invoked when a snapshot is applied to the state machine.
 	// This invalidates any pending proposals that fall within the snapshot's covered range.
@@ -271,11 +270,11 @@ func (pt *proposalTracker) Track(proposal *types.PendingProposal) error {
 }
 
 // HandleAppliedCommand is called when a command has been applied to the state machine.
-func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg, commandResultData interface{}, commandError error) {
+func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg) {
 	proposalID := types.ProposalID(fmt.Sprintf("%d-%d", applyMsg.CommandTerm, applyMsg.CommandIndex))
 	now := pt.clock.Now()
 
-	entry, duration, exists := pt.finalizeProposalMetadata(proposalID, commandError, now)
+	entry, duration, exists := pt.finalizeProposalMetadata(proposalID, applyMsg.CommandResultError, now)
 	if !exists {
 		pt.logger.Debugw("No pending proposal found for applied command",
 			"id", proposalID,
@@ -285,11 +284,11 @@ func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg, command
 	}
 
 	if entry.Context != nil && entry.Context.Err() != nil {
-		pt.handleCancelledProposal(entry, commandError, now, duration)
+		pt.handleCancelledProposal(entry, applyMsg.CommandResultError, now, duration)
 		return
 	}
 
-	pt.deliverAppliedResult(entry, commandResultData, commandError, now, duration)
+	pt.deliverAppliedResult(entry, applyMsg.CommandResultData, applyMsg.CommandResultError, now, duration)
 }
 
 // finalizeProposalMetadata looks up and removes a proposal from the tracker by ID,

@@ -122,7 +122,7 @@ func TestLockManager_Apply(t *testing.T) {
 		cmdData, err := json.Marshal(cmd)
 		testutil.RequireNoError(t, err)
 
-		err = lm.Apply(ctx, types.Index(1), cmdData)
+		_, err = lm.Apply(ctx, types.Index(1), cmdData)
 		testutil.AssertNoError(t, err)
 		testutil.AssertEqual(t, types.Index(1), lm.lastAppliedIndex)
 
@@ -132,14 +132,14 @@ func TestLockManager_Apply(t *testing.T) {
 	})
 
 	t.Run("apply with empty command", func(t *testing.T) {
-		err := lm.Apply(ctx, types.Index(2), []byte{})
+		_, err := lm.Apply(ctx, types.Index(2), []byte{})
 		testutil.AssertError(t, err)
 		testutil.AssertContains(t, err.Error(), "empty command")
 	})
 
 	t.Run("apply with invalid command data", func(t *testing.T) {
 		invalidData := []byte("invalid json")
-		err := lm.Apply(ctx, types.Index(3), invalidData)
+		_, err := lm.Apply(ctx, types.Index(3), invalidData)
 		testutil.AssertError(t, err)
 		testutil.AssertContains(t, err.Error(), "failed to decode command")
 	})
@@ -155,7 +155,7 @@ func TestLockManager_Apply(t *testing.T) {
 		cmdData, err := json.Marshal(cmd)
 		testutil.RequireNoError(t, err)
 
-		err = lm.Apply(ctx, types.Index(1), cmdData)
+		_, err = lm.Apply(ctx, types.Index(1), cmdData)
 		testutil.AssertNoError(t, err)
 
 		info, err := lm.GetLockInfo(ctx, lockID)
@@ -596,7 +596,7 @@ func TestLockManager_Snapshot(t *testing.T) {
 	cmdData, err := json.Marshal(cmd)
 	testutil.RequireNoError(t, err)
 
-	err = lm.Apply(ctx, version, cmdData)
+	_, err = lm.Apply(ctx, version, cmdData)
 	testutil.RequireNoError(t, err)
 
 	t.Run("create snapshot", func(t *testing.T) {

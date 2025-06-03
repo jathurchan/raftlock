@@ -137,16 +137,16 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 }
 
 // Apply routes a committed Raft command to the appropriate lock operation
-func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []byte) error {
+func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []byte) (resultData any, err error) {
 	if len(cmdData) == 0 {
 		lm.logger.Errorw("Apply received an empty command", "index", index)
-		return errors.New("empty command")
+		return nil, errors.New("empty command")
 	}
 
 	cmd, err := lm.config.Serializer.DecodeCommand(cmdData)
 	if err != nil {
 		lm.logger.Errorw("Failed to decode command", "index", index, "error", err, "commandData", string(cmdData))
-		return fmt.Errorf("failed to decode command: %w", err)
+		return nil, fmt.Errorf("failed to decode command: %w", err)
 	}
 
 	lm.mu.Lock()
@@ -154,23 +154,27 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 
 	if index <= lm.lastAppliedIndex { // Idempotency
 		lm.logger.Debugw("Skipping already applied command", "commandIndex", index, "lastAppliedIndex", lm.lastAppliedIndex, "operation", cmd.Op)
-		return nil
+		return nil, nil
 	}
 
 	startTime := lm.clock.Now()
+	var opResultData any
 	var opErr error
 
 	switch cmd.Op {
 	case types.OperationAcquire:
-		_, opErr = lm.applyAcquireLocked(cmd.LockID, cmd.ClientID, time.Duration(cmd.TTL)*time.Millisecond, index)
+		opResultData, opErr = lm.applyAcquireLocked(cmd.LockID, cmd.ClientID, time.Duration(cmd.TTL)*time.Millisecond, index)
 	case types.OperationRelease:
-		_, opErr = lm.applyReleaseLocked(cmd.LockID, cmd.ClientID, cmd.Version)
+		opResultData, opErr = lm.applyReleaseLocked(cmd.LockID, cmd.ClientID, cmd.Version)
 	case types.OperationRenew:
 		opErr = lm.applyRenewLocked(cmd.LockID, cmd.ClientID, cmd.Version, time.Duration(cmd.TTL)*time.Millisecond)
+		if opErr == nil {
+			opResultData = true
+		}
 	case types.OperationEnqueueWaiter:
-		_, opErr = lm.applyWaitQueueLocked(cmd.LockID, cmd.ClientID, time.Duration(cmd.Timeout)*time.Millisecond, cmd.Version, cmd.Priority)
+		opResultData, opErr = lm.applyWaitQueueLocked(cmd.LockID, cmd.ClientID, time.Duration(cmd.Timeout)*time.Millisecond, cmd.Version, cmd.Priority)
 	case types.OperationCancelWait:
-		_, opErr = lm.applyCancelWaitLocked(cmd.LockID, cmd.ClientID, cmd.Version)
+		opResultData, opErr = lm.applyCancelWaitLocked(cmd.LockID, cmd.ClientID, cmd.Version)
 	default:
 		opErr = fmt.Errorf("unknown operation type: %s", cmd.Op)
 	}
@@ -191,7 +195,7 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 		}
 	}
 
-	return opErr
+	return opResultData, opErr
 }
 
 // ApplyAcquire attempts to acquire a lock for the specified client

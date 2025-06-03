@@ -455,14 +455,14 @@ type mockApplier struct {
 	snapshotData    []byte
 	applierRestored bool
 	snapshotFunc    func(ctx context.Context) (types.Index, []byte, error)
-	applyFunc       func(ctx context.Context, index types.Index, command []byte) error
+	applyFunc       func(ctx context.Context, index types.Index, command []byte) (resultData any, err error)
 }
 
-func (m *mockApplier) Apply(ctx context.Context, index types.Index, command []byte) error {
+func (m *mockApplier) Apply(ctx context.Context, index types.Index, command []byte) (resultData any, err error) {
 	if m.applyFunc != nil {
 		return m.applyFunc(ctx, index, command)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *mockApplier) Snapshot(ctx context.Context) (types.Index, []byte, error) {

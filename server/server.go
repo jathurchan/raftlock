@@ -726,11 +726,18 @@ func (s *raftLockServer) handleApplyMessage(applyMsg types.ApplyMsg) {
 	case applyMsg.CommandValid:
 		s.lastCommitIndex.Store(uint64(applyMsg.CommandIndex))
 
-		s.proposalTracker.HandleAppliedCommand(applyMsg, nil, nil)
+		s.proposalTracker.HandleAppliedCommand(applyMsg)
 
-		s.logger.Debugw("Applied command committed via Raft",
+		logFields := []any{
 			"index", applyMsg.CommandIndex,
-			"term", applyMsg.CommandTerm)
+			"term", applyMsg.CommandTerm,
+		}
+		if applyMsg.CommandResultError != nil {
+			logFields = append(logFields, "applyError", applyMsg.CommandResultError)
+			s.logger.Warnw("Applied command from Raft resulted in an operational error", logFields...)
+		} else {
+			s.logger.Debugw("Applied command committed via Raft", logFields...)
+		}
 
 	case applyMsg.SnapshotValid:
 		s.lastCommitIndex.Store(uint64(applyMsg.SnapshotIndex))

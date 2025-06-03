@@ -638,30 +638,33 @@ func (r *raftNode) applyEntries(entries []types.LogEntry) {
 		ctx, cancel := context.WithTimeout(context.Background(), r.applyEntryTimeout)
 
 		applyStart := r.clock.Now()
-		err := r.applier.Apply(ctx, entry.Index, entry.Command)
+		resultData, opErr := r.applier.Apply(ctx, entry.Index, entry.Command)
 		applyLatency := r.clock.Since(applyStart)
 		cancel()
 
 		r.metrics.ObserveHistogram("raft_apply_entry_latency_seconds", applyLatency.Seconds())
 
-		if err != nil {
+		if opErr != nil {
 			r.logger.Errorw("Failed to apply committed entry to state machine",
 				"index", entry.Index,
 				"term", entry.Term,
-				"error", err)
+				"error", opErr) // specific error from the lockManager
 			r.metrics.IncCounter("raft_apply_entry_errors_total")
-			return
 		}
 
 		r.stateMgr.UpdateLastApplied(entry.Index)
 		r.sendApplyMsg(types.ApplyMsg{
-			CommandValid: true,
-			Command:      entry.Command,
-			CommandIndex: entry.Index,
-			CommandTerm:  entry.Term,
+			CommandValid:       true,
+			Command:            entry.Command,
+			CommandIndex:       entry.Index,
+			CommandTerm:        entry.Term,
+			CommandResultData:  resultData,
+			CommandResultError: opErr,
 		})
 
-		r.metrics.IncCounter("raft_apply_entry_success_total")
+		if opErr == nil {
+			r.metrics.IncCounter("raft_apply_entry_success_total")
+		}
 	}
 }
 

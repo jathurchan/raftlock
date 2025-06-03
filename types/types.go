@@ -159,18 +159,40 @@ type PeerState struct {
 
 }
 
-// ApplyMsg is sent on the ApplyChannel once an entry is committed and applied.
-// It can represent either a command applied or a snapshot installed.
+// ApplyMsg is sent on the ApplyChannel after a log entry is committed and applied,
+// or when a snapshot is installed. It represents either an applied command or a snapshot.
+//
+// Only one of CommandValid or SnapshotValid will be true.
 type ApplyMsg struct {
-	CommandValid bool   // True if this message contains a valid command
-	Command      []byte // The command applied
-	CommandIndex Index  // The log index of the applied command
-	CommandTerm  Term   // The term of the log entry containing the command
+	// CommandValid is true if this message contains a valid applied command.
+	CommandValid bool
 
-	SnapshotValid bool   // True if this message contains a snapshot
-	Snapshot      []byte // The snapshot data
-	SnapshotIndex Index  // The log index included in the snapshot
-	SnapshotTerm  Term   // The term of the last log entry included in the snapshot
+	// Command is the raw command that was applied.
+	Command []byte
+
+	// CommandIndex is the log index of the applied command.
+	CommandIndex Index
+
+	// CommandTerm is the term when the command was appended to the log.
+	CommandTerm Term
+
+	// CommandResultData is the result returned by Applier.Apply (e.g., *types.LockInfo).
+	CommandResultData any
+
+	// CommandResultError is the error returned by Applier.Apply (e.g., lock.ErrLockHeld).
+	CommandResultError error
+
+	// SnapshotValid is true if this message contains a snapshot instead of a command.
+	SnapshotValid bool
+
+	// Snapshot is the serialized snapshot data.
+	Snapshot []byte
+
+	// SnapshotIndex is the highest log index included in the snapshot.
+	SnapshotIndex Index
+
+	// SnapshotTerm is the term of the last log entry included in the snapshot.
+	SnapshotTerm Term
 }
 
 // IndexOffsetPair maps a Raft log index to its file offset.
