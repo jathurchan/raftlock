@@ -78,32 +78,7 @@ const (
 	// proposalStatusExpired means the proposal was removed due to expiration or timeout,
 	// typically during cleanup.
 	proposalStatusExpired
-
-	// proposalStatusTrackerShutdown indicates the proposal failed due to the tracker shutting down
-	// before it could be applied or resolved.
-	proposalStatusTrackerShutdown
 )
-
-func (ps proposalStatus) String() string {
-	switch ps {
-	case proposalStatusPending:
-		return "pending"
-	case proposalStatusAppliedSuccess:
-		return "applied_success"
-	case proposalStatusAppliedFailure:
-		return "applied_failure"
-	case proposalStatusClientCancelled:
-		return "client_cancelled"
-	case proposalStatusSnapshotInvalidated:
-		return "snapshot_invalidated"
-	case proposalStatusExpired:
-		return "expired_by_tracker"
-	case proposalStatusTrackerShutdown:
-		return "failed_tracker_shutdown"
-	default:
-		return "unknown"
-	}
-}
 
 // proposalEntry wraps a PendingProposal with internal metadata used for lifecycle tracking.
 type proposalEntry struct {
@@ -547,7 +522,7 @@ func (pt *proposalTracker) Cleanup() int {
 	expired := pt.collectExpiredProposals(now)
 
 	pt.mu.Unlock() // Unlock before sending results to avoid holding lock during callbacks
-	pt.finalizeExpiredProposals(expired, now)
+	pt.finalizeExpiredProposals(expired)
 
 	if len(expired) > 0 {
 		pt.logger.Infow("Cleaned up expired or cancelled proposals", "count", len(expired))
@@ -593,7 +568,7 @@ func (pt *proposalTracker) shouldExpireProposal(entry *proposalEntry, now time.T
 }
 
 // finalizeExpiredProposals sends failure results for proposals that were expired during cleanup.
-func (pt *proposalTracker) finalizeExpiredProposals(entries []*proposalEntry, now time.Time) {
+func (pt *proposalTracker) finalizeExpiredProposals(entries []*proposalEntry) {
 	for _, entry := range entries {
 		err := entry.Context.Err()
 		if err == nil {
