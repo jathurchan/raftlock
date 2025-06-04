@@ -1,6 +1,11 @@
 package types
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"google.golang.org/protobuf/types/known/durationpb"
+)
 
 // LockID is a unique identifier for a lock resource.
 type LockID string
@@ -19,6 +24,10 @@ type Term uint64
 // Index represents a position in the Raft log.
 // Log indices start at 1 and increase with each appended entry.
 type Index uint64
+
+// ProposalID uniquely identifies a Raft proposal within the system.
+// It must be unique across all active proposals to ensure correct tracking and resolution.
+type ProposalID string
 
 // LockOperation defines the type of action that can be performed on a lock.
 type LockOperation string
@@ -54,13 +63,17 @@ const (
 // Command represents a client operation submitted to the lock manager.
 // These commands are serialized and applied to the state machine via Raft.
 type Command struct {
-	Op       LockOperation `json:"op"`                 // Type of operation: acquire, release, renew, etc.
-	LockID   LockID        `json:"lock_id"`            // Unique identifier for the target lock.
-	ClientID ClientID      `json:"client_id"`          // ID of the client issuing the command.
-	TTL      int64         `json:"ttl,omitempty"`      // Time-to-live for the lock in milliseconds (used with acquire/renew).
-	Version  Index         `json:"version,omitempty"`  // Raft index used for token fencing.
-	Priority int           `json:"priority,omitempty"` // Priority of the client when waiting for a lock.
-	Timeout  int64         `json:"timeout,omitempty"`  // Maximum time to wait for the lock in milliseconds.
+	Op          LockOperation     `json:"op"`                     // Type of operation: acquire, release, renew, etc.
+	LockID      LockID            `json:"lock_id"`                // Unique identifier for the target lock.
+	ClientID    ClientID          `json:"client_id"`              // ID of the client issuing the command.
+	TTL         int64             `json:"ttl,omitempty"`          // Time-to-live in ms (used for acquire/renew).
+	Version     Index             `json:"version,omitempty"`      // Raft index used for fencing.
+	Priority    int               `json:"priority,omitempty"`     // Priority when waiting for a lock.
+	Timeout     int64             `json:"timeout,omitempty"`      // Optional general timeout in ms
+	Wait        bool              `json:"wait,omitempty"`         // Whether to wait in queue if lock is held.
+	WaitTimeout int64             `json:"wait_timeout,omitempty"` // Max time to wait in queue (in ms).
+	RequestID   string            `json:"request_id,omitempty"`   // Optional request ID for idempotency.
+	Metadata    map[string]string `json:"metadata,omitempty"`     // Optional metadata for the lock request.
 }
 
 // WaiterInfo provides information about a client currently waiting for a lock.
@@ -146,18 +159,40 @@ type PeerState struct {
 
 }
 
-// ApplyMsg is sent on the ApplyChannel once an entry is committed and applied.
-// It can represent either a command applied or a snapshot installed.
+// ApplyMsg is sent on the ApplyChannel after a log entry is committed and applied,
+// or when a snapshot is installed. It represents either an applied command or a snapshot.
+//
+// Only one of CommandValid or SnapshotValid will be true.
 type ApplyMsg struct {
-	CommandValid bool   // True if this message contains a valid command
-	Command      []byte // The command applied
-	CommandIndex Index  // The log index of the applied command
-	CommandTerm  Term   // The term of the log entry containing the command
+	// CommandValid is true if this message contains a valid applied command.
+	CommandValid bool
 
-	SnapshotValid bool   // True if this message contains a snapshot
-	Snapshot      []byte // The snapshot data
-	SnapshotIndex Index  // The log index included in the snapshot
-	SnapshotTerm  Term   // The term of the last log entry included in the snapshot
+	// Command is the raw command that was applied.
+	Command []byte
+
+	// CommandIndex is the log index of the applied command.
+	CommandIndex Index
+
+	// CommandTerm is the term when the command was appended to the log.
+	CommandTerm Term
+
+	// CommandResultData is the result returned by Applier.Apply (e.g., *types.LockInfo).
+	CommandResultData any
+
+	// CommandResultError is the error returned by Applier.Apply (e.g., lock.ErrLockHeld).
+	CommandResultError error
+
+	// SnapshotValid is true if this message contains a snapshot instead of a command.
+	SnapshotValid bool
+
+	// Snapshot is the serialized snapshot data.
+	Snapshot []byte
+
+	// SnapshotIndex is the highest log index included in the snapshot.
+	SnapshotIndex Index
+
+	// SnapshotTerm is the term of the last log entry included in the snapshot.
+	SnapshotTerm Term
 }
 
 // IndexOffsetPair maps a Raft log index to its file offset.
@@ -239,4 +274,59 @@ type PeerConnectionStatus struct {
 	LastError   error     // Last significant error; nil if none.
 	LastActive  time.Time // Last successful communication timestamp.
 	PendingRPCs int       // Number of in-flight RPCs.
+}
+
+// PendingProposal represents a Raft proposal awaiting completion.
+type PendingProposal struct {
+	ID        ProposalID          // Unique identifier for the proposal (e.g., "{term}-{index}")
+	Index     Index               // Raft log index of the proposal
+	Term      Term                // Raft log term of the proposal
+	Operation LockOperation       // Type of lock operation being proposed
+	StartTime time.Time           // When the proposal was initiated by the client request
+	ResultCh  chan ProposalResult // Buffered channel to send the result back to the requester
+	Context   context.Context     // Client's context for cancellation and timeout tracking
+	Command   []byte              // The marshalled command data submitted to Raft
+
+	ClientID ClientID // Client that initiated the proposal
+	LockID   LockID   // Lock being operated on
+}
+
+// ProposalResult contains the outcome of a Raft proposal after it has been
+// processed (or has failed/timed out).
+type ProposalResult struct {
+	Success   bool          // True if the operation was successfully applied by the state machine
+	Error     error         // Error if the operation failed, was cancelled, or invalidated
+	Data      any           // Operation-specific result data (e.g., *types.LockInfo for acquire)
+	AppliedAt time.Time     // Timestamp when the proposal was actually applied or finalized
+	Duration  time.Duration // Total duration from submission to completion/failure
+}
+
+// ProposalStats provides aggregated statistics about proposal handling.
+type ProposalStats struct {
+	TotalProposals      int64
+	PendingProposals    int64
+	SuccessfulProposals int64
+	FailedProposals     int64
+	CancelledProposals  int64
+	ExpiredProposals    int64
+	AverageLatency      time.Duration
+	MaxLatency          time.Duration
+}
+
+// BackoffAdvice provides guidance to clients on how to back off before retrying a lock request.
+type BackoffAdvice struct {
+	// InitialBackoff is the recommended starting backoff duration.
+	InitialBackoff *durationpb.Duration
+
+	// MaxBackoff is the maximum backoff duration the client should apply.
+	MaxBackoff *durationpb.Duration
+
+	// Multiplier determines how the backoff increases after each failed attempt.
+	Multiplier float64
+
+	// JitterFactor introduces randomness to reduce contention during retries.
+	JitterFactor float64
+
+	// EstimatedAvailabilityIn is the estimated time until the lock might become available.
+	EstimatedAvailabilityIn *durationpb.Duration
 }

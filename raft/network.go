@@ -62,13 +62,13 @@ type gRPCNetworkManager struct {
 
 	id         types.NodeID // ID of the local node
 	localAddr  string       // Address the local gRPC server listens on
-	rpcHandler rpcHandler   // Handler for incoming Raft RPCs
+	rpcHandler RPCHandler   // Handler for incoming Raft RPCs
 
 	logger  logger.Logger
 	metrics Metrics
 	clock   Clock
 
-	opts gRPCNetworkManagerOptions
+	opts GRPCNetworkManagerOptions
 
 	peers       map[types.NodeID]PeerConfig      // Static configuration of peers
 	peerClients map[types.NodeID]*peerConnection // Active connections to peers
@@ -92,8 +92,8 @@ type peerConnection struct {
 	connected  atomic.Bool      // Indicates if the connection is believed to be active
 }
 
-// gRPCNetworkManagerOptions configures a gRPCNetworkManager.
-type gRPCNetworkManagerOptions struct {
+// GRPCNetworkManagerOptions configures a gRPCNetworkManager.
+type GRPCNetworkManagerOptions struct {
 	MaxRecvMsgSize     int           // Maximum gRPC receive message size in bytes
 	MaxSendMsgSize     int           // Maximum gRPC send message size in bytes
 	DialTimeout        time.Duration // Timeout for establishing a connection to a peer
@@ -106,10 +106,10 @@ type gRPCNetworkManagerOptions struct {
 	ServerMaxConnectionAgeGrace time.Duration // Server: Time to allow RPCs to complete after graceful close signal
 }
 
-// defaultGRPCNetworkManagerOptions provides reasonable default configuration values
+// DefaultGRPCNetworkManagerOptions provides reasonable default configuration values
 // using constants defined in constants.go.
-func defaultGRPCNetworkManagerOptions() gRPCNetworkManagerOptions {
-	return gRPCNetworkManagerOptions{
+func DefaultGRPCNetworkManagerOptions() GRPCNetworkManagerOptions {
+	return GRPCNetworkManagerOptions{
 		MaxRecvMsgSize:              DefaultMaxRecvMsgSize,
 		MaxSendMsgSize:              DefaultMaxSendMsgSize,
 		DialTimeout:                 DefaultDialTimeout,
@@ -127,12 +127,12 @@ func NewGRPCNetworkManager(
 	id types.NodeID,
 	addr string,
 	peers map[types.NodeID]PeerConfig,
-	rpcHandler rpcHandler,
+	rpcHandler RPCHandler,
 	isShutdown *atomic.Bool,
 	logger logger.Logger,
 	metrics Metrics,
 	clock Clock,
-	opts gRPCNetworkManagerOptions,
+	opts GRPCNetworkManagerOptions,
 ) (*gRPCNetworkManager, error) {
 	if id == "" {
 		return nil, errors.New("node ID cannot be empty")
@@ -168,7 +168,7 @@ func NewGRPCNetworkManager(
 		}
 	}
 
-	defaults := defaultGRPCNetworkManagerOptions()
+	defaults := DefaultGRPCNetworkManagerOptions()
 	if opts.MaxRecvMsgSize <= 0 {
 		opts.MaxRecvMsgSize = defaults.MaxRecvMsgSize
 	}
@@ -753,7 +753,7 @@ func formatGRPCError(err error) error {
 type grpcServerHandler struct {
 	proto.UnimplementedRaftServer
 	nm         *gRPCNetworkManager
-	rpcHandler rpcHandler
+	rpcHandler RPCHandler
 	logger     logger.Logger
 }
 

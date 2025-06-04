@@ -455,14 +455,14 @@ type mockApplier struct {
 	snapshotData    []byte
 	applierRestored bool
 	snapshotFunc    func(ctx context.Context) (types.Index, []byte, error)
-	applyFunc       func(ctx context.Context, index types.Index, command []byte) error
+	applyFunc       func(ctx context.Context, index types.Index, command []byte) (resultData any, err error)
 }
 
-func (m *mockApplier) Apply(ctx context.Context, index types.Index, command []byte) error {
+func (m *mockApplier) Apply(ctx context.Context, index types.Index, command []byte) (resultData any, err error) {
 	if m.applyFunc != nil {
 		return m.applyFunc(ctx, index, command)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *mockApplier) Snapshot(ctx context.Context) (types.Index, []byte, error) {
@@ -1503,6 +1503,8 @@ func newMockSnapshotManager() *mockSnapshotManager {
 
 func (m *mockSnapshotManager) SetReplicationStateUpdater(updater ReplicationStateUpdater) {}
 
+func (m *mockSnapshotManager) SetNetworkManager(nm NetworkManager) {}
+
 func (m *mockSnapshotManager) Initialize(ctx context.Context) error {
 	if m.initializeFunc != nil {
 		return m.initializeFunc(ctx)
@@ -1686,6 +1688,8 @@ type mockElectionManager struct {
 	tickFunc       func(ctx context.Context)
 }
 
+func (m *mockElectionManager) SetNetworkManager(nm NetworkManager) {}
+
 func (m *mockElectionManager) Initialize(ctx context.Context) error {
 	if m.initializeFunc != nil {
 		return m.initializeFunc(ctx)
@@ -1742,6 +1746,8 @@ type mockReplicationManager struct {
 	proposeFunc                           func(ctx context.Context, command []byte) (types.Index, types.Term, bool, error)
 	verifyLeadershipAndGetCommitIndexFunc func(ctx context.Context) (types.Index, error)
 }
+
+func (m *mockReplicationManager) SetNetworkManager(nm NetworkManager) {}
 
 func (m *mockReplicationManager) Tick(ctx context.Context) {
 	if m.tickFunc != nil {

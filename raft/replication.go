@@ -15,6 +15,9 @@ import (
 )
 
 type ReplicationManager interface {
+	// SetNetworkManager allows late injection of the network manager after the Raft node is built.
+	SetNetworkManager(nm NetworkManager)
+
 	// Tick advances internal timers, sending heartbeats if needed.
 	// Called only when this node is the leader.
 	Tick(ctx context.Context)
@@ -122,9 +125,6 @@ func validateReplicationManagerDeps(deps ReplicationManagerDeps) error {
 		return err
 	}
 	if err := check(deps.ID != "", "ID"); err != nil {
-		return err
-	}
-	if err := checkPtr(deps.NetworkMgr, "NetworkMgr"); err != nil {
 		return err
 	}
 	if err := checkPtr(deps.StateMgr, "StateMgr"); err != nil {
@@ -249,6 +249,11 @@ func NewReplicationManager(deps ReplicationManagerDeps) (ReplicationManager, err
 		"leaderLease", rm.leaderLeaseEnabled)
 
 	return rm, nil
+}
+
+// SetNetworkManager injects the network manager dependency into the replication manager.
+func (s *replicationManager) SetNetworkManager(nm NetworkManager) {
+	s.networkMgr = nm
 }
 
 // Tick drives periodic replication tasks for the leader.

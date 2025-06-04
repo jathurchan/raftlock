@@ -87,7 +87,7 @@ func TestRaftElection_ElectionManager_Initialize(t *testing.T) {
 					Options: Options{
 						ElectionTickCount:           DefaultElectionTickCount,
 						HeartbeatTickCount:          DefaultHeartbeatTickCount,
-						ElectionRandomizationFactor: DefaultElectionRandomizationFact,
+						ElectionRandomizationFactor: DefaultElectionRandomizationFactor,
 					},
 					FeatureFlags: FeatureFlags{PreVoteEnabled: true},
 				},
@@ -167,11 +167,6 @@ func TestRaftElection_ValidateElectionManagerDeps(t *testing.T) {
 			d.LogMgr = nil
 			return d
 		}, "log manager (LogMgr) must not be nil"},
-
-		{"nil NetworkMgr", func(d ElectionManagerDeps) ElectionManagerDeps {
-			d.NetworkMgr = nil
-			return d
-		}, "network manager (NetworkMgr) must not be nil"},
 
 		{"nil LeaderInitializer", func(d ElectionManagerDeps) ElectionManagerDeps {
 			d.LeaderInitializer = nil

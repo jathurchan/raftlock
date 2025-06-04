@@ -7,7 +7,7 @@ import (
 )
 
 // Applier defines how Raft applies committed log entries to an application's state machine
-// and manages state snapshots. It bridges the consensus layer with application logic.
+// and manages state snapshots. It bridges the consensus layer with the business logic.
 //
 // Implementations must be:
 //   - Deterministic: Same input yields identical results across nodes.
@@ -15,20 +15,23 @@ import (
 //   - Thread-safe: Safe for concurrent calls from multiple goroutines.
 //   - Cancellable: Context-aware for deadlines and cancellations.
 type Applier interface {
-	// Apply applies a committed log entry at the given index.
+	// Apply applies a committed log entry at the specified index.
 	//
-	// Called after the entry is committed by Raft. The implementation must:
+	// Invoked after the entry is committed by Raft. The implementation should:
 	//   - Decode the command
 	//   - Apply it to the state machine
 	//   - Track the latest applied index
-	//   - Handle duplicates safely (important during recovery)
+	//   - Handle duplicates gracefully (important during recovery)
 	//
-	// The context may carry deadlines or cancellations. Implementations should
-	// still attempt to apply the command, as skipping a committed entry may
-	// lead to divergence.
+	// The context may include deadlines or cancellation. However, the command
+	// should still be applied—skipping committed entries can cause divergence.
 	//
-	// Returns an error only for unrecoverable failures.
-	Apply(ctx context.Context, index types.Index, command []byte) (err error)
+	// Returns:
+	//   - resultData: the outcome of the command (e.g., LockInfo for "acquire")
+	//   - err: non-nil only on unrecoverable failure. A nil error with non-nil
+	//     resultData indicates success. A non-nil error may accompany resultData
+	//     to provide partial context.
+	Apply(ctx context.Context, index types.Index, command []byte) (resultData any, err error)
 
 	// Snapshot returns a serialized, point-in-time snapshot of application state.
 	//

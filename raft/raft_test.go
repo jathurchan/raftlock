@@ -928,12 +928,12 @@ func TestRaft_RaftNode_ApplyCommittedEntries(t *testing.T) {
 		stateMgr.lastApplied = 0
 
 		applier.applied = make(map[types.Index][]byte)
-		applier.applyFunc = func(ctx context.Context, index types.Index, command []byte) error {
+		applier.applyFunc = func(ctx context.Context, index types.Index, command []byte) (resultData any, err error) {
 			applier.mu.Lock()
 			defer applier.mu.Unlock()
 			applier.applied[index] = command
 			applier.applyCalls++
-			return nil
+			return nil, nil
 		}
 
 		go func() { r.applyNotifyCh <- struct{}{} }()

@@ -28,6 +28,9 @@ const (
 
 	// MaxWaitQueueTimeout is the maximum allowed timeout for waiting in a lock queue.
 	MaxWaitQueueTimeout = 10 * time.Minute
+
+	// MinWaitQueueTimeout is the minimum allowed timeout for waiting in a lock queue.
+	MinWaitQueueTimeout = 1 * time.Second
 )
 
 // Capacity
@@ -40,15 +43,6 @@ const (
 
 	// DefaultCacheSize is the default maximum number of locks in the read cache.
 	DefaultCacheSize = 5000
-)
-
-// Lock modes
-const (
-	// LockModeExclusive represents an exclusive (write) lock.
-	LockModeExclusive = "exclusive"
-
-	// LockModeShared represents a shared (read) lock.
-	LockModeShared = "shared"
 )
 
 // Wait queue

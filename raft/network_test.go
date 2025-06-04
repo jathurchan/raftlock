@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func setupNetworkManagerWithOpts(t *testing.T, id types.NodeID, selfAddr string, peers map[types.NodeID]PeerConfig, opts gRPCNetworkManagerOptions, customClock Clock, customMetrics Metrics) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, Clock) {
+func setupNetworkManagerWithOpts(t *testing.T, id types.NodeID, selfAddr string, peers map[types.NodeID]PeerConfig, opts GRPCNetworkManagerOptions, customClock Clock, customMetrics Metrics) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, Clock) {
 	t.Helper()
 	isShutdown := &atomic.Bool{}
 	handler := &mockRPCHandler{}
@@ -180,7 +180,7 @@ func (ct *controlledTimer) Reset(d time.Duration) bool {
 }
 
 func setupDefaultNetworkManager(t *testing.T, id types.NodeID, addr string, peers map[types.NodeID]PeerConfig) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, *controlledMockClock) {
-	opts := gRPCNetworkManagerOptions{
+	opts := GRPCNetworkManagerOptions{
 		DialTimeout:        100 * time.Millisecond,
 		ServerStartTimeout: 1 * time.Second,
 		KeepaliveTime:      1 * time.Second,
@@ -196,12 +196,12 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 		id               types.NodeID
 		addr             string
 		peers            map[types.NodeID]PeerConfig
-		rpcHandler       rpcHandler
+		rpcHandler       RPCHandler
 		isShutdown       *atomic.Bool
 		logger           logger.Logger
 		metrics          Metrics
 		clock            Clock
-		opts             gRPCNetworkManagerOptions
+		opts             GRPCNetworkManagerOptions
 		expectError      bool
 		errorMsgContains string
 		checkFields      func(t *testing.T, nm *gRPCNetworkManager, tc testCase)
@@ -221,7 +221,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:      logger.NewNoOpLogger(),
 			metrics:     NewNoOpMetrics(),
 			clock:       newMockClock(),
-			opts:        gRPCNetworkManagerOptions{},
+			opts:        GRPCNetworkManagerOptions{},
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
 				testutil.AssertEqual(t, tc.id, nm.id, "ID mismatch")
@@ -237,7 +237,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 				testutil.AssertNotNil(t, nm.server, "gRPC server should be created")
 				testutil.AssertNotNil(t, nm.serverReady, "serverReady channel should be created")
 
-				defaults := defaultGRPCNetworkManagerOptions()
+				defaults := DefaultGRPCNetworkManagerOptions()
 				if nm.opts.MaxRecvMsgSize != defaults.MaxRecvMsgSize {
 					t.Errorf("Expected default MaxRecvMsgSize %d, got %d", defaults.MaxRecvMsgSize, nm.opts.MaxRecvMsgSize)
 				}
@@ -253,7 +253,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "node ID cannot be empty",
 		},
@@ -267,7 +267,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "local address cannot be empty",
 		},
@@ -284,7 +284,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "peer ID cannot be empty",
 		},
@@ -301,7 +301,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "address for peer node2 cannot be empty",
 		},
@@ -315,7 +315,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "RPC handler cannot be nil",
 		},
@@ -329,7 +329,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "shutdown flag cannot be nil",
 		},
@@ -343,7 +343,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           nil,
 			metrics:          NewNoOpMetrics(),
 			clock:            newMockClock(),
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "logger cannot be nil",
 		},
@@ -357,7 +357,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:           logger.NewNoOpLogger(),
 			metrics:          NewNoOpMetrics(),
 			clock:            nil,
-			opts:             gRPCNetworkManagerOptions{},
+			opts:             GRPCNetworkManagerOptions{},
 			expectError:      true,
 			errorMsgContains: "clock cannot be nil",
 		},
@@ -373,7 +373,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:      logger.NewNoOpLogger(),
 			metrics:     nil,
 			clock:       newMockClock(),
-			opts:        gRPCNetworkManagerOptions{},
+			opts:        GRPCNetworkManagerOptions{},
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
 				if _, ok := nm.metrics.(*noOpMetrics); !ok {
@@ -394,7 +394,7 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:      logger.NewNoOpLogger(),
 			metrics:     NewNoOpMetrics(),
 			clock:       newMockClock(),
-			opts:        gRPCNetworkManagerOptions{},
+			opts:        GRPCNetworkManagerOptions{},
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
 				testutil.AssertEqual(t, tc.addr, nm.localAddr, "Local address should be the one passed to constructor, not from peers map")
@@ -412,13 +412,13 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			logger:     logger.NewNoOpLogger(),
 			metrics:    NewNoOpMetrics(),
 			clock:      newMockClock(),
-			opts: gRPCNetworkManagerOptions{
+			opts: GRPCNetworkManagerOptions{
 				MaxRecvMsgSize: 2048 * 1024,
 				DialTimeout:    3 * time.Second,
 			},
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
-				defaults := defaultGRPCNetworkManagerOptions()
+				defaults := DefaultGRPCNetworkManagerOptions()
 				testutil.AssertEqual(t, 2048*1024, nm.opts.MaxRecvMsgSize, "MaxRecvMsgSize mismatch")
 				testutil.AssertEqual(t, 3*time.Second, nm.opts.DialTimeout, "DialTimeout mismatch")
 				testutil.AssertEqual(t, defaults.KeepaliveTime, nm.opts.KeepaliveTime, "KeepaliveTime should be default")
@@ -523,14 +523,14 @@ func mockNMForHandler(t *testing.T) *gRPCNetworkManager {
 		logger:      logger.NewNoOpLogger().WithComponent("mock-nm-for-handler"),
 		metrics:     met,
 		clock:       clk,
-		opts:        defaultGRPCNetworkManagerOptions(),
+		opts:        DefaultGRPCNetworkManagerOptions(),
 		peers:       make(map[types.NodeID]PeerConfig),
 		peerClients: make(map[types.NodeID]*peerConnection),
 		serverReady: make(chan struct{}),
 	}
 }
 
-func setupPeerServer(t *testing.T, addr string, actualRPCHandler rpcHandler) (actualAddr string, cleanupFunc func()) {
+func setupPeerServer(t *testing.T, addr string, actualRPCHandler RPCHandler) (actualAddr string, cleanupFunc func()) {
 	t.Helper()
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
