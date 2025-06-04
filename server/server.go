@@ -371,6 +371,13 @@ func (s *raftLockServer) unaryInterceptor(
 
 	ctx = s.applyRequestTimeout(ctx)
 	resp, err := handler(ctx, req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = status.Error(codes.DeadlineExceeded, "request timeout")
+		} else if errors.Is(err, context.Canceled) {
+			err = status.Error(codes.Canceled, "request canceled")
+		}
+	}
 	s.observeRequestOutcome(method, startTime, err)
 
 	return resp, err
