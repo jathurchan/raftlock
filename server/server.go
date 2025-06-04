@@ -1286,8 +1286,7 @@ func (s *raftLockServer) protoFilterToLockFilter(pf *pb.LockFilter) lock.LockFil
 		}
 
 		// Match held status
-		isHeld := li.OwnerID != ""
-		if pf.OnlyHeld != isHeld {
+		if pf.OnlyHeld && li.OwnerID == "" {
 			return false
 		}
 
