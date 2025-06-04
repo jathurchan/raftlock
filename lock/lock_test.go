@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -762,5 +763,149 @@ func TestLockManager_Close(t *testing.T) {
 		testutil.AssertEmpty(t, lm.pendingWaits)
 		testutil.AssertEqual(t, 0, lm.expirationHeap.Len())
 		lm.mu.RUnlock()
+	})
+}
+
+func TestLockManager_GetActiveLockCount(t *testing.T) {
+	lm, _ := createTestLockManager(t)
+	ctx := context.Background()
+
+	t.Run("zero active locks initially", func(t *testing.T) {
+		count, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 0, count)
+	})
+
+	t.Run("count increases with lock acquisitions", func(t *testing.T) {
+		lockID1 := types.LockID("active-lock-1")
+		clientID1 := types.ClientID("client-1")
+		ttl := 30 * time.Second
+
+		_, err := lm.ApplyAcquire(ctx, lockID1, clientID1, ttl, types.Index(1))
+		testutil.RequireNoError(t, err)
+
+		count, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 1, count)
+
+		lockID2 := types.LockID("active-lock-2")
+		clientID2 := types.ClientID("client-2")
+
+		_, err = lm.ApplyAcquire(ctx, lockID2, clientID2, ttl, types.Index(2))
+		testutil.RequireNoError(t, err)
+
+		count, err = lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 2, count)
+
+		lockID3 := types.LockID("active-lock-3")
+		clientID3 := types.ClientID("client-3")
+
+		_, err = lm.ApplyAcquire(ctx, lockID3, clientID3, ttl, types.Index(3))
+		testutil.RequireNoError(t, err)
+
+		count, err = lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 3, count)
+	})
+
+	t.Run("count decreases with lock releases", func(t *testing.T) {
+		initialCount, err := lm.GetActiveLockCount(ctx)
+		testutil.RequireNoError(t, err)
+		testutil.AssertEqual(t, 3, initialCount)
+
+		lockID1 := types.LockID("active-lock-1")
+		clientID1 := types.ClientID("client-1")
+
+		_, err = lm.ApplyRelease(ctx, lockID1, clientID1, types.Index(1))
+		testutil.RequireNoError(t, err)
+
+		count, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 2, count)
+
+		lockID2 := types.LockID("active-lock-2")
+		clientID2 := types.ClientID("client-2")
+
+		_, err = lm.ApplyRelease(ctx, lockID2, clientID2, types.Index(2))
+		testutil.RequireNoError(t, err)
+
+		count, err = lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 1, count)
+	})
+
+	t.Run("renewal does not affect active count", func(t *testing.T) {
+		countBefore, err := lm.GetActiveLockCount(ctx)
+		testutil.RequireNoError(t, err)
+		testutil.AssertEqual(t, 1, countBefore)
+
+		lockID3 := types.LockID("active-lock-3")
+		clientID3 := types.ClientID("client-3")
+		newTTL := 60 * time.Second
+
+		err = lm.ApplyRenew(ctx, lockID3, clientID3, types.Index(3), newTTL)
+		testutil.RequireNoError(t, err)
+
+		countAfter, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, countBefore, countAfter)
+	})
+
+	t.Run("count decreases with lock expiration", func(t *testing.T) {
+		lockID4 := types.LockID("expiring-lock")
+		clientID4 := types.ClientID("expiring-client")
+		shortTTL := 1 * time.Second
+
+		_, err := lm.ApplyAcquire(ctx, lockID4, clientID4, shortTTL, types.Index(4))
+		testutil.RequireNoError(t, err)
+
+		count, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 2, count)
+
+		clock := lm.clock.(*mockClock)
+		clock.Advance(shortTTL + time.Second)
+		expiredCount := lm.Tick(ctx)
+		testutil.AssertEqual(t, 1, expiredCount)
+
+		count, err = lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, 1, count)
+	})
+
+	t.Run("same client acquiring multiple locks", func(t *testing.T) {
+		sameClient := types.ClientID("multi-lock-client")
+		ttl := 30 * time.Second
+
+		initialCount, err := lm.GetActiveLockCount(ctx)
+		testutil.RequireNoError(t, err)
+
+		for i := range 3 {
+			lockID := types.LockID(fmt.Sprintf("multi-lock-%d", i))
+			_, err := lm.ApplyAcquire(ctx, lockID, sameClient, ttl, types.Index(10+i))
+			testutil.RequireNoError(t, err)
+		}
+
+		finalCount, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, initialCount+3, finalCount)
+	})
+
+	t.Run("failed acquisition does not affect count", func(t *testing.T) {
+		lockID3 := types.LockID("active-lock-3")
+		differentClient := types.ClientID("different-client")
+		ttl := 30 * time.Second
+
+		countBefore, err := lm.GetActiveLockCount(ctx)
+		testutil.RequireNoError(t, err)
+
+		_, err = lm.ApplyAcquire(ctx, lockID3, differentClient, ttl, types.Index(100))
+		testutil.AssertError(t, err)
+		testutil.AssertErrorIs(t, err, ErrLockHeld)
+
+		countAfter, err := lm.GetActiveLockCount(ctx)
+		testutil.AssertNoError(t, err)
+		testutil.AssertEqual(t, countBefore, countAfter)
 	})
 }
