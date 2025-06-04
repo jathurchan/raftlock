@@ -172,6 +172,9 @@ func ErrorToProtoError(err error) *pb.ErrorDetail {
 	if errors.Is(err, lock.ErrLockNotFound) {
 		return &pb.ErrorDetail{Code: pb.ErrorCode_LOCK_NOT_FOUND, Message: err.Error()}
 	}
+	if errors.Is(err, lock.ErrNotWaiting) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_NOT_WAITING, Message: err.Error()}
+	}
 
 	switch {
 	case errors.Is(err, ErrNotLeader):
