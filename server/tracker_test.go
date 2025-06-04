@@ -146,7 +146,7 @@ func TestProposalTracker_Creation(t *testing.T) {
 			options: []ProposalTrackerOption{
 				WithMaxPendingAge(5 * time.Minute),
 				WithCleanupInterval(30 * time.Second),
-				WithClock(newTestClock()),
+				WithClock(newMockClock()),
 			},
 			validateFn: func(t *testing.T, pt ProposalTracker) {
 				if count := pt.GetPendingCount(); count != 0 {
@@ -251,7 +251,7 @@ func TestProposalTracker_TrackValidation(t *testing.T) {
 
 func TestProposalTracker_SuccessfulFlow(t *testing.T) {
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	pt := NewProposalTracker(logger, WithClock(clock))
 	defer pt.Close()
 
@@ -452,7 +452,7 @@ func TestProposalTracker_SnapshotInvalidation(t *testing.T) {
 
 func TestProposalTracker_ContextCancellation(t *testing.T) {
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	pt := NewProposalTracker(logger,
 		WithClock(clock),
 		WithMaxPendingAge(time.Hour),
@@ -503,7 +503,7 @@ func TestProposalTracker_ContextCancellation(t *testing.T) {
 
 func TestProposalTracker_Cleanup(t *testing.T) {
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 
 	pt := NewProposalTracker(logger,
 		WithClock(clock),
@@ -553,7 +553,7 @@ func TestProposalTracker_Cleanup(t *testing.T) {
 
 func TestProposalTracker_AutomaticCleanup(t *testing.T) {
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 
 	pt := NewProposalTracker(logger,
 		WithClock(clock),
@@ -721,7 +721,7 @@ func TestProposalTracker_GracefulShutdown(t *testing.T) {
 
 func TestProposalTracker_StatisticsAccuracy(t *testing.T) {
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	pt := NewProposalTracker(logger, WithClock(clock))
 	defer pt.Close()
 

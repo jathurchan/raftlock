@@ -21,7 +21,7 @@ func TestNewConnectionManager(t *testing.T) {
 			name:    "with all dependencies",
 			metrics: newMockServerMetrics(),
 			logger:  logger.NewNoOpLogger(),
-			clock:   newTestClock(),
+			clock:   newMockClock(),
 		},
 		{
 			name:    "with nil clock defaults to standard clock",
@@ -55,7 +55,7 @@ func TestNewConnectionManager(t *testing.T) {
 func TestConnectionManager_OnConnect(t *testing.T) {
 	metrics := newMockServerMetrics()
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	cm := NewConnectionManager(metrics, logger, clock)
 
 	t.Run("single connection", func(t *testing.T) {
@@ -146,7 +146,7 @@ func TestConnectionManager_OnConnect(t *testing.T) {
 func TestConnectionManager_OnDisconnect(t *testing.T) {
 	metrics := newMockServerMetrics()
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	cm := NewConnectionManager(metrics, logger, clock)
 
 	t.Run("disconnect existing connection", func(t *testing.T) {
@@ -235,7 +235,7 @@ func TestConnectionManager_OnDisconnect(t *testing.T) {
 func TestConnectionManager_OnRequest(t *testing.T) {
 	metrics := newMockServerMetrics()
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	cm := NewConnectionManager(metrics, logger, clock)
 
 	t.Run("request on existing connection", func(t *testing.T) {
@@ -264,7 +264,7 @@ func TestConnectionManager_OnRequest(t *testing.T) {
 	})
 
 	t.Run("multiple requests on same connection", func(t *testing.T) {
-		clock = newTestClock()
+		clock = newMockClock()
 		cm = NewConnectionManager(newMockServerMetrics(), logger, clock)
 
 		addr := "192.168.1.1:12345"
@@ -300,7 +300,7 @@ func TestConnectionManager_OnRequest(t *testing.T) {
 func TestConnectionManager_GetActiveConnections(t *testing.T) {
 	metrics := newMockServerMetrics()
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	cm := NewConnectionManager(metrics, logger, clock)
 
 	if cm.GetActiveConnections() != 0 {
@@ -334,7 +334,7 @@ func TestConnectionManager_GetActiveConnections(t *testing.T) {
 func TestConnectionManager_GetAllConnectionInfo(t *testing.T) {
 	metrics := newMockServerMetrics()
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	cm := NewConnectionManager(metrics, logger, clock)
 
 	t.Run("empty initially", func(t *testing.T) {
@@ -375,7 +375,7 @@ func TestConnectionManager_GetAllConnectionInfo(t *testing.T) {
 	})
 
 	t.Run("multiple connections", func(t *testing.T) {
-		clock = newTestClock()
+		clock = newMockClock()
 		cm = NewConnectionManager(newMockServerMetrics(), logger, clock)
 
 		addrs := []string{
@@ -418,7 +418,7 @@ func TestConnectionManager_GetAllConnectionInfo(t *testing.T) {
 func TestConnectionManager_ConcurrentAccess(t *testing.T) {
 	metrics := newMockServerMetrics()
 	logger := logger.NewNoOpLogger()
-	clock := newTestClock()
+	clock := newMockClock()
 	cm := NewConnectionManager(metrics, logger, clock)
 
 	var wg sync.WaitGroup
