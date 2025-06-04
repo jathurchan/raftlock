@@ -505,15 +505,24 @@ func (s *raftLockServer) errorToGRPCStatus(err error) error {
 	switch protoError.Code {
 	case pb.ErrorCode_INVALID_ARGUMENT:
 		grpcCode = codes.InvalidArgument
+	case pb.ErrorCode_LOCK_HELD:
+		grpcCode = codes.ResourceExhausted
+	case pb.ErrorCode_LOCK_NOT_FOUND:
+		grpcCode = codes.NotFound
 	case pb.ErrorCode_NOT_LEADER:
 		grpcCode = codes.FailedPrecondition
-	case pb.ErrorCode_NO_LEADER, pb.ErrorCode_UNAVAILABLE:
+	case pb.ErrorCode_NO_LEADER:
+		grpcCode = codes.Unavailable
+	case pb.ErrorCode_UNAVAILABLE:
 		grpcCode = codes.Unavailable
 	case pb.ErrorCode_RATE_LIMITED:
 		grpcCode = codes.ResourceExhausted
-	case pb.ErrorCode_INTERNAL_ERROR:
+	case pb.ErrorCode_TIMEOUT:
+		grpcCode = codes.DeadlineExceeded
+	case pb.ErrorCode_INTERNAL_ERROR: // Fallback
 		grpcCode = codes.Internal
-	default:
+	default: // Default for any unmapped pb.ErrorCodes
+		s.logger.Warnw("Unmapped pb.ErrorCode to gRPC code", "pbErrorCode", protoError.Code.String())
 		grpcCode = codes.Internal
 	}
 

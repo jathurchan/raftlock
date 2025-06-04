@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"github.com/jathurchan/raftlock/lock"
 	pb "github.com/jathurchan/raftlock/proto"
 )
 
@@ -132,6 +134,38 @@ func ErrorToProtoError(err error) *pb.ErrorDetail {
 	var validationErr *ValidationError
 	var serverErr *ServerError
 
+	if errors.Is(err, lock.ErrLockHeld) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_LOCK_HELD, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrLockNotHeld) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_LOCK_NOT_HELD, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrNotLockOwner) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_NOT_LOCK_OWNER, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrVersionMismatch) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_VERSION_MISMATCH, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrLockNotFound) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_LOCK_NOT_FOUND, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrInvalidTTL) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_INVALID_TTL, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrWaitQueueFull) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_WAIT_QUEUE_FULL, Message: err.Error()}
+	}
+	if errors.Is(err, lock.ErrNotWaiting) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_NOT_WAITING, Message: err.Error()}
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_TIMEOUT, Message: "Request timed out: deadline exceeded."}
+	}
+	if errors.Is(err, context.Canceled) {
+		return &pb.ErrorDetail{Code: pb.ErrorCode_TIMEOUT, Message: "Request canceled by client."}
+	}
+
 	if errors.As(err, &leaderRedirectErr) {
 		details := map[string]string{}
 		if leaderRedirectErr.LeaderAddress != "" {
@@ -168,12 +202,6 @@ func ErrorToProtoError(err error) *pb.ErrorDetail {
 			Message: serverErr.Message, // e.Error() too verbose or leak internal details
 			Details: details,
 		}
-	}
-	if errors.Is(err, lock.ErrLockNotFound) {
-		return &pb.ErrorDetail{Code: pb.ErrorCode_LOCK_NOT_FOUND, Message: err.Error()}
-	}
-	if errors.Is(err, lock.ErrNotWaiting) {
-		return &pb.ErrorDetail{Code: pb.ErrorCode_NOT_WAITING, Message: err.Error()}
 	}
 
 	switch {
