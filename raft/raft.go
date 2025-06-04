@@ -60,6 +60,8 @@ func (r *raftNode) SetNetworkManager(nm NetworkManager) {
 		return
 	}
 
+	r.networkMgr = nm
+
 	if r.snapshotMgr != nil {
 		r.snapshotMgr.SetNetworkManager(nm)
 	}
