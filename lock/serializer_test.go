@@ -8,6 +8,102 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
+func TestLockSerializer_Json_EncodeCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   types.Command
+		expectErr bool
+	}{
+		{
+			name: "acquire command with all fields",
+			command: types.Command{
+				Op:          types.OperationAcquire,
+				LockID:      "lock1",
+				ClientID:    "client1",
+				TTL:         30000,
+				Version:     42,
+				Priority:    10,
+				Timeout:     5000,
+				Wait:        true,
+				WaitTimeout: 60000,
+				RequestID:   "req123",
+				Metadata:    map[string]string{"key": "value", "env": "test"},
+			},
+			expectErr: false,
+		},
+		{
+			name: "release command minimal fields",
+			command: types.Command{
+				Op:       types.OperationRelease,
+				LockID:   "lock2",
+				ClientID: "client2",
+				Version:  100,
+			},
+			expectErr: false,
+		},
+		{
+			name: "renew command",
+			command: types.Command{
+				Op:       types.OperationRenew,
+				LockID:   "lock3",
+				ClientID: "client3",
+				TTL:      45000,
+				Version:  200,
+			},
+			expectErr: false,
+		},
+		{
+			name: "enqueue waiter command",
+			command: types.Command{
+				Op:          types.OperationEnqueueWaiter,
+				LockID:      "lock4",
+				ClientID:    "client4",
+				Priority:    5,
+				WaitTimeout: 30000,
+			},
+			expectErr: false,
+		},
+		{
+			name: "cancel wait command",
+			command: types.Command{
+				Op:       types.OperationCancelWait,
+				LockID:   "lock5",
+				ClientID: "client5",
+			},
+			expectErr: false,
+		},
+		{
+			name: "command with empty strings",
+			command: types.Command{
+				Op:       types.OperationAcquire,
+				LockID:   "",
+				ClientID: "",
+				TTL:      0,
+			},
+			expectErr: false,
+		},
+	}
+
+	s := &JSONSerializer{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := s.EncodeCommand(tc.command)
+
+			if tc.expectErr {
+				testutil.AssertError(t, err, "Expected an error encoding command")
+			} else {
+				testutil.AssertNoError(t, err, "Unexpected error encoding command")
+				testutil.AssertTrue(t, len(data) > 0, "Encoded data should not be empty")
+
+				decoded, decodeErr := s.DecodeCommand(data)
+				testutil.AssertNoError(t, decodeErr, "Failed to decode encoded command")
+				testutil.AssertEqual(t, tc.command, decoded, "Round-trip encoding/decoding failed")
+			}
+		})
+	}
+}
+
 func TestLockSerializer_Json_DecodeCommand(t *testing.T) {
 	tests := []struct {
 		name      string
