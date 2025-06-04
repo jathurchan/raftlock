@@ -5,7 +5,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	pb "github.com/jathurchan/raftlock/proto"
 	"github.com/jathurchan/raftlock/raft"
+	"github.com/jathurchan/raftlock/types"
 )
 
 type testClock struct {
@@ -219,3 +221,47 @@ func (tt *testTimer) triggerTimer(now time.Time) {
 		}
 	}
 }
+
+type mockServerMetrics struct {
+	mu                sync.RWMutex
+	activeConnections int
+}
+
+func newMockServerMetrics() *mockServerMetrics {
+	return &mockServerMetrics{}
+}
+
+func (m *mockServerMetrics) SetActiveConnections(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.activeConnections = count
+}
+
+func (m *mockServerMetrics) getActiveConnections() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.activeConnections
+}
+
+// Implement all other ServerMetrics methods as no-ops for testing
+func (m *mockServerMetrics) IncrGRPCRequest(method string, success bool)                  {}
+func (m *mockServerMetrics) IncrLeaderRedirect(method string)                             {}
+func (m *mockServerMetrics) IncrRetry(method string)                                      {}
+func (m *mockServerMetrics) IncrRaftProposal(operation types.LockOperation, success bool) {}
+func (m *mockServerMetrics) IncrValidationError(method string, errorType string)          {}
+func (m *mockServerMetrics) IncrClientError(method string, errorCode pb.ErrorCode)        {}
+func (m *mockServerMetrics) IncrServerError(method string, errorType string)              {}
+func (m *mockServerMetrics) IncrQueueOverflow(queueType string)                           {}
+func (m *mockServerMetrics) IncrLockExpiration()                                          {}
+func (m *mockServerMetrics) ObserveRequestLatency(method string, latency time.Duration)   {}
+func (m *mockServerMetrics) ObserveRaftProposalLatency(operation types.LockOperation, latency time.Duration) {
+}
+func (m *mockServerMetrics) ObserveQueueLength(queueType string, length int)  {}
+func (m *mockServerMetrics) ObserveRequestSize(method string, sizeBytes int)  {}
+func (m *mockServerMetrics) ObserveResponseSize(method string, sizeBytes int) {}
+func (m *mockServerMetrics) IncrConcurrentRequests(method string, delta int)  {}
+func (m *mockServerMetrics) IncrHealthCheck(healthy bool)                     {}
+func (m *mockServerMetrics) SetServerState(isLeader bool, isHealthy bool)     {}
+func (m *mockServerMetrics) SetRaftTerm(term types.Term)                      {}
+func (m *mockServerMetrics) SetRaftCommitIndex(index types.Index)             {}
+func (m *mockServerMetrics) Reset()                                           {}
