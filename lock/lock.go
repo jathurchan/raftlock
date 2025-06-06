@@ -907,13 +907,21 @@ func (lm *lockManager) Snapshot(ctx context.Context) (types.Index, []byte, error
 	return lm.lastAppliedIndex, data, nil
 }
 
-// snapshotWaiters converts all waitQueue heaps into stable slices for serialization.
+// snapshotWaiters converts all waitQueue heaps into stable, priority-ordered slices for serialization.
 func (lm *lockManager) snapshotWaiters() map[types.LockID][]*waiter {
 	result := make(map[types.LockID][]*waiter, len(lm.waiters))
 	for lockID, wq := range lm.waiters {
+		if wq == nil || wq.Len() == 0 {
+			continue
+		}
+
+		wqCopy := make(waitQueue, wq.Len())
+		copy(wqCopy, *wq)
+		heap.Init(&wqCopy) // Ensure the copy is a valid heap.
+
 		slice := make([]*waiter, wq.Len())
-		for i := range wq.Len() {
-			slice[i] = (*wq)[i]
+		for i := range slice {
+			slice[i] = heap.Pop(&wqCopy).(*waiter)
 		}
 		result[lockID] = slice
 	}
