@@ -68,3 +68,81 @@ type RaftLockClient interface {
 	// The client must not be used after Close is called.
 	Close() error
 }
+
+// AdminClient provides administrative and monitoring capabilities for RaftLock clusters.
+// Intended for use in tools, dashboards, and scripts—not for client applications performing locking.
+type AdminClient interface {
+	// GetStatus returns the current status of the RaftLock cluster node.
+	//
+	// Useful for monitoring and diagnostics.
+	//
+	// Returns:
+	//   - ClusterStatus with Raft and lock manager state
+	//   - Error if the request fails
+	GetStatus(ctx context.Context, req *GetStatusRequest) (*ClusterStatus, error)
+
+	// Health checks the health of the RaftLock service.
+	//
+	// Returns:
+	//   - HealthStatus indicating current health
+	//   - Error if the service is unhealthy or unreachable
+	Health(ctx context.Context, req *HealthRequest) (*HealthStatus, error)
+
+	// GetBackoffAdvice returns adaptive backoff parameters to guide retry behavior
+	// during lock contention.
+	//
+	// Returns:
+	//   - BackoffAdvice with recommended delay settings
+	//   - Error if the request fails
+	GetBackoffAdvice(ctx context.Context, req *BackoffAdviceRequest) (*BackoffAdvice, error)
+
+	// Close shuts down the client and releases associated resources.
+	Close() error
+}
+
+// AdvancedClient provides low-level operations for advanced RaftLock use cases.
+// These methods expose finer control over lock queuing and client behavior.
+type AdvancedClient interface {
+	// EnqueueWaiter explicitly adds the client to a lock's wait queue.
+	//
+	// Most applications should use Acquire with wait=true instead.
+	//
+	// Returns:
+	//   - EnqueueResult with queue position and estimated wait time
+	//   - Error if the operation fails
+	//
+	// Possible errors:
+	//   - ErrWaitQueueFull: the wait queue is at capacity
+	EnqueueWaiter(ctx context.Context, req *EnqueueWaiterRequest) (*EnqueueResult, error)
+
+	// CancelWait removes the client from a lock's wait queue.
+	//
+	// Most applications should rely on context cancellation instead.
+	//
+	// Returns:
+	//   - CancelWaitResult indicating cancellation success
+	//   - Error if the operation fails
+	//
+	// Possible errors:
+	//   - ErrNotWaiting: client is not in the queue
+	CancelWait(ctx context.Context, req *CancelWaitRequest) (*CancelWaitResult, error)
+
+	// GetLeaderAddress returns the current leader's address, or an empty string if unknown.
+	GetLeaderAddress() string
+
+	// IsConnected reports whether the client has an active connection to the cluster.
+	IsConnected() bool
+
+	// SetRetryPolicy sets the client's retry behavior for failed operations.
+	//
+	// If not set, a default policy is used.
+	SetRetryPolicy(policy RetryPolicy)
+
+	// GetMetrics returns client-side metrics for observability.
+	//
+	// Returns nil if metrics collection is disabled.
+	GetMetrics() Metrics
+
+	// Close shuts down the client and releases resources.
+	Close() error
+}

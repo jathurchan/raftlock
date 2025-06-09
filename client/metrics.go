@@ -2,8 +2,8 @@ package client
 
 import "time"
 
-// ClientMetrics exposes client-side metrics for observability and monitoring.
-type ClientMetrics interface {
+// Metrics exposes client-side metrics for observability and monitoring.
+type Metrics interface {
 	// GetRequestCount returns the total number of requests for the given operation type.
 	GetRequestCount(operation string) uint64
 

@@ -186,6 +186,15 @@ type CancelWaitRequest struct {
 	Version int64
 }
 
+// CancelWaitResult contains the outcome of leaving a wait queue.
+type CancelWaitResult struct {
+	// Cancelled indicates whether the wait was successfully cancelled
+	Cancelled bool
+
+	// Error contains detailed error information if the operation failed
+	Error *ErrorDetail
+}
+
 // BackoffAdviceRequest contains parameters for requesting backoff guidance.
 type BackoffAdviceRequest struct {
 	// LockID is the unique identifier for the lock resource
