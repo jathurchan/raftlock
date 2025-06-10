@@ -331,9 +331,6 @@ type BackoffAdvice struct {
 
 	// JitterFactor introduces randomness to reduce contention
 	JitterFactor float64
-
-	// EstimatedAvailabilityIn is estimated time until lock might become available
-	EstimatedAvailabilityIn time.Duration
 }
 
 // RaftStatus contains information about the Raft cluster state.

@@ -95,7 +95,7 @@ type ClientError struct {
 
 // Error implements the error interface.
 func (e *ClientError) Error() string {
-	if e.Details != nil && len(e.Details) > 0 {
+	if len(e.Details) > 0 {
 		return fmt.Sprintf("client %s failed: %v (code: %v, details: %v)", e.Op, e.Err, e.Code, e.Details)
 	}
 	return fmt.Sprintf("client %s failed: %v (code: %v)", e.Op, e.Err, e.Code)
