@@ -6,6 +6,44 @@ import (
 	pb "github.com/jathurchan/raftlock/proto"
 )
 
+const (
+	// Default gRPC dial timeout.
+	defaultDialTimeout = 5 * time.Second
+
+	// Default timeout for individual gRPC requests.
+	defaultRequestTimeout = 30 * time.Second
+
+	// Default interval for sending keepalive pings.
+	defaultKeepAliveTime = 30 * time.Second
+
+	// Default timeout for waiting on keepalive ack.
+	defaultKeepAliveTimeout = 5 * time.Second
+
+	// Whether to allow keepalives when no streams are active.
+	defaultPermitWithoutStream = true
+
+	// Whether client-side metrics are enabled by default.
+	defaultEnableMetrics = true
+
+	// Default maximum gRPC message size (16MB).
+	defaultMaxMessageSize = 16 * 1024 * 1024
+
+	// Default number of retry attempts for failed operations.
+	defaultMaxRetries = 3
+
+	// Default initial backoff duration between retries.
+	defaultInitialBackoff = 100 * time.Millisecond
+
+	// Default maximum backoff duration.
+	defaultMaxBackoff = 5 * time.Second
+
+	// Default multiplier for exponential backoff.
+	defaultBackoffMultiplier = 2.0
+
+	// Default jitter factor to randomize backoff durations.
+	defaultJitterFactor = 0.1
+)
+
 // Config holds configuration options for RaftLock clients.
 type Config struct {
 	// Endpoints is a list of RaftLock server addresses that the client will
@@ -55,16 +93,16 @@ type KeepAliveConfig struct {
 // DefaultClientConfig returns a ClientConfig with sensible default values.
 func DefaultClientConfig() Config {
 	return Config{
-		DialTimeout:    5 * time.Second,
-		RequestTimeout: 30 * time.Second,
+		DialTimeout:    defaultDialTimeout,
+		RequestTimeout: defaultRequestTimeout,
 		KeepAlive: KeepAliveConfig{
-			Time:                30 * time.Second,
-			Timeout:             5 * time.Second,
-			PermitWithoutStream: true,
+			Time:                defaultKeepAliveTime,
+			Timeout:             defaultKeepAliveTimeout,
+			PermitWithoutStream: defaultPermitWithoutStream,
 		},
 		RetryPolicy:    DefaultRetryPolicy(),
-		EnableMetrics:  true,
-		MaxMessageSize: 16 * 1024 * 1024, // 16MB
+		EnableMetrics:  defaultEnableMetrics,
+		MaxMessageSize: defaultMaxMessageSize,
 	}
 }
 
@@ -72,11 +110,11 @@ func DefaultClientConfig() Config {
 // transient and leader-related errors.
 func DefaultRetryPolicy() RetryPolicy {
 	return RetryPolicy{
-		MaxRetries:        3,
-		InitialBackoff:    100 * time.Millisecond,
-		MaxBackoff:        5 * time.Second,
-		BackoffMultiplier: 2.0,
-		JitterFactor:      0.1,
+		MaxRetries:        defaultMaxRetries,
+		InitialBackoff:    defaultInitialBackoff,
+		MaxBackoff:        defaultMaxBackoff,
+		BackoffMultiplier: defaultBackoffMultiplier,
+		JitterFactor:      defaultJitterFactor,
 		RetryableErrors: []pb.ErrorCode{
 			pb.ErrorCode_NO_LEADER,
 			pb.ErrorCode_NOT_LEADER,
