@@ -1887,27 +1887,27 @@ func TestServer_GetBackoffAdvice_Success(t *testing.T) {
 		t.Errorf("GetBackoffAdvice request failed: %v", err)
 	}
 
-	if resp.InitialBackoff == nil {
+	if resp.Advice.InitialBackoff == nil {
 		t.Error("Expected initial backoff to be set")
 	}
 
-	if resp.MaxBackoff == nil {
+	if resp.Advice.MaxBackoff == nil {
 		t.Error("Expected max backoff to be set")
 	}
 
-	if resp.Multiplier <= 0 {
+	if resp.Advice.Multiplier <= 0 {
 		t.Error("Expected positive multiplier")
 	}
 
-	if resp.JitterFactor < 0 || resp.JitterFactor > 1 {
-		t.Errorf("Expected jitter factor between 0 and 1, got %f", resp.JitterFactor)
+	if resp.Advice.JitterFactor < 0 || resp.Advice.JitterFactor > 1 {
+		t.Errorf("Expected jitter factor between 0 and 1, got %f", resp.Advice.JitterFactor)
 	}
 
-	if resp.InitialBackoff.AsDuration() <= 0 {
+	if resp.Advice.InitialBackoff.AsDuration() <= 0 {
 		t.Error("Expected positive initial backoff")
 	}
 
-	if resp.MaxBackoff.AsDuration() <= resp.InitialBackoff.AsDuration() {
+	if resp.Advice.MaxBackoff.AsDuration() <= resp.Advice.InitialBackoff.AsDuration() {
 		t.Error("Expected max backoff to be greater than initial backoff")
 	}
 }
@@ -1949,7 +1949,7 @@ func TestServer_GetBackoffAdvice_LockManagerError(t *testing.T) {
 	}
 
 	// Should return default advice even on errors
-	if resp.InitialBackoff.AsDuration() != 100*time.Millisecond {
+	if resp.Advice.InitialBackoff.AsDuration() != 100*time.Millisecond {
 		t.Error("Expected default initial backoff on error")
 	}
 }

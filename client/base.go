@@ -37,6 +37,9 @@ type baseClient interface {
 	// close shuts down all connections and marks the client as closed.
 	close() error
 
+	// setRetryPolicy replaces the current retry policy.
+	setRetryPolicy(policy RetryPolicy)
+
 	// setRand sets a custom random source, used primarily for testing.
 	setRand(r raft.Rand)
 
@@ -81,6 +84,13 @@ func newBaseClient(config Config) (baseClient, error) {
 	return client, nil
 }
 
+// setRetryPolicy updates the client's retry policy in a thread-safe manner.
+func (c *baseClientImpl) setRetryPolicy(policy RetryPolicy) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config.RetryPolicy = policy
+}
+
 // setRand replaces the random source, typically for testing.
 func (c *baseClientImpl) setRand(r raft.Rand) {
 	c.rand = r
@@ -93,7 +103,7 @@ func (c *baseClientImpl) getMetrics() Metrics {
 
 // getConnection returns a gRPC connection to the specified endpoint,
 // creating it if one doesn’t already exist.
-func (c *baseClientImpl) getConnection(ctx context.Context, endpoint string) (*grpc.ClientConn, error) {
+func (c *baseClientImpl) getConnection(endpoint string) (*grpc.ClientConn, error) {
 	if c.closed.Load() {
 		return nil, ErrClientClosed
 	}
@@ -206,7 +216,7 @@ func (c *baseClientImpl) tryOperation(ctx context.Context, operation string, fn 
 
 // tryEndpoint runs the operation against a single endpoint.
 func (c *baseClientImpl) tryEndpoint(ctx context.Context, endpoint string, fn func(context.Context, pb.RaftLockClient) error) error {
-	conn, err := c.getConnection(ctx, endpoint)
+	conn, err := c.getConnection(endpoint)
 	if err != nil {
 		return err
 	}

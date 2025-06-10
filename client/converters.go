@@ -145,6 +145,32 @@ func protoToGetLocksResult(p *pb.GetLocksResponse) *GetLocksResult {
 	}
 }
 
+// protoToEnqueueResult converts a protobuf EnqueueWaiterResponse to an EnqueueResult.
+// Returns nil if the input is nil.
+func protoToEnqueueResult(p *pb.EnqueueWaiterResponse) *EnqueueResult {
+	if p == nil {
+		return nil
+	}
+	return &EnqueueResult{
+		Enqueued:              p.Enqueued,
+		Position:              p.Position,
+		EstimatedWaitDuration: p.EstimatedWaitDuration.AsDuration(),
+		Error:                 protoToErrorDetail(p.Error),
+	}
+}
+
+// protoToCancelWaitResult converts a protobuf CancelWaitResponse to a CancelWaitResult.
+// Returns nil if the input is nil.
+func protoToCancelWaitResult(p *pb.CancelWaitResponse) *CancelWaitResult {
+	if p == nil {
+		return nil
+	}
+	return &CancelWaitResult{
+		Cancelled: p.Cancelled,
+		Error:     protoToErrorDetail(p.Error),
+	}
+}
+
 // lockFilterToProto converts a LockFilter to its protobuf representation.
 // Returns nil if the input is nil.
 func lockFilterToProto(f *LockFilter) *pb.LockFilter {
@@ -165,4 +191,108 @@ func lockFilterToProto(f *LockFilter) *pb.LockFilter {
 		pbFilter.ExpiresAfter = timestamppb.New(*f.ExpiresAfter)
 	}
 	return pbFilter
+}
+
+// protoToClusterStatus converts a protobuf GetStatusResponse to an internal ClusterStatus.
+func protoToClusterStatus(p *pb.GetStatusResponse) *ClusterStatus {
+	if p == nil {
+		return nil
+	}
+	return &ClusterStatus{
+		RaftStatus: protoToRaftStatus(p.RaftStatus),
+		LockStats:  protoToLockManagerStats(p.LockStats),
+		Health:     protoToHealthStatus(p.Health),
+	}
+}
+
+// protoToRaftStatus converts a protobuf RaftStatus to an internal RaftStatus.
+func protoToRaftStatus(p *pb.RaftStatus) *RaftStatus {
+	if p == nil {
+		return nil
+	}
+	replication := make(map[string]*PeerState, len(p.Replication))
+	for nodeID, peerState := range p.Replication {
+		replication[nodeID] = protoToPeerState(peerState)
+	}
+	return &RaftStatus{
+		NodeID:        p.NodeId,
+		Role:          p.Role,
+		Term:          p.Term,
+		LeaderID:      p.LeaderId,
+		LastLogIndex:  p.LastLogIndex,
+		LastLogTerm:   p.LastLogTerm,
+		CommitIndex:   p.CommitIndex,
+		LastApplied:   p.LastApplied,
+		SnapshotIndex: p.SnapshotIndex,
+		SnapshotTerm:  p.SnapshotTerm,
+		Replication:   replication,
+	}
+}
+
+// protoToPeerState converts a protobuf PeerState to an internal PeerState.
+func protoToPeerState(p *pb.PeerState) *PeerState {
+	if p == nil {
+		return nil
+	}
+	return &PeerState{
+		NextIndex:          p.NextIndex,
+		MatchIndex:         p.MatchIndex,
+		IsActive:           p.IsActive,
+		LastActiveAt:       p.LastActiveAt.AsTime(),
+		SnapshotInProgress: p.SnapshotInProgress,
+		ReplicationLag:     p.ReplicationLag,
+	}
+}
+
+// protoToLockManagerStats converts a protobuf LockManagerStats to an internal LockManagerStats.
+func protoToLockManagerStats(p *pb.LockManagerStats) *LockManagerStats {
+	if p == nil {
+		return nil
+	}
+	return &LockManagerStats{
+		ActiveLocksCount:         p.ActiveLocksCount,
+		TotalWaitersCount:        p.TotalWaitersCount,
+		ContestedLocksCount:      p.ContestedLocksCount,
+		AverageHoldDuration:      p.AverageHoldDuration.AsDuration(),
+		AcquisitionRatePerSecond: p.AcquisitionRatePerSecond,
+		ReleaseRatePerSecond:     p.ReleaseRatePerSecond,
+		ExpiredLocksLastPeriod:   p.ExpiredLocksLastPeriod,
+	}
+}
+
+// protoToHealthStatus converts a protobuf HealthStatus to its internal representation.
+func protoToHealthStatus(p *pb.HealthStatus) *HealthStatus {
+	if p == nil {
+		return nil
+	}
+	return &HealthStatus{
+		Status:              HealthServingStatus(p.Status),
+		Message:             p.Message,
+		IsRaftLeader:        p.IsRaftLeader,
+		RaftLeaderAddress:   p.RaftLeaderAddress,
+		RaftTerm:            p.RaftTerm,
+		RaftLastApplied:     p.RaftLastApplied,
+		CurrentActiveLocks:  p.CurrentActiveLocks,
+		CurrentTotalWaiters: p.CurrentTotalWaiters,
+		Uptime:              p.Uptime.AsDuration(),
+		LastHealthCheckAt:   p.LastHealthCheckAt.AsTime(),
+	}
+}
+
+// protoToHealthStatusFromGetStatus is a compatibility wrapper for GetStatus responses.
+// It ensures fields are correctly mapped from a protobuf HealthStatus.
+func protoToHealthStatusFromHealthResponse(p *pb.HealthResponse) *HealthStatus {
+	if p == nil {
+		return nil
+	}
+	// Convert the nested health information first.
+	hs := protoToHealthStatus(p.HealthInfo)
+	if hs == nil {
+		// Even if HealthInfo is nil, we should return a struct with the top-level info.
+		hs = &HealthStatus{}
+	}
+	// Supplement with the top-level status and message from the response wrapper.
+	hs.Status = HealthServingStatus(p.Status)
+	hs.Message = p.Message
+	return hs
 }

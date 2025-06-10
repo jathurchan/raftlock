@@ -249,21 +249,7 @@ message BackoffAdviceRequest {
 
 // Backoff advice response
 message BackoffAdviceResponse {
-  // Initial backoff duration (e.g., "50ms", "100ms")
-  google.protobuf.Duration initial_backoff = 1;
-
-  // Maximum backoff duration (e.g., "1s", "5s")
-  google.protobuf.Duration max_backoff = 2;
-
-  // Multiplier for exponential backoff (e.g., 1.5, 2.0)
-  double multiplier = 3;
-
-  // Jitter factor (0.0 to 1.0, e.g., 0.2 for +/- 20% jitter)
-  double jitter_factor = 4;
-
-  // Estimated wait time until lock might become available (e.g., "5s", "100ms").
-  // This is purely an estimate.
-  google.protobuf.Duration estimated_availability_in = 5;
+  BackoffAdvice advice = 1;
 }
 
 // Get status request

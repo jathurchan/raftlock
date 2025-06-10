@@ -989,7 +989,7 @@ func (s *raftLockServer) handleAcquireError(err error, req *pb.AcquireRequest) (
 }
 
 // buildAcquireResponse constructs the final response from LockInfo or enqueue fallback.
-func (s *raftLockServer) buildAcquireResponse(data interface{}, req *pb.AcquireRequest) (*pb.AcquireResponse, error) {
+func (s *raftLockServer) buildAcquireResponse(data any, req *pb.AcquireRequest) (*pb.AcquireResponse, error) {
 	if info, ok := data.(*types.LockInfo); ok && info != nil {
 		s.logger.Infow("Lock acquired", "lockId", req.LockId, "clientId", req.ClientId, "version", info.Version)
 		return &pb.AcquireResponse{
@@ -1535,10 +1535,12 @@ func (s *raftLockServer) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAd
 		s.metrics.IncrServerError(MethodGetBackoffAdvice, ErrorTypeInternalError)
 
 		return &pb.BackoffAdviceResponse{
-			InitialBackoff: durationpb.New(100 * time.Millisecond),
-			MaxBackoff:     durationpb.New(5 * time.Second),
-			Multiplier:     2.0,
-			JitterFactor:   0.1,
+			Advice: &pb.BackoffAdvice{
+				InitialBackoff: durationpb.New(100 * time.Millisecond),
+				MaxBackoff:     durationpb.New(5 * time.Second),
+				Multiplier:     2.0,
+				JitterFactor:   0.1,
+			},
 		}, nil
 	}
 
@@ -1547,10 +1549,12 @@ func (s *raftLockServer) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAd
 	s.logger.Debugw("GetBackoffAdvice successful", "lockId", req.LockId)
 	s.metrics.IncrGRPCRequest(MethodGetBackoffAdvice, true)
 	return &pb.BackoffAdviceResponse{
-		InitialBackoff: advice.InitialBackoff,
-		MaxBackoff:     advice.MaxBackoff,
-		Multiplier:     advice.Multiplier,
-		JitterFactor:   advice.JitterFactor,
+		Advice: &pb.BackoffAdvice{
+			InitialBackoff: advice.InitialBackoff,
+			MaxBackoff:     advice.MaxBackoff,
+			Multiplier:     advice.Multiplier,
+			JitterFactor:   advice.JitterFactor,
+		},
 	}, nil
 }
 
