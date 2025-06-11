@@ -63,8 +63,7 @@ jobs:
           version: latest
           args: |
             --timeout=5m
-            --out-format=colored-line-number
-            --exclude-dirs=proto
+            --skip-dirs=proto
       
       - name: Run tests with coverage (entire repo, excluding .pb.go)
         run: |
