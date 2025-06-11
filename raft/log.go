@@ -90,7 +90,11 @@ type LogManager interface {
 	// or the scan encounters compacted log regions.
 	//
 	// This method does not perform locking. The caller must ensure thread safety.
-	FindLastEntryWithTermUnsafe(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error)
+	FindLastEntryWithTermUnsafe(
+		ctx context.Context,
+		term types.Term,
+		searchFromHint types.Index,
+	) (types.Index, error)
 
 	// FindFirstIndexInTermUnsafe scans backward from searchUpToIndex to find the first log index
 	// that belongs to the given term. It assumes that log entries for a term are contiguous.
@@ -100,7 +104,11 @@ type LogManager interface {
 	// (e.g., ErrNotFound or ErrCompacted) if the term is not present or is in a compacted region.
 	//
 	// This method does not perform locking. The caller must ensure thread safety.
-	FindFirstIndexInTermUnsafe(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error)
+	FindFirstIndexInTermUnsafe(
+		ctx context.Context,
+		term types.Term,
+		searchUpToIndex types.Index,
+	) (types.Index, error)
 
 	// Stop signals the log manager to shut down and release resources.
 	// Note: Actual shutdown logic (stopping operations) relies on checking the
@@ -178,8 +186,18 @@ func (lm *logManager) Initialize(ctx context.Context) error {
 
 	term, err := lm.fetchEntryTerm(ctx, lastIdx)
 	if err != nil {
-		lm.logger.Errorw("Failed to get term for last log index during initialization", "lastIndex", lastIdx, "error", err)
-		return fmt.Errorf("inconsistent storage: failed to fetch term for last index %d: %w", lastIdx, err)
+		lm.logger.Errorw(
+			"Failed to get term for last log index during initialization",
+			"lastIndex",
+			lastIdx,
+			"error",
+			err,
+		)
+		return fmt.Errorf(
+			"inconsistent storage: failed to fetch term for last index %d: %w",
+			lastIdx,
+			err,
+		)
 	}
 
 	lm.updateCachedState(lastIdx, term)
@@ -254,7 +272,11 @@ func (lm *logManager) GetTermUnsafe(ctx context.Context, index types.Index) (typ
 // It first attempts to serve the request from a cached last index/term if applicable.
 // If not cached, it verifies the index is within valid bounds and fetches the term from storage.
 // If useUnlockedCache is true, it assumes the caller already holds lm.mu and accesses cache without locks.
-func (lm *logManager) getTermInternal(ctx context.Context, index types.Index, useUnlockedCache bool) (types.Term, error) {
+func (lm *logManager) getTermInternal(
+	ctx context.Context,
+	index types.Index,
+	useUnlockedCache bool,
+) (types.Term, error) {
 	if index == 0 {
 		return 0, nil
 	}
@@ -307,7 +329,10 @@ func (lm *logManager) tryGetCachedTermUnlocked(index types.Index) (types.Term, b
 
 // tryGetCachedTermCommon checks if the given index matches the provided cached index and term,
 // and that the term is valid (> 0). If so, returns the term and true.
-func tryGetCachedTermCommon(index, cachedIndex types.Index, cachedTerm types.Term) (types.Term, bool) {
+func tryGetCachedTermCommon(
+	index, cachedIndex types.Index,
+	cachedTerm types.Term,
+) (types.Term, bool) {
 	if index == cachedIndex && cachedTerm > 0 {
 		return cachedTerm, true
 	}
@@ -321,16 +346,29 @@ func (lm *logManager) checkLogBounds(index types.Index) error {
 	lastIndex := lm.GetLastIndexUnsafe()
 
 	if index < firstIndex {
-		return fmt.Errorf("requested index %d is compacted (first available: %d): %w", index, firstIndex, ErrCompacted)
+		return fmt.Errorf(
+			"requested index %d is compacted (first available: %d): %w",
+			index,
+			firstIndex,
+			ErrCompacted,
+		)
 	}
 	if index > lastIndex {
-		return fmt.Errorf("requested index %d is beyond last index %d: %w", index, lastIndex, ErrNotFound)
+		return fmt.Errorf(
+			"requested index %d is beyond last index %d: %w",
+			index,
+			lastIndex,
+			ErrNotFound,
+		)
 	}
 	return nil
 }
 
 // GetEntries returns log entries in the range [startIndex, endIndex).
-func (lm *logManager) GetEntries(ctx context.Context, startIndex, endIndex types.Index) ([]types.LogEntry, error) {
+func (lm *logManager) GetEntries(
+	ctx context.Context,
+	startIndex, endIndex types.Index,
+) ([]types.LogEntry, error) {
 	startTime := time.Now()
 	var entries []types.LogEntry
 	var err error
@@ -361,7 +399,15 @@ func (lm *logManager) GetEntries(ctx context.Context, startIndex, endIndex types
 	}
 
 	if err = validateEntryRange(entries, startIndex, effectiveEnd); err != nil {
-		lm.logger.Errorw("Storage returned inconsistent log entry range", "error", err, "requestedStart", startIndex, "requestedEnd", effectiveEnd)
+		lm.logger.Errorw(
+			"Storage returned inconsistent log entry range",
+			"error",
+			err,
+			"requestedStart",
+			startIndex,
+			"requestedEnd",
+			effectiveEnd,
+		)
 		lm.metrics.ObserveLogConsistencyError()
 		return nil, fmt.Errorf("internal storage error: %w", err)
 	}
@@ -391,8 +437,13 @@ func (lm *logManager) mapStorageReadError(err error, start, end types.Index) err
 	if errors.Is(err, storage.ErrIndexOutOfRange) {
 		newFirst := lm.GetFirstIndex()
 		if start < newFirst {
-			return fmt.Errorf("entries [%d, %d) were compacted concurrently (first available: %d): %w",
-				start, end, newFirst, ErrCompacted)
+			return fmt.Errorf(
+				"entries [%d, %d) were compacted concurrently (first available: %d): %w",
+				start,
+				end,
+				newFirst,
+				ErrCompacted,
+			)
 		}
 		return fmt.Errorf("entries [%d, %d) not found: %w", start, end, ErrNotFound)
 	}
@@ -403,7 +454,11 @@ func (lm *logManager) mapStorageReadError(err error, start, end types.Index) err
 func validateEntryRange(entries []types.LogEntry, expectedStart, expectedEnd types.Index) error {
 	if len(entries) == 0 {
 		if expectedStart != expectedEnd {
-			return fmt.Errorf("expected entries in range [%d, %d), but got none", expectedStart, expectedEnd)
+			return fmt.Errorf(
+				"expected entries in range [%d, %d), but got none",
+				expectedStart,
+				expectedEnd,
+			)
 		}
 		return nil
 	}
@@ -441,7 +496,15 @@ func (lm *logManager) AppendEntries(ctx context.Context, entries []types.LogEntr
 
 	err = lm.storage.AppendLogEntries(ctx, entries)
 	if err != nil {
-		lm.logger.Errorw("Storage rejected AppendLogEntries", "error", err, "entryCount", entryCount, "firstIndex", entries[0].Index)
+		lm.logger.Errorw(
+			"Storage rejected AppendLogEntries",
+			"error",
+			err,
+			"entryCount",
+			entryCount,
+			"firstIndex",
+			entries[0].Index,
+		)
 		return fmt.Errorf("log append failed: %w", err)
 	}
 
@@ -482,7 +545,12 @@ func (lm *logManager) TruncatePrefix(ctx context.Context, newFirstIndex types.In
 	var err error
 
 	defer func() {
-		lm.metrics.ObserveLogTruncate(LogTruncateTypePrefix, entriesRemoved, time.Since(startTime), success)
+		lm.metrics.ObserveLogTruncate(
+			LogTruncateTypePrefix,
+			entriesRemoved,
+			time.Since(startTime),
+			success,
+		)
 	}()
 
 	if lm.isShutdown.Load() {
@@ -497,20 +565,36 @@ func (lm *logManager) TruncatePrefix(ctx context.Context, newFirstIndex types.In
 	oldFirstIndex := lm.GetFirstIndex()
 
 	if newFirstIndex <= oldFirstIndex {
-		lm.logger.Debugw("TruncatePrefix skipped: index less than or equal to current first index", "newFirstIndex", newFirstIndex, "oldFirstIndex", oldFirstIndex)
+		lm.logger.Debugw(
+			"TruncatePrefix skipped: index less than or equal to current first index",
+			"newFirstIndex",
+			newFirstIndex,
+			"oldFirstIndex",
+			oldFirstIndex,
+		)
 		success = true
 		return nil
 	}
 
 	lastIndex := lm.GetLastIndexUnsafe()
 	if newFirstIndex > lastIndex+1 {
-		err = fmt.Errorf("invalid truncation index: %d is beyond last index %d", newFirstIndex, lastIndex)
+		err = fmt.Errorf(
+			"invalid truncation index: %d is beyond last index %d",
+			newFirstIndex,
+			lastIndex,
+		)
 		return err
 	}
 
 	err = lm.storage.TruncateLogPrefix(ctx, newFirstIndex)
 	if err != nil {
-		lm.logger.Errorw("Failed to truncate log prefix in storage", "newFirstIndex", newFirstIndex, "error", err)
+		lm.logger.Errorw(
+			"Failed to truncate log prefix in storage",
+			"newFirstIndex",
+			newFirstIndex,
+			"error",
+			err,
+		)
 		return fmt.Errorf("log prefix truncation to index %d failed: %w", newFirstIndex, err)
 	}
 
@@ -518,8 +602,13 @@ func (lm *logManager) TruncatePrefix(ctx context.Context, newFirstIndex types.In
 	entriesRemoved = int(resultingFirstIndex - oldFirstIndex)
 
 	if entriesRemoved < 0 {
-		lm.logger.Warnw("First index decreased after TruncatePrefix, expected increase or no change",
-			"oldFirstIndex", oldFirstIndex, "newFirstIndex", resultingFirstIndex)
+		lm.logger.Warnw(
+			"First index decreased after TruncatePrefix, expected increase or no change",
+			"oldFirstIndex",
+			oldFirstIndex,
+			"newFirstIndex",
+			resultingFirstIndex,
+		)
 		entriesRemoved = 0 // To avoid negative count in metrics.
 	}
 
@@ -546,7 +635,12 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 	var err error
 
 	defer func() {
-		lm.metrics.ObserveLogTruncate(LogTruncateTypeSuffix, entriesRemoved, time.Since(startTime), success)
+		lm.metrics.ObserveLogTruncate(
+			LogTruncateTypeSuffix,
+			entriesRemoved,
+			time.Since(startTime),
+			success,
+		)
 	}()
 
 	if lm.isShutdown.Load() {
@@ -565,7 +659,11 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 	if err := lm.storage.TruncateLogSuffix(ctx, newLastIndexPlusOne); err != nil {
 		lm.logger.Errorw("Failed to truncate log suffix in storage",
 			"newLastIndexPlusOne", newLastIndexPlusOne, "error", err)
-		return fmt.Errorf("log suffix truncation from index %d failed: %w", newLastIndexPlusOne, err)
+		return fmt.Errorf(
+			"log suffix truncation from index %d failed: %w",
+			newLastIndexPlusOne,
+			err,
+		)
 	}
 
 	newLastIndex := lm.storage.LastLogIndex()
@@ -574,7 +672,11 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 		lm.logger.Errorw("Inconsistent state: lastIndex increased after suffix truncation",
 			"oldLast", oldLastIndex, "newLast", newLastIndex)
 		lm.metrics.ObserveLogConsistencyError()
-		return fmt.Errorf("suffix truncation led to inconsistent state: newLastIndex %d > oldLastIndex %d", newLastIndex, oldLastIndex)
+		return fmt.Errorf(
+			"suffix truncation led to inconsistent state: newLastIndex %d > oldLastIndex %d",
+			newLastIndex,
+			oldLastIndex,
+		)
 	}
 
 	var newLastTerm types.Term
@@ -585,7 +687,11 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 				"index", newLastIndex, "error", err)
 			lm.metrics.ObserveLogConsistencyError()
 			_ = lm.RebuildInMemoryState(ctx)
-			return fmt.Errorf("suffix truncation succeeded but failed to fetch new last term for index %d: %w", newLastIndex, err)
+			return fmt.Errorf(
+				"suffix truncation succeeded but failed to fetch new last term for index %d: %w",
+				newLastIndex,
+				err,
+			)
 		}
 	}
 
@@ -617,33 +723,75 @@ func (lm *logManager) IsConsistentWithStorage(ctx context.Context) (bool, error)
 	storageLastIndex := lm.storage.LastLogIndex()
 
 	if memLastIndex != storageLastIndex {
-		lm.logger.Errorw("Log index mismatch detected", "memoryIndex", memLastIndex, "storageIndex", storageLastIndex)
+		lm.logger.Errorw(
+			"Log index mismatch detected",
+			"memoryIndex",
+			memLastIndex,
+			"storageIndex",
+			storageLastIndex,
+		)
 		lm.metrics.ObserveLogConsistencyError()
-		return false, fmt.Errorf("log index mismatch: memory=%d, storage=%d", memLastIndex, storageLastIndex)
+		return false, fmt.Errorf(
+			"log index mismatch: memory=%d, storage=%d",
+			memLastIndex,
+			storageLastIndex,
+		)
 	}
 
 	if storageLastIndex == 0 {
 		if memLastTerm != 0 {
 			lm.logger.Errorw("Log term mismatch detected for empty log", "memoryTerm", memLastTerm)
 			lm.metrics.ObserveLogConsistencyError()
-			return false, fmt.Errorf("term mismatch for empty log: memory=%d, expected=0", memLastTerm)
+			return false, fmt.Errorf(
+				"term mismatch for empty log: memory=%d, expected=0",
+				memLastTerm,
+			)
 		}
 		return true, nil
 	}
 
 	storageTerm, err := lm.fetchEntryTerm(ctx, storageLastIndex)
 	if err != nil {
-		lm.logger.Errorw("Failed to fetch storage term for consistency check", "index", storageLastIndex, "error", err)
-		return false, fmt.Errorf("unable to verify log consistency: failed to fetch term for last index %d: %w", storageLastIndex, err)
+		lm.logger.Errorw(
+			"Failed to fetch storage term for consistency check",
+			"index",
+			storageLastIndex,
+			"error",
+			err,
+		)
+		return false, fmt.Errorf(
+			"unable to verify log consistency: failed to fetch term for last index %d: %w",
+			storageLastIndex,
+			err,
+		)
 	}
 
 	if memLastTerm != storageTerm {
-		lm.logger.Errorw("Log term mismatch detected", "index", storageLastIndex, "memoryTerm", memLastTerm, "storageTerm", storageTerm)
+		lm.logger.Errorw(
+			"Log term mismatch detected",
+			"index",
+			storageLastIndex,
+			"memoryTerm",
+			memLastTerm,
+			"storageTerm",
+			storageTerm,
+		)
 		lm.metrics.ObserveLogConsistencyError()
-		return false, fmt.Errorf("log term mismatch at index %d: memory=%d, storage=%d", storageLastIndex, memLastTerm, storageTerm)
+		return false, fmt.Errorf(
+			"log term mismatch at index %d: memory=%d, storage=%d",
+			storageLastIndex,
+			memLastTerm,
+			storageTerm,
+		)
 	}
 
-	lm.logger.Debugw("Log consistency check passed", "lastIndex", storageLastIndex, "lastTerm", storageTerm)
+	lm.logger.Debugw(
+		"Log consistency check passed",
+		"lastIndex",
+		storageLastIndex,
+		"lastTerm",
+		storageTerm,
+	)
 	return true, nil
 }
 
@@ -669,7 +817,11 @@ func (lm *logManager) RebuildInMemoryState(ctx context.Context) error {
 			"lastIndex", lastIndex, "error", err)
 		lm.updateCachedState(0, 0)
 		lm.metrics.ObserveLogState(firstIndex, 0, 0)
-		return fmt.Errorf("failed to rebuild state: could not fetch last entry term at index %d: %w", lastIndex, err)
+		return fmt.Errorf(
+			"failed to rebuild state: could not fetch last entry term at index %d: %w",
+			lastIndex,
+			err,
+		)
 	}
 	lastTerm = entryTerm
 
@@ -688,7 +840,11 @@ func (lm *logManager) RebuildInMemoryState(ctx context.Context) error {
 // Starts search from `searchFromHint` if provided, otherwise from the last log index.
 // Returns the index of the last entry with the given term, or ErrNotFound if not found.
 // Returns early if it encounters an older term or a compacted log region.
-func (lm *logManager) FindLastEntryWithTermUnsafe(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error) {
+func (lm *logManager) FindLastEntryWithTermUnsafe(
+	ctx context.Context,
+	term types.Term,
+	searchFromHint types.Index,
+) (types.Index, error) {
 	if lm.isShutdown.Load() {
 		return 0, ErrShuttingDown
 	}
@@ -704,20 +860,42 @@ func (lm *logManager) FindLastEntryWithTermUnsafe(ctx context.Context, term type
 		startIdx = searchFromHint
 	}
 
-	lm.logger.Debugw("Starting FindLastEntryWithTerm", "term", term, "startIndex", startIdx, "firstIndex", firstIdx)
+	lm.logger.Debugw(
+		"Starting FindLastEntryWithTerm",
+		"term",
+		term,
+		"startIndex",
+		startIdx,
+		"firstIndex",
+		firstIdx,
+	)
 
-	return lm.scanLogForTermUnsafe(ctx, startIdx, firstIdx, -1, func(t types.Term, idx types.Index) (bool, bool) {
-		switch {
-		case t == term:
-			lm.logger.Debugw("Found last entry for term", "term", term, "index", idx)
-			return true, false
-		case t < term:
-			lm.logger.Debugw("Stopping early due to older term", "term", term, "index", idx, "entryTerm", t)
-			return false, true
-		default:
-			return false, false
-		}
-	})
+	return lm.scanLogForTermUnsafe(
+		ctx,
+		startIdx,
+		firstIdx,
+		-1,
+		func(t types.Term, idx types.Index) (bool, bool) {
+			switch {
+			case t == term:
+				lm.logger.Debugw("Found last entry for term", "term", term, "index", idx)
+				return true, false
+			case t < term:
+				lm.logger.Debugw(
+					"Stopping early due to older term",
+					"term",
+					term,
+					"index",
+					idx,
+					"entryTerm",
+					t,
+				)
+				return false, true
+			default:
+				return false, false
+			}
+		},
+	)
 }
 
 // FindFirstIndexInTermUnsafe scans backward from searchUpToIndex to find the first index
@@ -751,9 +929,17 @@ func (lm *logManager) FindFirstIndexInTermUnsafe(
 
 	if scanStartIndex < firstLogIdx || (lastLogIdx == 0 && scanStartIndex == 0 && firstLogIdx > 0) {
 		if scanStartIndex < firstLogIdx {
-			lm.logger.Debugw("FindFirstIndexInTermUnsafe: scan start index is before first log index",
-				"termToFind", termToFind, "searchUpToIndex", searchUpToIndex,
-				"scanStartIndex", scanStartIndex, "firstLogIdx", firstLogIdx)
+			lm.logger.Debugw(
+				"FindFirstIndexInTermUnsafe: scan start index is before first log index",
+				"termToFind",
+				termToFind,
+				"searchUpToIndex",
+				searchUpToIndex,
+				"scanStartIndex",
+				scanStartIndex,
+				"firstLogIdx",
+				firstLogIdx,
+			)
 			return 0, ErrNotFound
 		}
 	}
@@ -765,7 +951,11 @@ func (lm *logManager) FindFirstIndexInTermUnsafe(
 	var firstIndexOfTermBlock types.Index = 0
 	var scanErr error
 
-	_, scanErr = lm.scanLogForTermUnsafe(ctx, scanStartIndex, firstLogIdx, -1, /* step backward */
+	_, scanErr = lm.scanLogForTermUnsafe(
+		ctx,
+		scanStartIndex,
+		firstLogIdx,
+		-1, /* step backward */
 		func(currentEntryTerm types.Term, currentEntryIndex types.Index) (signalScanToStop bool, stopEarlyForScan bool) {
 			if currentEntryTerm == termToFind {
 				firstIndexOfTermBlock = currentEntryIndex
@@ -777,25 +967,39 @@ func (lm *logManager) FindFirstIndexInTermUnsafe(
 			}
 
 			return false, false
-		})
+		},
+	)
 
 	if scanErr != nil {
 		if firstIndexOfTermBlock == 0 {
 			return 0, scanErr
 		}
 
-		isHardOperationalError := !errors.Is(scanErr, ErrNotFound) && !errors.Is(scanErr, ErrCompacted)
+		isHardOperationalError := !errors.Is(scanErr, ErrNotFound) &&
+			!errors.Is(scanErr, ErrCompacted)
 		if isHardOperationalError {
-			lm.logger.Warnw("Hard error during FindFirstIndexInTermUnsafe after term block was identified",
-				"termToFind", termToFind, "firstIndexOfTermBlock", firstIndexOfTermBlock, "scanError", scanErr)
+			lm.logger.Warnw(
+				"Hard error during FindFirstIndexInTermUnsafe after term block was identified",
+				"termToFind",
+				termToFind,
+				"firstIndexOfTermBlock",
+				firstIndexOfTermBlock,
+				"scanError",
+				scanErr,
+			)
 			return 0, scanErr
 		}
 	}
 
 	if firstIndexOfTermBlock == 0 {
 		if scanErr == nil {
-			lm.logger.Debugw("FindFirstIndexInTermUnsafe: scan completed without error, but no term index found.",
-				"termToFind", termToFind, "searchUpToIndex", searchUpToIndex)
+			lm.logger.Debugw(
+				"FindFirstIndexInTermUnsafe: scan completed without error, but no term index found.",
+				"termToFind",
+				termToFind,
+				"searchUpToIndex",
+				searchUpToIndex,
+			)
 		}
 		return 0, ErrNotFound
 	}
@@ -827,7 +1031,15 @@ func (lm *logManager) scanLogForTermUnsafe(
 		term, err := lm.GetTermUnsafe(ctx, i)
 		if err != nil {
 			if errors.Is(err, ErrCompacted) {
-				lm.logger.Infow("Scan encountered compacted log segment", "index", i, "start", start, "end", end)
+				lm.logger.Infow(
+					"Scan encountered compacted log segment",
+					"index",
+					i,
+					"start",
+					start,
+					"end",
+					end,
+				)
 				return 0, ErrCompacted
 			}
 
@@ -889,7 +1101,13 @@ func (lm *logManager) fetchEntryTerm(ctx context.Context, index types.Index) (ty
 	entry, err := lm.storage.GetLogEntry(fetchCtx, index)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			lm.logger.Warnw("Timeout fetching entry term internally", "index", index, "timeout", logManagerOpTimeout)
+			lm.logger.Warnw(
+				"Timeout fetching entry term internally",
+				"index",
+				index,
+				"timeout",
+				logManagerOpTimeout,
+			)
 		} else if errors.Is(err, context.Canceled) {
 			lm.logger.Infow("Context canceled fetching entry term internally", "index", index)
 		} else if errors.Is(err, storage.ErrEntryNotFound) {

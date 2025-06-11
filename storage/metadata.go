@@ -40,7 +40,12 @@ type defaultMetadataService struct {
 }
 
 // newMetadataServiceWithDeps creates a new DefaultMetadataService with custom serializer.
-func newMetadataServiceWithDeps(fs fileSystem, serializer serializer, index indexService, logger logger.Logger) metadataService {
+func newMetadataServiceWithDeps(
+	fs fileSystem,
+	serializer serializer,
+	index indexService,
+	logger logger.Logger,
+) metadataService {
 	return &defaultMetadataService{
 		fs:         fs,
 		serializer: serializer,
@@ -60,13 +65,13 @@ func (m *defaultMetadataService) LoadMetadata(path string) (logMetadata, error) 
 			return metadata, fmt.Errorf("metadata file not found: %w", os.ErrNotExist)
 		}
 		m.logger.Errorw("Failed to read metadata file", "error", err, "path", path)
-		return metadata, fmt.Errorf("%w: failed to read metadata file: %v", ErrStorageIO, err)
+		return metadata, fmt.Errorf("%w: failed to read metadata file: %w", ErrStorageIO, err)
 	}
 
 	metadata, err = m.serializer.UnmarshalMetadata(data)
 	if err != nil {
 		m.logger.Errorw("Failed to unmarshal metadata", "error", err, "raw", string(data))
-		return metadata, fmt.Errorf("%w: failed to unmarshal metadata: %v", ErrCorruptedState, err)
+		return metadata, fmt.Errorf("%w: failed to unmarshal metadata: %w", ErrCorruptedState, err)
 	}
 
 	m.logger.Debugw("Successfully loaded metadata",
@@ -80,7 +85,11 @@ func (m *defaultMetadataService) LoadMetadata(path string) (logMetadata, error) 
 
 // SaveMetadata serializes and writes metadata to the given file path.
 // If useAtomicWrite is true, the write will be performed atomically using a temporary file and rename.
-func (m *defaultMetadataService) SaveMetadata(path string, metadata logMetadata, useAtomicWrite bool) error {
+func (m *defaultMetadataService) SaveMetadata(
+	path string,
+	metadata logMetadata,
+	useAtomicWrite bool,
+) error {
 	m.logger.Debugw("Saving metadata",
 		"path", path,
 		"useAtomicWrite", useAtomicWrite,
@@ -91,12 +100,12 @@ func (m *defaultMetadataService) SaveMetadata(path string, metadata logMetadata,
 	data, err := m.serializer.MarshalMetadata(metadata)
 	if err != nil {
 		m.logger.Errorw("Failed to marshal metadata", "error", err)
-		return fmt.Errorf("%w: failed to marshal metadata: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to marshal metadata: %w", ErrStorageIO, err)
 	}
 
 	if err := m.fs.WriteMaybeAtomic(path, data, ownRWOthR, useAtomicWrite); err != nil {
 		m.logger.Errorw("Failed to write metadata", "path", path, "error", err)
-		return fmt.Errorf("%w: failed to write metadata file: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to write metadata file: %w", ErrStorageIO, err)
 	}
 
 	m.logger.Infow("Metadata successfully saved", "path", path)
@@ -113,7 +122,6 @@ func (m *defaultMetadataService) SyncMetadataFromIndexMap(
 	context string,
 	useAtomicWrite bool,
 ) (types.Index, types.Index, error) {
-
 	boundsRes := m.index.GetBounds(indexMap, currentFirst, currentLast)
 
 	if !boundsRes.Changed {
@@ -144,7 +152,11 @@ func (m *defaultMetadataService) SyncMetadataFromIndexMap(
 			"context", context,
 			"path", path,
 			"error", err)
-		return currentFirst, currentLast, fmt.Errorf("%w: failed saving metadata during %s", ErrStorageIO, context)
+		return currentFirst, currentLast, fmt.Errorf(
+			"%w: failed saving metadata during %s",
+			ErrStorageIO,
+			context,
+		)
 	}
 
 	m.logger.Debugw("Metadata successfully saved",

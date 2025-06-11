@@ -126,7 +126,11 @@ func (b *RaftBuilder) Build() (Raft, error) {
 
 	quorum := calculateQuorumSize(len(b.config.Peers))
 	if quorum == 0 && len(b.config.Peers) > 0 {
-		log.Warnw("Quorum size is 0 for a multi-node cluster; check configuration", "peerCount", len(b.config.Peers))
+		log.Warnw(
+			"Quorum size is 0 for a multi-node cluster; check configuration",
+			"peerCount",
+			len(b.config.Peers),
+		)
 	}
 
 	snapshotDeps := SnapshotManagerDeps{
@@ -190,7 +194,15 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		return nil, fmt.Errorf("failed to initialize election manager: %w", err)
 	}
 
-	log.Infow("Raft initialized", "id", b.config.ID, "peerCount", len(b.config.Peers), "quorumSize", quorum)
+	log.Infow(
+		"Raft initialized",
+		"id",
+		b.config.ID,
+		"peerCount",
+		len(b.config.Peers),
+		"quorumSize",
+		quorum,
+	)
 	return node, nil
 }
 

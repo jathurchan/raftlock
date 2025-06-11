@@ -201,8 +201,18 @@ func (m *metrics) addDerivedAverages(metricsMap map[string]uint64) {
 	addAverageLatency(metricsMap, "read", &m.readLatencySum, &m.readLatencyCount)
 	addAverageLatency(metricsMap, "state", &m.stateLatencySum, &m.stateLatencyCount)
 	addAverageLatency(metricsMap, "snapshot", &m.snapshotLatencySum, &m.snapshotLatencyCount)
-	addAverageLatency(metricsMap, "serialization_time", &m.serializationTimeSum, &m.serializationCount)
-	addAverageLatency(metricsMap, "deserialization_time", &m.deserializationTimeSum, &m.deserializationCount)
+	addAverageLatency(
+		metricsMap,
+		"serialization_time",
+		&m.serializationTimeSum,
+		&m.serializationCount,
+	)
+	addAverageLatency(
+		metricsMap,
+		"deserialization_time",
+		&m.deserializationTimeSum,
+		&m.deserializationCount,
+	)
 }
 
 func (m *metrics) addDerivedStats(metricsMap map[string]uint64) {
@@ -233,7 +243,12 @@ func (m *metrics) addDerivedStats(metricsMap map[string]uint64) {
 }
 
 // appendLatencySummary formats and writes latency details (Avg, Max, P95, P99) to the buffer.
-func appendLatencySummary(buf *bytes.Buffer, name string, sum, count, max *atomic.Uint64, sampler *latencySampler) {
+func appendLatencySummary(
+	buf *bytes.Buffer,
+	name string,
+	sum, count, max *atomic.Uint64,
+	sampler *latencySampler,
+) {
 	c := count.Load()
 	avg := uint64(0)
 	if c > 0 {
@@ -276,8 +291,20 @@ func (m *metrics) writeOperations(buf *bytes.Buffer) {
 	buf.WriteString(fmt.Sprintf("  Append Ops: %d\n", m.appendOps.Load()))
 	buf.WriteString(fmt.Sprintf("  Read Ops: %d\n", m.readOps.Load()))
 	buf.WriteString(fmt.Sprintf("  State Ops: %d\n", m.stateOps.Load()))
-	buf.WriteString(fmt.Sprintf("  Snapshots: %d saved / %d loaded\n", m.snapshotSaveOps.Load(), m.snapshotLoadOps.Load()))
-	buf.WriteString(fmt.Sprintf("  Truncations: %d prefix / %d suffix\n", m.truncatePrefixOps.Load(), m.truncateSuffixOps.Load()))
+	buf.WriteString(
+		fmt.Sprintf(
+			"  Snapshots: %d saved / %d loaded\n",
+			m.snapshotSaveOps.Load(),
+			m.snapshotLoadOps.Load(),
+		),
+	)
+	buf.WriteString(
+		fmt.Sprintf(
+			"  Truncations: %d prefix / %d suffix\n",
+			m.truncatePrefixOps.Load(),
+			m.truncateSuffixOps.Load(),
+		),
+	)
 }
 
 func (m *metrics) ensureSamplers() {
@@ -290,8 +317,22 @@ func (m *metrics) ensureSamplers() {
 
 func (m *metrics) writeLatencies(buf *bytes.Buffer) {
 	buf.WriteString("\nLatencies:\n")
-	appendLatencySummary(buf, "Append", &m.appendLatencySum, &m.appendLatencyCount, &m.appendLatencyMax, m.latencySamplers["append"])
-	appendLatencySummary(buf, "Read", &m.readLatencySum, &m.readLatencyCount, &m.readLatencyMax, m.latencySamplers["read"])
+	appendLatencySummary(
+		buf,
+		"Append",
+		&m.appendLatencySum,
+		&m.appendLatencyCount,
+		&m.appendLatencyMax,
+		m.latencySamplers["append"],
+	)
+	appendLatencySummary(
+		buf,
+		"Read",
+		&m.readLatencySum,
+		&m.readLatencyCount,
+		&m.readLatencyMax,
+		m.latencySamplers["read"],
+	)
 }
 
 func (m *metrics) writeStorage(buf *bytes.Buffer) {

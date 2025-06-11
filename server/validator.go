@@ -203,10 +203,18 @@ func (v *requestValidator) validateLockID(lockID string) error {
 		return NewValidationError("lock_id", lockID, "lock_id cannot be empty")
 	}
 	if len(lockID) > MaxLockIDLength {
-		return NewValidationError("lock_id", lockID, fmt.Sprintf(ErrMsgInvalidLockID, MaxLockIDLength))
+		return NewValidationError(
+			"lock_id",
+			lockID,
+			fmt.Sprintf(ErrMsgInvalidLockID, MaxLockIDLength),
+		)
 	}
 	if strings.ContainsAny(lockID, "\x00\n\r\t") {
-		return NewValidationError("lock_id", lockID, "lock_id contains invalid characters (null, newline, tab)")
+		return NewValidationError(
+			"lock_id",
+			lockID,
+			"lock_id contains invalid characters (null, newline, tab)",
+		)
 	}
 	return nil
 }
@@ -216,31 +224,51 @@ func (v *requestValidator) validateClientID(clientID string) error {
 		return NewValidationError("client_id", clientID, "client_id cannot be empty")
 	}
 	if len(clientID) > MaxClientIDLength {
-		return NewValidationError("client_id", clientID, fmt.Sprintf(ErrMsgInvalidClientID, MaxClientIDLength))
+		return NewValidationError(
+			"client_id",
+			clientID,
+			fmt.Sprintf(ErrMsgInvalidClientID, MaxClientIDLength),
+		)
 	}
 	if strings.ContainsAny(clientID, "\x00\n\r\t") {
-		return NewValidationError("client_id", clientID, "client_id contains invalid characters (null, newline, tab)")
+		return NewValidationError(
+			"client_id",
+			clientID,
+			"client_id contains invalid characters (null, newline, tab)",
+		)
 	}
 	return nil
 }
 
 func (v *requestValidator) validateTTL(ttl time.Duration) error {
 	if ttl < MinLockTTL || ttl > MaxLockTTL {
-		return NewValidationError("ttl", ttl.String(), fmt.Sprintf(ErrMsgInvalidTTL, MinLockTTL, MaxLockTTL))
+		return NewValidationError(
+			"ttl",
+			ttl.String(),
+			fmt.Sprintf(ErrMsgInvalidTTL, MinLockTTL, MaxLockTTL),
+		)
 	}
 	return nil
 }
 
 func (v *requestValidator) validateWaitTimeout(timeout time.Duration) error {
 	if timeout < MinWaitTimeout || timeout > MaxWaitTimeout {
-		return NewValidationError("timeout", timeout.String(), fmt.Sprintf(ErrMsgInvalidTimeout, MinWaitTimeout, MaxWaitTimeout))
+		return NewValidationError(
+			"timeout",
+			timeout.String(),
+			fmt.Sprintf(ErrMsgInvalidTimeout, MinWaitTimeout, MaxWaitTimeout),
+		)
 	}
 	return nil
 }
 
 func (v *requestValidator) validatePriority(priority int32) error {
 	if priority < MinPriority || priority > MaxPriority {
-		return NewValidationError("priority", priority, fmt.Sprintf(ErrMsgInvalidPriority, MinPriority, MaxPriority))
+		return NewValidationError(
+			"priority",
+			priority,
+			fmt.Sprintf(ErrMsgInvalidPriority, MinPriority, MaxPriority),
+		)
 	}
 	return nil
 }
@@ -250,17 +278,29 @@ func (v *requestValidator) validateMetadata(metadata map[string]string) error {
 		return nil
 	}
 	if len(metadata) > MaxMetadataEntries {
-		return NewValidationError("metadata", fmt.Sprintf("entry_count: %d", len(metadata)), fmt.Sprintf(ErrMsgTooManyMetadata, MaxMetadataEntries))
+		return NewValidationError(
+			"metadata",
+			fmt.Sprintf("entry_count: %d", len(metadata)),
+			fmt.Sprintf(ErrMsgTooManyMetadata, MaxMetadataEntries),
+		)
 	}
 	for key, value := range metadata {
 		if len(key) == 0 {
 			return NewValidationError("metadata.key", key, "metadata key cannot be empty")
 		}
 		if len(key) > MaxMetadataKeyLength {
-			return NewValidationError("metadata.key", key, fmt.Sprintf(ErrMsgMetadataKeyTooLong, MaxMetadataKeyLength))
+			return NewValidationError(
+				"metadata.key",
+				key,
+				fmt.Sprintf(ErrMsgMetadataKeyTooLong, MaxMetadataKeyLength),
+			)
 		}
 		if len(value) > MaxMetadataValueLength {
-			return NewValidationError("metadata.value", fmt.Sprintf("len:%d", len(value)), fmt.Sprintf(ErrMsgMetadataValueTooLong, MaxMetadataValueLength))
+			return NewValidationError(
+				"metadata.value",
+				fmt.Sprintf("len:%d", len(value)),
+				fmt.Sprintf(ErrMsgMetadataValueTooLong, MaxMetadataValueLength),
+			)
 		}
 	}
 	return nil
@@ -268,27 +308,51 @@ func (v *requestValidator) validateMetadata(metadata map[string]string) error {
 
 func (v *requestValidator) validateRequestID(requestID string) error {
 	if requestID != "" && len(requestID) > MaxRequestIDLength {
-		return NewValidationError("request_id", requestID, fmt.Sprintf("request_id length cannot exceed %d characters", MaxRequestIDLength))
+		return NewValidationError(
+			"request_id",
+			requestID,
+			fmt.Sprintf("request_id length cannot exceed %d characters", MaxRequestIDLength),
+		)
 	}
 	return nil
 }
 
 func (v *requestValidator) validateLockFilter(filter *pb.LockFilter) error {
 	if filter.LockIdPattern != "" && len(filter.LockIdPattern) > MaxLockIDLength {
-		return NewValidationError("filter.lock_id_pattern", filter.LockIdPattern, fmt.Sprintf("lock_id_pattern too long (max %d)", MaxLockIDLength))
+		return NewValidationError(
+			"filter.lock_id_pattern",
+			filter.LockIdPattern,
+			fmt.Sprintf("lock_id_pattern too long (max %d)", MaxLockIDLength),
+		)
 	}
 	if filter.OwnerIdPattern != "" && len(filter.OwnerIdPattern) > MaxClientIDLength {
-		return NewValidationError("filter.owner_id_pattern", filter.OwnerIdPattern, fmt.Sprintf("owner_id_pattern too long (max %d)", MaxClientIDLength))
+		return NewValidationError(
+			"filter.owner_id_pattern",
+			filter.OwnerIdPattern,
+			fmt.Sprintf("owner_id_pattern too long (max %d)", MaxClientIDLength),
+		)
 	}
 	if filter.ExpiresBefore != nil && !filter.ExpiresBefore.IsValid() {
-		return NewValidationError("filter.expires_before", filter.ExpiresBefore, "invalid timestamp for expires_before")
+		return NewValidationError(
+			"filter.expires_before",
+			filter.ExpiresBefore,
+			"invalid timestamp for expires_before",
+		)
 	}
 	if filter.ExpiresAfter != nil && !filter.ExpiresAfter.IsValid() {
-		return NewValidationError("filter.expires_after", filter.ExpiresAfter, "invalid timestamp for expires_after")
+		return NewValidationError(
+			"filter.expires_after",
+			filter.ExpiresAfter,
+			"invalid timestamp for expires_after",
+		)
 	}
 	if filter.MetadataFilter != nil {
 		if err := v.validateMetadata(filter.MetadataFilter); err != nil {
-			return NewValidationError("filter.metadata_filter", "sub-validation failed", err.Error())
+			return NewValidationError(
+				"filter.metadata_filter",
+				"sub-validation failed",
+				err.Error(),
+			)
 		}
 	}
 	return nil

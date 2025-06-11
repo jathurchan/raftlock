@@ -21,7 +21,11 @@ type TokenBucketRateLimiter struct {
 }
 
 // NewTokenBucketRateLimiter creates a new token bucket rate limiter.
-func NewTokenBucketRateLimiter(maxRequests, burst int, window time.Duration, logger logger.Logger) *TokenBucketRateLimiter {
+func NewTokenBucketRateLimiter(
+	maxRequests, burst int,
+	window time.Duration,
+	logger logger.Logger,
+) *TokenBucketRateLimiter {
 	var rps rate.Limit
 	if window.Seconds() > 0 {
 		rps = rate.Limit(float64(maxRequests) / window.Seconds())

@@ -110,7 +110,11 @@ func (n *NoOpServerMetrics) IncrServerError(method string, errorType string)    
 func (n *NoOpServerMetrics) IncrQueueOverflow(queueType string)                           {}
 func (n *NoOpServerMetrics) IncrLockExpiration()                                          {}
 func (n *NoOpServerMetrics) ObserveRequestLatency(method string, latency time.Duration)   {}
-func (n *NoOpServerMetrics) ObserveRaftProposalLatency(operation types.LockOperation, latency time.Duration) {
+
+func (n *NoOpServerMetrics) ObserveRaftProposalLatency(
+	operation types.LockOperation,
+	latency time.Duration,
+) {
 }
 func (n *NoOpServerMetrics) ObserveQueueLength(queueType string, length int)  {}
 func (n *NoOpServerMetrics) ObserveRequestSize(method string, sizeBytes int)  {}

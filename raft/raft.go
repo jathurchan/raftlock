@@ -209,7 +209,8 @@ func (r *raftNode) stopNetworkManager() error {
 	r.logger.Debugw("Stopping network manager")
 	err := r.networkMgr.Stop()
 
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	if err != nil && !errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	return nil
@@ -240,7 +241,10 @@ func (r *raftNode) Tick(ctx context.Context) {
 }
 
 // Propose submits a new command to be replicated.
-func (r *raftNode) Propose(ctx context.Context, command []byte) (types.Index, types.Term, bool, error) {
+func (r *raftNode) Propose(
+	ctx context.Context,
+	command []byte,
+) (types.Index, types.Term, bool, error) {
 	startTime := r.clock.Now()
 	r.metrics.IncCounter("raft_propose_total")
 
@@ -255,7 +259,6 @@ func (r *raftNode) Propose(ctx context.Context, command []byte) (types.Index, ty
 	}
 
 	index, term, isLeader, err := r.replicationMgr.Propose(ctx, command)
-
 	if err != nil {
 		if errors.Is(err, ErrNotLeader) {
 			r.logger.Infow("Proposal rejected: not leader",
@@ -296,7 +299,6 @@ func (r *raftNode) ReadIndex(ctx context.Context) (types.Index, error) {
 	}
 
 	index, err := r.replicationMgr.VerifyLeadershipAndGetCommitIndex(ctx)
-
 	if err != nil {
 		if errors.Is(err, ErrNotLeader) {
 			r.logger.Infow("ReadIndex rejected: not leader",
@@ -386,7 +388,10 @@ func (r *raftNode) LeaderChangeChannel() <-chan types.NodeID {
 }
 
 // RequestVote handles vote requests from candidates
-func (r *raftNode) RequestVote(ctx context.Context, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+func (r *raftNode) RequestVote(
+	ctx context.Context,
+	args *types.RequestVoteArgs,
+) (*types.RequestVoteReply, error) {
 	r.metrics.IncCounter("raft_request_vote_received_total",
 		"is_prevote", fmt.Sprintf("%t", args.IsPreVote),
 		"candidate", string(args.CandidateID))
@@ -399,7 +404,6 @@ func (r *raftNode) RequestVote(ctx context.Context, args *types.RequestVoteArgs)
 
 	startTime := r.clock.Now()
 	reply, err := r.electionMgr.HandleRequestVote(ctx, args)
-
 	if err != nil {
 		r.metrics.IncCounter("raft_request_vote_errors_total")
 		return reply, err
@@ -422,7 +426,10 @@ func (r *raftNode) RequestVote(ctx context.Context, args *types.RequestVoteArgs)
 }
 
 // AppendEntries handles log replication RPCs from the leader
-func (r *raftNode) AppendEntries(ctx context.Context, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+func (r *raftNode) AppendEntries(
+	ctx context.Context,
+	args *types.AppendEntriesArgs,
+) (*types.AppendEntriesReply, error) {
 	isHeartbeat := len(args.Entries) == 0
 
 	if isHeartbeat {
@@ -465,7 +472,10 @@ func (r *raftNode) AppendEntries(ctx context.Context, args *types.AppendEntriesA
 }
 
 // InstallSnapshot handles snapshot transfers from the leader
-func (r *raftNode) InstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+func (r *raftNode) InstallSnapshot(
+	ctx context.Context,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) {
 	r.metrics.IncCounter("raft_install_snapshot_received_total")
 	r.metrics.AddCounter("raft_install_snapshot_bytes_received", float64(len(args.Data)))
 
@@ -583,7 +593,9 @@ func (r *raftNode) getCommitAndLastApplied() (commitIdx, lastAppliedIdx types.In
 }
 
 // determineApplyRange calculates the next index and capped end index for batch processing.
-func (r *raftNode) determineApplyRange(lastAppliedIdx, commitIdx types.Index) (types.Index, types.Index) {
+func (r *raftNode) determineApplyRange(
+	lastAppliedIdx, commitIdx types.Index,
+) (types.Index, types.Index) {
 	nextApplyIdx := lastAppliedIdx + 1
 
 	batchLimit := types.Index(DefaultMaxApplyBatchSize)

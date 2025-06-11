@@ -38,13 +38,25 @@ type NetworkManager interface {
 	Stop() error
 
 	// SendRequestVote sends a RequestVote RPC to a target peer.
-	SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error)
+	SendRequestVote(
+		ctx context.Context,
+		target types.NodeID,
+		args *types.RequestVoteArgs,
+	) (*types.RequestVoteReply, error)
 
 	// SendAppendEntries sends an AppendEntries RPC (log replication or heartbeat) to a target peer.
-	SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)
+	SendAppendEntries(
+		ctx context.Context,
+		target types.NodeID,
+		args *types.AppendEntriesArgs,
+	) (*types.AppendEntriesReply, error)
 
 	// SendInstallSnapshot efficiently streams or chunks snapshot data to a target peer.
-	SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)
+	SendInstallSnapshot(
+		ctx context.Context,
+		target types.NodeID,
+		args *types.InstallSnapshotArgs,
+	) (*types.InstallSnapshotReply, error)
 
 	// PeerStatus returns health and connection info for a known peer.
 	PeerStatus(peer types.NodeID) (types.PeerConnectionStatus, error)
@@ -164,7 +176,15 @@ func NewGRPCNetworkManager(
 			return nil, fmt.Errorf("address for peer %s cannot be empty", peerID)
 		}
 		if peerID == id && peerCfg.Address != addr {
-			logger.Warnw("Peer configuration for self has different address", "self_id", id, "configured_addr", peerCfg.Address, "local_addr", addr)
+			logger.Warnw(
+				"Peer configuration for self has different address",
+				"self_id",
+				id,
+				"configured_addr",
+				peerCfg.Address,
+				"local_addr",
+				addr,
+			)
 		}
 	}
 
@@ -272,8 +292,15 @@ func (nm *gRPCNetworkManager) Start() error {
 		close(nm.serverReady)
 
 		if err := nm.server.Serve(listener); err != nil {
-			if !nm.isShutdown.Load() && !errors.Is(err, grpc.ErrServerStopped) && !errors.Is(err, net.ErrClosed) {
-				nm.logger.Errorw("gRPC server encountered an error", "address", actualAddr, "error", err)
+			if !nm.isShutdown.Load() && !errors.Is(err, grpc.ErrServerStopped) &&
+				!errors.Is(err, net.ErrClosed) {
+				nm.logger.Errorw(
+					"gRPC server encountered an error",
+					"address",
+					actualAddr,
+					"error",
+					err,
+				)
 			} else {
 				nm.logger.Infow("gRPC server stopped serving", "address", actualAddr)
 			}
@@ -284,9 +311,16 @@ func (nm *gRPCNetworkManager) Start() error {
 	case <-nm.serverReady:
 		nm.logger.Infow("gRPC server goroutine is running", "address", actualAddr)
 	case <-nm.clock.After(nm.opts.ServerStartTimeout):
-		nm.logger.Errorw("Timeout waiting for gRPC server goroutine to start", "timeout", nm.opts.ServerStartTimeout)
+		nm.logger.Errorw(
+			"Timeout waiting for gRPC server goroutine to start",
+			"timeout",
+			nm.opts.ServerStartTimeout,
+		)
 		_ = listener.Close()
-		return fmt.Errorf("timeout waiting for gRPC server to start listening after %v", nm.opts.ServerStartTimeout)
+		return fmt.Errorf(
+			"timeout waiting for gRPC server to start listening after %v",
+			nm.opts.ServerStartTimeout,
+		)
 	case <-context.Background().Done():
 		nm.logger.Warnw("Shutdown requested during server startup")
 		_ = listener.Close()
@@ -360,7 +394,13 @@ func (nm *gRPCNetworkManager) stopInternal() error {
 			if exists && connToClose != nil {
 				nm.logger.Debugw("Closing client connection to peer", "peer_id", peerID)
 				if cerr := connToClose.Close(); cerr != nil {
-					nm.logger.Warnw("Error closing connection to peer", "peer_id", peerID, "error", cerr)
+					nm.logger.Warnw(
+						"Error closing connection to peer",
+						"peer_id",
+						peerID,
+						"error",
+						cerr,
+					)
 				}
 			}
 		}(id)
@@ -405,17 +445,48 @@ func (nm *gRPCNetworkManager) SendRequestVote(
 		IsPreVote:    args.IsPreVote,
 	}
 
-	nm.logger.Debugw("Sending RequestVote RPC", "target", target, "term", args.Term, "is_prevote", args.IsPreVote)
+	nm.logger.Debugw(
+		"Sending RequestVote RPC",
+		"target",
+		target,
+		"term",
+		args.Term,
+		"is_prevote",
+		args.IsPreVote,
+	)
 
 	resp, err := client.client.RequestVote(ctx, req)
 	latency := nm.clock.Since(startTime)
-	nm.metrics.ObserveHistogram("grpc_client_rpc_latency_seconds", latency.Seconds(), "rpc", "RequestVote", "peer_id", string(target))
+	nm.metrics.ObserveHistogram(
+		"grpc_client_rpc_latency_seconds",
+		latency.Seconds(),
+		"rpc",
+		"RequestVote",
+		"peer_id",
+		string(target),
+	)
 
 	if err != nil {
-		nm.logger.Debugw("RequestVote RPC failed", "target", target, "term", args.Term, "error", err, "latency", latency)
+		nm.logger.Debugw(
+			"RequestVote RPC failed",
+			"target",
+			target,
+			"term",
+			args.Term,
+			"error",
+			err,
+			"latency",
+			latency,
+		)
 		client.lastError = err
 		client.connected.Store(false)
-		nm.metrics.IncCounter("grpc_client_rpc_failures_total", "rpc", "RequestVote", "peer_id", string(target))
+		nm.metrics.IncCounter(
+			"grpc_client_rpc_failures_total",
+			"rpc",
+			"RequestVote",
+			"peer_id",
+			string(target),
+		)
 		return nil, formatGRPCError(err)
 	}
 
@@ -428,8 +499,26 @@ func (nm *gRPCNetworkManager) SendRequestVote(
 		VoteGranted: resp.VoteGranted,
 	}
 
-	nm.logger.Debugw("RequestVote RPC succeeded", "target", target, "term", args.Term, "vote_granted", reply.VoteGranted, "reply_term", reply.Term, "latency", latency)
-	nm.metrics.IncCounter("grpc_client_rpc_success_total", "rpc", "RequestVote", "peer_id", string(target))
+	nm.logger.Debugw(
+		"RequestVote RPC succeeded",
+		"target",
+		target,
+		"term",
+		args.Term,
+		"vote_granted",
+		reply.VoteGranted,
+		"reply_term",
+		reply.Term,
+		"latency",
+		latency,
+	)
+	nm.metrics.IncCounter(
+		"grpc_client_rpc_success_total",
+		"rpc",
+		"RequestVote",
+		"peer_id",
+		string(target),
+	)
 
 	return reply, nil
 }
@@ -446,7 +535,11 @@ func (nm *gRPCNetworkManager) SendAppendEntries(
 
 	client, err := nm.getOrCreatePeerClient(target)
 	if err != nil {
-		return nil, fmt.Errorf("SendAppendEntries: failed to get client for peer %s: %w", target, err)
+		return nil, fmt.Errorf(
+			"SendAppendEntries: failed to get client for peer %s: %w",
+			target,
+			err,
+		)
 	}
 
 	startTime := nm.clock.Now()
@@ -480,24 +573,59 @@ func (nm *gRPCNetworkManager) SendAppendEntries(
 	}
 
 	if !isHeartbeat {
-		nm.logger.Debugw("Sending AppendEntries RPC", "target", target, "term", args.Term, "entries_count", len(args.Entries), "prev_idx", args.PrevLogIndex, "prev_term", args.PrevLogTerm)
+		nm.logger.Debugw(
+			"Sending AppendEntries RPC",
+			"target",
+			target,
+			"term",
+			args.Term,
+			"entries_count",
+			len(args.Entries),
+			"prev_idx",
+			args.PrevLogIndex,
+			"prev_term",
+			args.PrevLogTerm,
+		)
 	} else {
 		nm.logger.Debugw("Sending Heartbeat", "target", target, "term", args.Term, "prev_idx", args.PrevLogIndex, "prev_term", args.PrevLogTerm)
 	}
 
 	resp, err := client.client.AppendEntries(ctx, req)
 	latency := nm.clock.Since(startTime)
-	nm.metrics.ObserveHistogram("grpc_client_rpc_latency_seconds", latency.Seconds(), "rpc", rpcType, "peer_id", string(target))
+	nm.metrics.ObserveHistogram(
+		"grpc_client_rpc_latency_seconds",
+		latency.Seconds(),
+		"rpc",
+		rpcType,
+		"peer_id",
+		string(target),
+	)
 
 	if err != nil {
 		logLevel := nm.logger.Debugw
 		if !isHeartbeat {
 			logLevel = nm.logger.Warnw
 		}
-		logLevel(rpcType+" RPC failed", "target", target, "term", args.Term, "error", err, "latency", latency)
+		logLevel(
+			rpcType+" RPC failed",
+			"target",
+			target,
+			"term",
+			args.Term,
+			"error",
+			err,
+			"latency",
+			latency,
+		)
 		client.lastError = err
 		client.connected.Store(false)
-		nm.metrics.IncCounter("grpc_client_rpc_failures_total", "rpc", rpcType, "peer_id", string(target))
+		nm.metrics.IncCounter(
+			"grpc_client_rpc_failures_total",
+			"rpc",
+			rpcType,
+			"peer_id",
+			string(target),
+		)
 		return nil, formatGRPCError(err)
 	}
 
@@ -517,17 +645,47 @@ func (nm *gRPCNetworkManager) SendAppendEntries(
 		"target", target, "reply_term", reply.Term, "success", reply.Success, "latency", latency,
 	}
 	if !isHeartbeat || !reply.Success {
-		logFields = append(logFields,
-			"term", args.Term, "entries_count", len(args.Entries),
-			"reply_conflict_idx", reply.ConflictIndex, "reply_conflict_term", reply.ConflictTerm, "reply_match_idx", reply.MatchIndex)
+		logFields = append(
+			logFields,
+			"term",
+			args.Term,
+			"entries_count",
+			len(args.Entries),
+			"reply_conflict_idx",
+			reply.ConflictIndex,
+			"reply_conflict_term",
+			reply.ConflictTerm,
+			"reply_match_idx",
+			reply.MatchIndex,
+		)
 		nm.logger.Debugw(rpcType+" RPC response", logFields...)
 	} else {
 		nm.logger.Debugw(rpcType+" successful", logFields...)
 	}
-	nm.metrics.IncCounter("grpc_client_rpc_success_total", "rpc", rpcType, "peer_id", string(target))
+	nm.metrics.IncCounter(
+		"grpc_client_rpc_success_total",
+		"rpc",
+		rpcType,
+		"peer_id",
+		string(target),
+	)
 	if !isHeartbeat {
-		nm.metrics.AddCounter("grpc_client_sent_bytes_total", float64(totalDataSize), "rpc", rpcType, "peer_id", string(target))
-		nm.metrics.AddCounter("grpc_client_sent_entries_total", float64(len(entries)), "rpc", rpcType, "peer_id", string(target))
+		nm.metrics.AddCounter(
+			"grpc_client_sent_bytes_total",
+			float64(totalDataSize),
+			"rpc",
+			rpcType,
+			"peer_id",
+			string(target),
+		)
+		nm.metrics.AddCounter(
+			"grpc_client_sent_entries_total",
+			float64(len(entries)),
+			"rpc",
+			rpcType,
+			"peer_id",
+			string(target),
+		)
 	}
 
 	return reply, nil
@@ -545,7 +703,11 @@ func (nm *gRPCNetworkManager) SendInstallSnapshot(
 
 	client, err := nm.getOrCreatePeerClient(target)
 	if err != nil {
-		return nil, fmt.Errorf("SendInstallSnapshot: failed to get client for peer %s: %w", target, err)
+		return nil, fmt.Errorf(
+			"SendInstallSnapshot: failed to get client for peer %s: %w",
+			target,
+			err,
+		)
 	}
 
 	startTime := nm.clock.Now()
@@ -561,19 +723,52 @@ func (nm *gRPCNetworkManager) SendInstallSnapshot(
 	}
 	dataSize := len(args.Data)
 
-	nm.logger.Infow("Sending InstallSnapshot RPC",
-		"target", target, "term", args.Term,
-		"last_included_index", args.LastIncludedIndex, "last_included_term", args.LastIncludedTerm, "data_size", dataSize)
+	nm.logger.Infow(
+		"Sending InstallSnapshot RPC",
+		"target",
+		target,
+		"term",
+		args.Term,
+		"last_included_index",
+		args.LastIncludedIndex,
+		"last_included_term",
+		args.LastIncludedTerm,
+		"data_size",
+		dataSize,
+	)
 
 	resp, err := client.client.InstallSnapshot(ctx, req)
 	latency := nm.clock.Since(startTime)
-	nm.metrics.ObserveHistogram("grpc_client_rpc_latency_seconds", latency.Seconds(), "rpc", "InstallSnapshot", "peer_id", string(target))
+	nm.metrics.ObserveHistogram(
+		"grpc_client_rpc_latency_seconds",
+		latency.Seconds(),
+		"rpc",
+		"InstallSnapshot",
+		"peer_id",
+		string(target),
+	)
 
 	if err != nil {
-		nm.logger.Warnw("InstallSnapshot RPC failed", "target", target, "term", args.Term, "error", err, "latency", latency)
+		nm.logger.Warnw(
+			"InstallSnapshot RPC failed",
+			"target",
+			target,
+			"term",
+			args.Term,
+			"error",
+			err,
+			"latency",
+			latency,
+		)
 		client.lastError = err
 		client.connected.Store(false)
-		nm.metrics.IncCounter("grpc_client_rpc_failures_total", "rpc", "InstallSnapshot", "peer_id", string(target))
+		nm.metrics.IncCounter(
+			"grpc_client_rpc_failures_total",
+			"rpc",
+			"InstallSnapshot",
+			"peer_id",
+			string(target),
+		)
 		return nil, formatGRPCError(err)
 	}
 
@@ -585,9 +780,32 @@ func (nm *gRPCNetworkManager) SendInstallSnapshot(
 		Term: types.Term(resp.Term),
 	}
 
-	nm.logger.Infow("InstallSnapshot RPC succeeded", "target", target, "term", args.Term, "reply_term", reply.Term, "latency", latency)
-	nm.metrics.IncCounter("grpc_client_rpc_success_total", "rpc", "InstallSnapshot", "peer_id", string(target))
-	nm.metrics.AddCounter("grpc_client_sent_bytes_total", float64(dataSize), "rpc", "InstallSnapshot", "peer_id", string(target))
+	nm.logger.Infow(
+		"InstallSnapshot RPC succeeded",
+		"target",
+		target,
+		"term",
+		args.Term,
+		"reply_term",
+		reply.Term,
+		"latency",
+		latency,
+	)
+	nm.metrics.IncCounter(
+		"grpc_client_rpc_success_total",
+		"rpc",
+		"InstallSnapshot",
+		"peer_id",
+		string(target),
+	)
+	nm.metrics.AddCounter(
+		"grpc_client_sent_bytes_total",
+		float64(dataSize),
+		"rpc",
+		"InstallSnapshot",
+		"peer_id",
+		string(target),
+	)
 
 	return reply, nil
 }
@@ -655,7 +873,13 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClient(peerID types.NodeID) (*peerC
 			addr: peerCfg.Address,
 		}
 		nm.peerClients[peerID] = client
-		nm.logger.Debugw("Created new peer connection state struct", "peer_id", peerID, "address", peerCfg.Address)
+		nm.logger.Debugw(
+			"Created new peer connection state struct",
+			"peer_id",
+			peerID,
+			"address",
+			peerCfg.Address,
+		)
 	} else {
 		nm.logger.Debugw("Existing peer connection state struct found, attempting reconnect", "peer_id", peerID, "address", client.addr)
 	}
@@ -687,7 +911,9 @@ func (nm *gRPCNetworkManager) connectToPeerLocked(client *peerConnection) error 
 	}
 
 	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()), // TODO: Replace with secure credentials
+		grpc.WithTransportCredentials(
+			insecure.NewCredentials(),
+		), // TODO: Replace with secure credentials
 		grpc.WithKeepaliveParams(dialKeepaliveParams),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
@@ -789,13 +1015,24 @@ func (h *grpcServerHandler) RequestVote(
 	h.nm.metrics.ObserveHistogram("grpc_server_rpc_latency_seconds", latency.Seconds(), "rpc", rpc)
 
 	if err != nil {
-		h.logger.Warnw("Internal handler failed for RPC", "rpc", rpc, "error", err, "from", args.CandidateID)
+		h.logger.Warnw(
+			"Internal handler failed for RPC",
+			"rpc",
+			rpc,
+			"error",
+			err,
+			"from",
+			args.CandidateID,
+		)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpc)
 
 		if _, ok := status.FromError(err); ok {
 			return nil, err
 		}
-		return nil, status.Error(codes.Internal, fmt.Sprintf("internal raft handler error: %v", err))
+		return nil, status.Error(
+			codes.Internal,
+			fmt.Sprintf("internal raft handler error: %v", err),
+		)
 	}
 
 	resp := &proto.RequestVoteResponse{
@@ -803,7 +1040,17 @@ func (h *grpcServerHandler) RequestVote(
 		VoteGranted: reply.VoteGranted,
 	}
 
-	h.logger.Debugw("Sending RPC reply", "rpc", rpc, "to", args.CandidateID, "term", resp.Term, "granted", resp.VoteGranted)
+	h.logger.Debugw(
+		"Sending RPC reply",
+		"rpc",
+		rpc,
+		"to",
+		args.CandidateID,
+		"term",
+		resp.Term,
+		"granted",
+		resp.VoteGranted,
+	)
 	h.nm.metrics.IncCounter("grpc_server_rpc_success_total", "rpc", rpc)
 	return resp, nil
 }
@@ -821,10 +1068,22 @@ func (h *grpcServerHandler) AppendEntries(
 
 	if h.nm.isShutdown.Load() {
 		if h.logger != nil {
-			h.logger.Debugw("Rejecting RPC: server shutting down", "rpc", rpcType, "from", req.LeaderId)
+			h.logger.Debugw(
+				"Rejecting RPC: server shutting down",
+				"rpc",
+				rpcType,
+				"from",
+				req.LeaderId,
+			)
 		}
 		if h.nm != nil && h.nm.metrics != nil {
-			h.nm.metrics.IncCounter("grpc_server_rpc_rejected_total", "rpc", rpcType, "reason", "shutdown")
+			h.nm.metrics.IncCounter(
+				"grpc_server_rpc_rejected_total",
+				"rpc",
+				rpcType,
+				"reason",
+				"shutdown",
+			)
 		}
 		return nil, status.Error(codes.Aborted, "server shutting down")
 	}
@@ -860,22 +1119,48 @@ func (h *grpcServerHandler) AppendEntries(
 	h.logger.Debugw("Received RPC", logFields...)
 	h.nm.metrics.IncCounter("grpc_server_rpc_received_total", "rpc", rpcType)
 	if !isHeartbeat {
-		h.nm.metrics.AddCounter("grpc_server_received_bytes_total", float64(totalDataSize), "rpc", rpcType)
-		h.nm.metrics.AddCounter("grpc_server_received_entries_total", float64(len(entries)), "rpc", rpcType)
+		h.nm.metrics.AddCounter(
+			"grpc_server_received_bytes_total",
+			float64(totalDataSize),
+			"rpc",
+			rpcType,
+		)
+		h.nm.metrics.AddCounter(
+			"grpc_server_received_entries_total",
+			float64(len(entries)),
+			"rpc",
+			rpcType,
+		)
 	}
 
 	reply, err := h.rpcHandler.AppendEntries(ctx, args)
 	latency := h.nm.clock.Since(startTime)
-	h.nm.metrics.ObserveHistogram("grpc_server_rpc_latency_seconds", latency.Seconds(), "rpc", rpcType)
+	h.nm.metrics.ObserveHistogram(
+		"grpc_server_rpc_latency_seconds",
+		latency.Seconds(),
+		"rpc",
+		rpcType,
+	)
 
 	if err != nil {
-		h.logger.Warnw("Internal handler failed for RPC", "rpc", rpcType, "error", err, "from", args.LeaderID)
+		h.logger.Warnw(
+			"Internal handler failed for RPC",
+			"rpc",
+			rpcType,
+			"error",
+			err,
+			"from",
+			args.LeaderID,
+		)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpcType)
 
 		if s, ok := status.FromError(err); ok {
 			return nil, s.Err()
 		}
-		return nil, status.Error(codes.Internal, fmt.Sprintf("internal raft handler error: %v", err))
+		return nil, status.Error(
+			codes.Internal,
+			fmt.Sprintf("internal raft handler error: %v", err),
+		)
 	}
 
 	resp := &proto.AppendEntriesResponse{
@@ -886,10 +1171,26 @@ func (h *grpcServerHandler) AppendEntries(
 		MatchIndex:    uint64(reply.MatchIndex),
 	}
 
-	replyLogFields := []any{"rpc", rpcType, "to", args.LeaderID, "term", resp.Term, "success", resp.Success}
+	replyLogFields := []any{
+		"rpc",
+		rpcType,
+		"to",
+		args.LeaderID,
+		"term",
+		resp.Term,
+		"success",
+		resp.Success,
+	}
 	if !isHeartbeat || !resp.Success {
-		replyLogFields = append(replyLogFields,
-			"conflict_idx", resp.ConflictIndex, "conflict_term", resp.ConflictTerm, "match_idx", resp.MatchIndex)
+		replyLogFields = append(
+			replyLogFields,
+			"conflict_idx",
+			resp.ConflictIndex,
+			"conflict_term",
+			resp.ConflictTerm,
+			"match_idx",
+			resp.MatchIndex,
+		)
 	}
 	h.logger.Debugw("Sending RPC reply", replyLogFields...)
 	h.nm.metrics.IncCounter("grpc_server_rpc_success_total", "rpc", rpcType)
@@ -920,9 +1221,21 @@ func (h *grpcServerHandler) InstallSnapshot(
 		Data:              req.Data,
 	}
 
-	h.logger.Infow("Received RPC", "rpc", rpc,
-		"from", args.LeaderID, "term", args.Term,
-		"last_included_index", args.LastIncludedIndex, "last_included_term", args.LastIncludedTerm, "data_size", dataSize)
+	h.logger.Infow(
+		"Received RPC",
+		"rpc",
+		rpc,
+		"from",
+		args.LeaderID,
+		"term",
+		args.Term,
+		"last_included_index",
+		args.LastIncludedIndex,
+		"last_included_term",
+		args.LastIncludedTerm,
+		"data_size",
+		dataSize,
+	)
 	h.nm.metrics.IncCounter("grpc_server_rpc_received_total", "rpc", rpc)
 	h.nm.metrics.AddCounter("grpc_server_received_bytes_total", float64(dataSize), "rpc", rpc)
 
@@ -931,12 +1244,23 @@ func (h *grpcServerHandler) InstallSnapshot(
 	h.nm.metrics.ObserveHistogram("grpc_server_rpc_latency_seconds", latency.Seconds(), "rpc", rpc)
 
 	if err != nil {
-		h.logger.Warnw("Internal handler failed for RPC", "rpc", rpc, "error", err, "from", args.LeaderID)
+		h.logger.Warnw(
+			"Internal handler failed for RPC",
+			"rpc",
+			rpc,
+			"error",
+			err,
+			"from",
+			args.LeaderID,
+		)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpc)
 		if s, ok := status.FromError(err); ok {
 			return nil, s.Err()
 		}
-		return nil, status.Error(codes.Internal, fmt.Sprintf("internal raft handler error: %v", err))
+		return nil, status.Error(
+			codes.Internal,
+			fmt.Sprintf("internal raft handler error: %v", err),
+		)
 	}
 
 	resp := &proto.InstallSnapshotResponse{

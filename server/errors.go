@@ -67,7 +67,11 @@ func NewLeaderRedirectError(leaderAddress, leaderID string) *LeaderRedirectError
 // Error implements the error interface, providing a human-readable message.
 func (e *LeaderRedirectError) Error() string {
 	if e.LeaderAddress != "" && e.LeaderID != "" {
-		return fmt.Sprintf("server: not leader, redirect to node %s at %s", e.LeaderID, e.LeaderAddress)
+		return fmt.Sprintf(
+			"server: not leader, redirect to node %s at %s",
+			e.LeaderID,
+			e.LeaderAddress,
+		)
 	}
 	return "server: not leader, leader information unavailable for redirect"
 }
@@ -90,7 +94,12 @@ func NewValidationError(field string, value any, message string) *ValidationErro
 
 // Error implements the error interface, providing a structured validation error message.
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("server: validation error for field '%s' (value: %v): %s", e.Field, e.Value, e.Message)
+	return fmt.Sprintf(
+		"server: validation error for field '%s' (value: %v): %s",
+		e.Field,
+		e.Value,
+		e.Message,
+	)
 }
 
 // ServerError represents a generic internal server error, potentially wrapping an underlying cause.
@@ -112,7 +121,12 @@ func NewServerError(operation string, cause error, message string) *ServerError 
 // Error implements the error interface, providing context about the operation and cause.
 func (e *ServerError) Error() string {
 	if e.Cause != nil {
-		return fmt.Sprintf("server: error during %s: %s (cause: %v)", e.Operation, e.Message, e.Cause)
+		return fmt.Sprintf(
+			"server: error during %s: %s (cause: %v)",
+			e.Operation,
+			e.Message,
+			e.Cause,
+		)
 	}
 	return fmt.Sprintf("server: error during %s: %s", e.Operation, e.Message)
 }
@@ -160,7 +174,10 @@ func ErrorToProtoError(err error) *pb.ErrorDetail {
 	}
 
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &pb.ErrorDetail{Code: pb.ErrorCode_TIMEOUT, Message: "Request timed out: deadline exceeded."}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_TIMEOUT,
+			Message: "Request timed out: deadline exceeded.",
+		}
 	}
 	if errors.Is(err, context.Canceled) {
 		return &pb.ErrorDetail{Code: pb.ErrorCode_TIMEOUT, Message: "Request canceled by client."}
@@ -210,23 +227,41 @@ func ErrorToProtoError(err error) *pb.ErrorDetail {
 	case errors.Is(err, ErrNoLeader):
 		return &pb.ErrorDetail{Code: pb.ErrorCode_NO_LEADER, Message: ErrNoLeader.Error()}
 	case errors.Is(err, ErrRequestTooLarge):
-		return &pb.ErrorDetail{Code: pb.ErrorCode_INVALID_ARGUMENT, Message: ErrRequestTooLarge.Error()}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_INVALID_ARGUMENT,
+			Message: ErrRequestTooLarge.Error(),
+		}
 	case errors.Is(err, ErrRateLimited):
 		return &pb.ErrorDetail{Code: pb.ErrorCode_RATE_LIMITED, Message: ErrRateLimited.Error()}
 	case errors.Is(err, ErrRaftUnavailable):
 		return &pb.ErrorDetail{Code: pb.ErrorCode_UNAVAILABLE, Message: ErrRaftUnavailable.Error()}
 	case errors.Is(err, ErrLockManagerUnavailable):
-		return &pb.ErrorDetail{Code: pb.ErrorCode_UNAVAILABLE, Message: ErrLockManagerUnavailable.Error()}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_UNAVAILABLE,
+			Message: ErrLockManagerUnavailable.Error(),
+		}
 	case errors.Is(err, ErrServerNotStarted), errors.Is(err, ErrServerStopped):
 		return &pb.ErrorDetail{Code: pb.ErrorCode_UNAVAILABLE, Message: err.Error()}
 	case errors.Is(err, ErrInvalidRequest):
-		return &pb.ErrorDetail{Code: pb.ErrorCode_INVALID_ARGUMENT, Message: ErrInvalidRequest.Error()}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_INVALID_ARGUMENT,
+			Message: ErrInvalidRequest.Error(),
+		}
 	case errors.Is(err, ErrServerAlreadyStarted):
-		return &pb.ErrorDetail{Code: pb.ErrorCode_INTERNAL_ERROR, Message: ErrServerAlreadyStarted.Error()}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_INTERNAL_ERROR,
+			Message: ErrServerAlreadyStarted.Error(),
+		}
 	case errors.Is(err, ErrResponseTooLarge):
-		return &pb.ErrorDetail{Code: pb.ErrorCode_INTERNAL_ERROR, Message: ErrResponseTooLarge.Error()}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_INTERNAL_ERROR,
+			Message: ErrResponseTooLarge.Error(),
+		}
 	case errors.Is(err, ErrShutdownTimeout):
-		return &pb.ErrorDetail{Code: pb.ErrorCode_INTERNAL_ERROR, Message: ErrShutdownTimeout.Error()}
+		return &pb.ErrorDetail{
+			Code:    pb.ErrorCode_INTERNAL_ERROR,
+			Message: ErrShutdownTimeout.Error(),
+		}
 	default:
 		return &pb.ErrorDetail{
 			Code:    pb.ErrorCode_INTERNAL_ERROR,

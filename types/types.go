@@ -156,7 +156,6 @@ type PeerState struct {
 	LastActive         time.Time // When the peer was last known to be active
 	SnapshotInProgress bool      // Whether snapshot transfer is in progress
 	ReplicationLag     Index     // How far behind this peer is (leader's lastIndex - matchIndex)
-
 }
 
 // ApplyMsg is sent on the ApplyChannel after a log entry is committed and applied,

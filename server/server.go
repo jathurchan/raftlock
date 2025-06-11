@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"maps"
 
 	"github.com/jathurchan/raftlock/lock"
 	"github.com/jathurchan/raftlock/logger"
@@ -522,7 +521,11 @@ func (s *raftLockServer) errorToGRPCStatus(err error) error {
 	case pb.ErrorCode_INTERNAL_ERROR: // Fallback
 		grpcCode = codes.Internal
 	default: // Default for any unmapped pb.ErrorCodes
-		s.logger.Warnw("Unmapped pb.ErrorCode to gRPC code", "pbErrorCode", protoError.Code.String())
+		s.logger.Warnw(
+			"Unmapped pb.ErrorCode to gRPC code",
+			"pbErrorCode",
+			protoError.Code.String(),
+		)
 		grpcCode = codes.Internal
 	}
 
@@ -631,7 +634,10 @@ func (s *raftLockServer) runLockManagerTickLoop() {
 	for {
 		select {
 		case <-ticker.Chan():
-			ctx, cancel := context.WithTimeout(context.Background(), DefaultLockManagerTickInterval/2)
+			ctx, cancel := context.WithTimeout(
+				context.Background(),
+				DefaultLockManagerTickInterval/2,
+			)
 			if s.lockManager != nil {
 				expired := s.lockManager.Tick(ctx)
 				if expired > 0 {
@@ -750,7 +756,9 @@ func (s *raftLockServer) handleApplyMessage(applyMsg types.ApplyMsg) {
 		}
 		if applyMsg.CommandResultError != nil {
 			logFields = append(logFields, "applyError", applyMsg.CommandResultError)
-			s.logger.Warnw("Applied command from Raft resulted in an operational error", logFields...)
+			s.logger.Warnw(
+				"Applied command from Raft resulted in an operational error",
+				logFields...)
 		} else {
 			s.logger.Debugw("Applied command committed via Raft", logFields...)
 		}
@@ -863,7 +871,10 @@ func (s *raftLockServer) Metrics() ServerMetrics {
 }
 
 // Acquire attempts to acquire a distributed lock via Raft consensus.
-func (s *raftLockServer) Acquire(ctx context.Context, req *pb.AcquireRequest) (*pb.AcquireResponse, error) {
+func (s *raftLockServer) Acquire(
+	ctx context.Context,
+	req *pb.AcquireRequest,
+) (*pb.AcquireResponse, error) {
 	s.logger.Debugw("Received Acquire request", "lockId", req.LockId, "clientId", req.ClientId)
 
 	if err := s.validateAcquireRequest(req); err != nil {
@@ -899,7 +910,15 @@ func (s *raftLockServer) Acquire(ctx context.Context, req *pb.AcquireRequest) (*
 func (s *raftLockServer) validateAcquireRequest(req *pb.AcquireRequest) error {
 	if err := s.validator.ValidateAcquireRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodAcquire, ErrorTypeInvalidFormat)
-		s.logger.Warnw("Invalid Acquire request", "error", err, "lockId", req.LockId, "clientId", req.ClientId)
+		s.logger.Warnw(
+			"Invalid Acquire request",
+			"error",
+			err,
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+		)
 		return s.errorToGRPCStatus(err)
 	}
 	return nil
@@ -915,7 +934,11 @@ func (s *raftLockServer) resolveTTL(req *pb.AcquireRequest) (time.Duration, erro
 	parsed := req.Ttl.AsDuration()
 
 	if parsed <= 0 || parsed < lock.MinLockTTL || parsed > lock.MaxLockTTL {
-		err := NewValidationError("ttl", parsed.String(), fmt.Sprintf(ErrMsgInvalidTTL, lock.MinLockTTL, lock.MaxLockTTL))
+		err := NewValidationError(
+			"ttl",
+			parsed.String(),
+			fmt.Sprintf(ErrMsgInvalidTTL, lock.MinLockTTL, lock.MaxLockTTL),
+		)
 		s.metrics.IncrValidationError(MethodAcquire, ErrorTypeInvalidFormat)
 		s.logger.Warnw("Invalid TTL", "error", err, "lockId", req.LockId)
 		return 0, s.errorToGRPCStatus(err)
@@ -936,7 +959,11 @@ func (s *raftLockServer) resolveAcquireWaitTimeout(req *pb.AcquireRequest) (time
 	parsed := req.WaitTimeout.AsDuration()
 
 	if parsed < lock.MinWaitQueueTimeout || parsed > lock.MaxWaitQueueTimeout {
-		err := NewValidationError("wait_timeout", parsed.String(), fmt.Sprintf(ErrMsgInvalidTimeout, lock.MinWaitQueueTimeout, lock.MaxWaitQueueTimeout))
+		err := NewValidationError(
+			"wait_timeout",
+			parsed.String(),
+			fmt.Sprintf(ErrMsgInvalidTimeout, lock.MinWaitQueueTimeout, lock.MaxWaitQueueTimeout),
+		)
 		s.metrics.IncrValidationError(MethodAcquire, ErrorTypeInvalidFormat)
 		s.logger.Warnw("Invalid WaitTimeout", "error", err, "lockId", req.LockId)
 		return 0, s.errorToGRPCStatus(err)
@@ -945,7 +972,10 @@ func (s *raftLockServer) resolveAcquireWaitTimeout(req *pb.AcquireRequest) (time
 }
 
 // buildAcquireCommand constructs a Raft command from the request and resolved durations.
-func (s *raftLockServer) buildAcquireCommand(req *pb.AcquireRequest, ttl, waitTimeout time.Duration) types.Command {
+func (s *raftLockServer) buildAcquireCommand(
+	req *pb.AcquireRequest,
+	ttl, waitTimeout time.Duration,
+) types.Command {
 	return types.Command{
 		Op:          types.OperationAcquire,
 		LockID:      types.LockID(req.LockId),
@@ -972,7 +1002,10 @@ func (s *raftLockServer) parseAcquireProposal(data any) (any, error) {
 }
 
 // handleAcquireError maps proposal errors to AcquireResponse or gRPC errors.
-func (s *raftLockServer) handleAcquireError(err error, req *pb.AcquireRequest) (*pb.AcquireResponse, error) {
+func (s *raftLockServer) handleAcquireError(
+	err error,
+	req *pb.AcquireRequest,
+) (*pb.AcquireResponse, error) {
 	s.logger.Warnw("Acquire failed", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
 
 	// If not waiting and lock is held, return backoff advice
@@ -989,9 +1022,20 @@ func (s *raftLockServer) handleAcquireError(err error, req *pb.AcquireRequest) (
 }
 
 // buildAcquireResponse constructs the final response from LockInfo or enqueue fallback.
-func (s *raftLockServer) buildAcquireResponse(data any, req *pb.AcquireRequest) (*pb.AcquireResponse, error) {
+func (s *raftLockServer) buildAcquireResponse(
+	data interface{},
+	req *pb.AcquireRequest,
+) (*pb.AcquireResponse, error) {
 	if info, ok := data.(*types.LockInfo); ok && info != nil {
-		s.logger.Infow("Lock acquired", "lockId", req.LockId, "clientId", req.ClientId, "version", info.Version)
+		s.logger.Infow(
+			"Lock acquired",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"version",
+			info.Version,
+		)
 		return &pb.AcquireResponse{
 			Acquired: true,
 			Lock:     s.lockInfoToProtoLock(info),
@@ -1003,10 +1047,14 @@ func (s *raftLockServer) buildAcquireResponse(data any, req *pb.AcquireRequest) 
 		info, _ := s.lockManager.GetLockInfo(context.Background(), types.LockID(req.LockId))
 
 		return &pb.AcquireResponse{
-			Acquired:              false, // Not immediately acquired, but enqueued
-			Error:                 ErrorToProtoError(fmt.Errorf("enqueued for lock %s", req.LockId)),
-			QueuePosition:         int32(info.WaiterCount),
-			EstimatedWaitDuration: durationpb.New(s.calculateBackoffDuration(info) * time.Duration(info.WaiterCount)),
+			Acquired: false, // Not immediately acquired, but enqueued
+			Error: ErrorToProtoError(
+				fmt.Errorf("enqueued for lock %s", req.LockId),
+			),
+			QueuePosition: int32(info.WaiterCount),
+			EstimatedWaitDuration: durationpb.New(
+				s.calculateBackoffDuration(info) * time.Duration(info.WaiterCount),
+			),
 		}, nil
 	}
 
@@ -1036,8 +1084,19 @@ func (s *raftLockServer) lockInfoToProtoLock(info *types.LockInfo) *pb.Lock {
 }
 
 // Release handles a lock release request via the Raft consensus mechanism.
-func (s *raftLockServer) Release(ctx context.Context, req *pb.ReleaseRequest) (*pb.ReleaseResponse, error) {
-	s.logger.Debugw("Received Release request", "lockId", req.LockId, "clientId", req.ClientId, "version", req.Version)
+func (s *raftLockServer) Release(
+	ctx context.Context,
+	req *pb.ReleaseRequest,
+) (*pb.ReleaseResponse, error) {
+	s.logger.Debugw(
+		"Received Release request",
+		"lockId",
+		req.LockId,
+		"clientId",
+		req.ClientId,
+		"version",
+		req.Version,
+	)
 	if err := s.validator.ValidateReleaseRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodRelease, ErrorTypeInvalidFormat)
 		s.logger.Warnw("Invalid Release request", "error", err, "request", req)
@@ -1045,7 +1104,15 @@ func (s *raftLockServer) Release(ctx context.Context, req *pb.ReleaseRequest) (*
 	}
 
 	if err := s.requireLeader(MethodRelease); err != nil {
-		s.logger.Warnw("Release failed: not leader", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
+		s.logger.Warnw(
+			"Release failed: not leader",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 
@@ -1060,15 +1127,26 @@ func (s *raftLockServer) Release(ctx context.Context, req *pb.ReleaseRequest) (*
 		func(data any) (any, error) {
 			waiterPromoted, ok := data.(bool)
 			if !ok {
-				s.logger.Infow("Release proposal returned non-boolean data for waiterPromoted, assuming false", "type", fmt.Sprintf("%T", data))
+				s.logger.Infow(
+					"Release proposal returned non-boolean data for waiterPromoted, assuming false",
+					"type",
+					fmt.Sprintf("%T", data),
+				)
 				return false, nil
 			}
 			return waiterPromoted, nil
 		},
 	)
-
 	if err != nil {
-		s.logger.Warnw("Release proposal processing failed", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
+		s.logger.Warnw(
+			"Release proposal processing failed",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 
@@ -1077,7 +1155,15 @@ func (s *raftLockServer) Release(ctx context.Context, req *pb.ReleaseRequest) (*
 		waiterPromoted = promotion
 	}
 
-	s.logger.Infow("Lock released successfully", "lockId", req.LockId, "clientId", req.ClientId, "waiterPromoted", waiterPromoted)
+	s.logger.Infow(
+		"Lock released successfully",
+		"lockId",
+		req.LockId,
+		"clientId",
+		req.ClientId,
+		"waiterPromoted",
+		waiterPromoted,
+	)
 	return &pb.ReleaseResponse{
 		Released:       true,
 		WaiterPromoted: waiterPromoted,
@@ -1085,7 +1171,10 @@ func (s *raftLockServer) Release(ctx context.Context, req *pb.ReleaseRequest) (*
 }
 
 // Renew handles a lock renewal request via the Raft consensus mechanism.
-func (s *raftLockServer) Renew(ctx context.Context, req *pb.RenewRequest) (*pb.RenewResponse, error) {
+func (s *raftLockServer) Renew(
+	ctx context.Context,
+	req *pb.RenewRequest,
+) (*pb.RenewResponse, error) {
 	if err := s.validator.ValidateRenewRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodRenew, ErrorTypeInvalidFormat)
 		return nil, s.errorToGRPCStatus(err)
@@ -1118,8 +1207,14 @@ func (s *raftLockServer) Renew(ctx context.Context, req *pb.RenewRequest) (*pb.R
 
 	lockInfo, ok := result.Data.(*types.LockInfo)
 	if !ok {
-		s.logger.Errorw("Renew: unexpected proposal result type", "type", fmt.Sprintf("%T", result.Data))
-		return nil, s.errorToGRPCStatus(fmt.Errorf("internal error: unexpected proposal result type"))
+		s.logger.Errorw(
+			"Renew: unexpected proposal result type",
+			"type",
+			fmt.Sprintf("%T", result.Data),
+		)
+		return nil, s.errorToGRPCStatus(
+			fmt.Errorf("internal error: unexpected proposal result type"),
+		)
 	}
 
 	return &pb.RenewResponse{
@@ -1129,8 +1224,17 @@ func (s *raftLockServer) Renew(ctx context.Context, req *pb.RenewRequest) (*pb.R
 }
 
 // GetLockInfo returns metadata about a lock using a linearizable Raft read.
-func (s *raftLockServer) GetLockInfo(ctx context.Context, req *pb.GetLockInfoRequest) (*pb.GetLockInfoResponse, error) {
-	s.logger.Debugw("Received GetLockInfo request", "lockId", req.LockId, "includeWaiters", req.IncludeWaiters)
+func (s *raftLockServer) GetLockInfo(
+	ctx context.Context,
+	req *pb.GetLockInfoRequest,
+) (*pb.GetLockInfoResponse, error) {
+	s.logger.Debugw(
+		"Received GetLockInfo request",
+		"lockId",
+		req.LockId,
+		"includeWaiters",
+		req.IncludeWaiters,
+	)
 	if err := s.validator.ValidateGetLockInfoRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodGetLockInfo, ErrorTypeInvalidFormat)
 		s.logger.Warnw("Invalid GetLockInfo request", "error", err, "request", req)
@@ -1144,7 +1248,15 @@ func (s *raftLockServer) GetLockInfo(ctx context.Context, req *pb.GetLockInfoReq
 	}
 
 	if err := s.waitForCommitIndex(ctx, readIndex, types.LockID(req.LockId)); err != nil {
-		s.logger.Warnw("GetLockInfo: waitForCommitIndex failed", "lockId", req.LockId, "readIndex", readIndex, "error", err)
+		s.logger.Warnw(
+			"GetLockInfo: waitForCommitIndex failed",
+			"lockId",
+			req.LockId,
+			"readIndex",
+			readIndex,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 
@@ -1157,7 +1269,13 @@ func (s *raftLockServer) GetLockInfo(ctx context.Context, req *pb.GetLockInfoReq
 				Error:    ErrorToProtoError(err),
 			}, nil
 		}
-		s.logger.Errorw("Failed to get lock info from lock manager", "lockId", req.LockId, "error", err)
+		s.logger.Errorw(
+			"Failed to get lock info from lock manager",
+			"lockId",
+			req.LockId,
+			"error",
+			err,
+		)
 		s.metrics.IncrServerError(MethodGetLockInfo, ErrorTypeInternalError)
 		return nil, s.errorToGRPCStatus(fmt.Errorf("failed to retrieve lock info: %w", err))
 	}
@@ -1169,7 +1287,13 @@ func (s *raftLockServer) GetLockInfo(ctx context.Context, req *pb.GetLockInfoReq
 		}
 	}
 
-	s.logger.Debugw("Lock info retrieved successfully", "lockId", req.LockId, "ownerId", lockInfo.OwnerID)
+	s.logger.Debugw(
+		"Lock info retrieved successfully",
+		"lockId",
+		req.LockId,
+		"ownerId",
+		lockInfo.OwnerID,
+	)
 	s.metrics.IncrGRPCRequest(MethodGetLockInfo, true)
 	return &pb.GetLockInfoResponse{
 		LockInfo: pbLockInfo,
@@ -1177,7 +1301,10 @@ func (s *raftLockServer) GetLockInfo(ctx context.Context, req *pb.GetLockInfoReq
 }
 
 // getReadIndex issues a linearizable ReadIndex request via Raft.
-func (s *raftLockServer) getReadIndex(ctx context.Context, lockID types.LockID) (types.Index, error) {
+func (s *raftLockServer) getReadIndex(
+	ctx context.Context,
+	lockID types.LockID,
+) (types.Index, error) {
 	readCtx, cancel := context.WithTimeout(ctx, s.config.RequestTimeout)
 	defer cancel()
 
@@ -1199,7 +1326,11 @@ func (s *raftLockServer) getReadIndex(ctx context.Context, lockID types.LockID) 
 }
 
 // waitForCommitIndex blocks until the local state machine has applied up to the given index.
-func (s *raftLockServer) waitForCommitIndex(ctx context.Context, targetIndex types.Index, lockID types.LockID) error {
+func (s *raftLockServer) waitForCommitIndex(
+	ctx context.Context,
+	targetIndex types.Index,
+	lockID types.LockID,
+) error {
 	waitCtx, cancel := context.WithTimeout(ctx, s.config.RequestTimeout) // TODO: fix timeout
 	defer cancel()
 
@@ -1212,8 +1343,12 @@ func (s *raftLockServer) waitForCommitIndex(ctx context.Context, targetIndex typ
 				"currentIndex", s.lastCommitIndex.Load(),
 				"error", waitCtx.Err())
 			s.metrics.IncrServerError(MethodGetLockInfo, ErrorTypeTimeout)
-			return status.Errorf(codes.Unavailable,
-				"state not ready (expected index %d, current %d)", targetIndex, s.lastCommitIndex.Load())
+			return status.Errorf(
+				codes.Unavailable,
+				"state not ready (expected index %d, current %d)",
+				targetIndex,
+				s.lastCommitIndex.Load(),
+			)
 
 		case <-s.stopCh:
 			s.logger.Infow("server shutting down during GetLockInfo", "lockId", lockID)
@@ -1233,8 +1368,19 @@ func (s *raftLockServer) waitForCommitIndex(ctx context.Context, targetIndex typ
 }
 
 // GetLocks returns a paginated list of locks that match the provided filter.
-func (s *raftLockServer) GetLocks(ctx context.Context, req *pb.GetLocksRequest) (*pb.GetLocksResponse, error) {
-	s.logger.Debugw("Received GetLocks request", "filter", req.Filter, "limit", req.Limit, "offset", req.Offset)
+func (s *raftLockServer) GetLocks(
+	ctx context.Context,
+	req *pb.GetLocksRequest,
+) (*pb.GetLocksResponse, error) {
+	s.logger.Debugw(
+		"Received GetLocks request",
+		"filter",
+		req.Filter,
+		"limit",
+		req.Limit,
+		"offset",
+		req.Offset,
+	)
 	if err := s.validator.ValidateGetLocksRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodGetLocks, ErrorTypeInvalidFormat)
 		s.logger.Warnw("Invalid GetLocks request", "error", err, "request", req)
@@ -1275,7 +1421,15 @@ func (s *raftLockServer) GetLocks(ctx context.Context, req *pb.GetLocksRequest) 
 
 	hasMore := (offset + len(locks)) < total
 
-	s.logger.Debugw("GetLocks successful", "returnedCount", len(protoLocks), "totalMatching", total, "hasMore", hasMore)
+	s.logger.Debugw(
+		"GetLocks successful",
+		"returnedCount",
+		len(protoLocks),
+		"totalMatching",
+		total,
+		"hasMore",
+		hasMore,
+	)
 	s.metrics.IncrGRPCRequest(MethodGetLocks, true)
 	return &pb.GetLocksResponse{
 		Locks:               protoLocks,
@@ -1377,8 +1531,17 @@ func cloneStringMap(m map[string]string) map[string]string {
 
 // EnqueueWaiter adds a client to the wait queue for a lock via Raft.
 // The client is enqueued with a version (fencing token), optional priority, and timeout.
-func (s *raftLockServer) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaiterRequest) (*pb.EnqueueWaiterResponse, error) {
-	s.logger.Debugw("Received EnqueueWaiter request", "lockId", req.LockId, "clientId", req.ClientId)
+func (s *raftLockServer) EnqueueWaiter(
+	ctx context.Context,
+	req *pb.EnqueueWaiterRequest,
+) (*pb.EnqueueWaiterResponse, error) {
+	s.logger.Debugw(
+		"Received EnqueueWaiter request",
+		"lockId",
+		req.LockId,
+		"clientId",
+		req.ClientId,
+	)
 
 	if err := s.validator.ValidateEnqueueWaiterRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodEnqueueWaiter, ErrorTypeInvalidFormat)
@@ -1387,7 +1550,15 @@ func (s *raftLockServer) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaite
 	}
 
 	if err := s.requireLeader(MethodEnqueueWaiter); err != nil {
-		s.logger.Warnw("EnqueueWaiter failed: not leader", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
+		s.logger.Warnw(
+			"EnqueueWaiter failed: not leader",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 
@@ -1402,16 +1573,37 @@ func (s *raftLockServer) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaite
 		Timeout:  timeout.Milliseconds(),
 	}
 
-	result, err := s.submitAndProcessProposal(ctx, MethodEnqueueWaiter, cmd, parseEnqueuePositionResult)
+	result, err := s.submitAndProcessProposal(
+		ctx,
+		MethodEnqueueWaiter,
+		cmd,
+		parseEnqueuePositionResult,
+	)
 	if err != nil {
-		s.logger.Warnw("EnqueueWaiter proposal processing failed", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
+		s.logger.Warnw(
+			"EnqueueWaiter proposal processing failed",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 	position := result.(int)
 
 	estimated := s.estimateEnqueueWaitDuration(types.LockID(req.LockId), position)
 
-	s.logger.Infow("Client enqueued successfully", "lockId", req.LockId, "clientId", req.ClientId, "position", position)
+	s.logger.Infow(
+		"Client enqueued successfully",
+		"lockId",
+		req.LockId,
+		"clientId",
+		req.ClientId,
+		"position",
+		position,
+	)
 	s.metrics.IncrGRPCRequest(MethodEnqueueWaiter, true)
 
 	return &pb.EnqueueWaiterResponse{
@@ -1438,13 +1630,19 @@ func (s *raftLockServer) resolveEnqueueWaitTimeout(d *durationpb.Duration) time.
 func parseEnqueuePositionResult(data any) (any, error) {
 	pos, ok := data.(int)
 	if !ok {
-		return 0, fmt.Errorf("internal error: unexpected result type for enqueue position: %T", data)
+		return 0, fmt.Errorf(
+			"internal error: unexpected result type for enqueue position: %T",
+			data,
+		)
 	}
 	return pos, nil
 }
 
 // estimateEnqueueWaitDuration estimates wait time based on current lock state and queue position.
-func (s *raftLockServer) estimateEnqueueWaitDuration(lockID types.LockID, position int) time.Duration {
+func (s *raftLockServer) estimateEnqueueWaitDuration(
+	lockID types.LockID,
+	position int,
+) time.Duration {
 	info, err := s.lockManager.GetLockInfo(context.Background(), lockID)
 	if err != nil || info == nil {
 		s.logger.Debugw("Failed to get lock info for wait estimate", "lockId", lockID, "error", err)
@@ -1469,8 +1667,19 @@ func (s *raftLockServer) estimateEnqueueWaitDuration(lockID types.LockID, positi
 }
 
 // CancelWait removes a client from a lock's wait queue via Raft.
-func (s *raftLockServer) CancelWait(ctx context.Context, req *pb.CancelWaitRequest) (*pb.CancelWaitResponse, error) {
-	s.logger.Debugw("Received CancelWait request", "lockId", req.LockId, "clientId", req.ClientId, "version", req.Version)
+func (s *raftLockServer) CancelWait(
+	ctx context.Context,
+	req *pb.CancelWaitRequest,
+) (*pb.CancelWaitResponse, error) {
+	s.logger.Debugw(
+		"Received CancelWait request",
+		"lockId",
+		req.LockId,
+		"clientId",
+		req.ClientId,
+		"version",
+		req.Version,
+	)
 	if err := s.validator.ValidateCancelWaitRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodCancelWait, ErrorTypeInvalidFormat)
 		s.logger.Warnw("Invalid CancelWait request", "error", err, "request", req)
@@ -1478,7 +1687,15 @@ func (s *raftLockServer) CancelWait(ctx context.Context, req *pb.CancelWaitReque
 	}
 
 	if err := s.requireLeader(MethodCancelWait); err != nil {
-		s.logger.Warnw("CancelWait failed: not leader", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
+		s.logger.Warnw(
+			"CancelWait failed: not leader",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 
@@ -1493,21 +1710,38 @@ func (s *raftLockServer) CancelWait(ctx context.Context, req *pb.CancelWaitReque
 		func(data any) (any, error) {
 			cancelled, ok := data.(bool)
 			if !ok {
-				s.logger.Errorw("CancelWait: submitAndProcessProposal returned unexpected data type", "type", fmt.Sprintf("%T", data))
+				s.logger.Errorw(
+					"CancelWait: submitAndProcessProposal returned unexpected data type",
+					"type",
+					fmt.Sprintf("%T", data),
+				)
 				return false, fmt.Errorf("internal error: unexpected result type for cancel wait")
 			}
 			return cancelled, nil
 		},
 	)
-
 	if err != nil {
-		s.logger.Warnw("CancelWait proposal processing failed", "lockId", req.LockId, "clientId", req.ClientId, "error", err)
+		s.logger.Warnw(
+			"CancelWait proposal processing failed",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+			"error",
+			err,
+		)
 		return nil, s.errorToGRPCStatus(err)
 	}
 
 	cancelled := parsedData.(bool)
 	if !cancelled {
-		s.logger.Infow("Wait cancellation processed by LockManager, but client was not found or not removed", "lockId", req.LockId, "clientId", req.ClientId)
+		s.logger.Infow(
+			"Wait cancellation processed by LockManager, but client was not found or not removed",
+			"lockId",
+			req.LockId,
+			"clientId",
+			req.ClientId,
+		)
 		return &pb.CancelWaitResponse{
 			Cancelled: false,
 			Error:     ErrorToProtoError(lock.ErrNotWaiting),
@@ -1520,7 +1754,10 @@ func (s *raftLockServer) CancelWait(ctx context.Context, req *pb.CancelWaitReque
 }
 
 // GetBackoffAdvice provides a client with backoff guidance based on current lock state.
-func (s *raftLockServer) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAdviceRequest) (*pb.BackoffAdviceResponse, error) {
+func (s *raftLockServer) GetBackoffAdvice(
+	ctx context.Context,
+	req *pb.BackoffAdviceRequest,
+) (*pb.BackoffAdviceResponse, error) {
 	s.logger.Debugw("Received GetBackoffAdvice request", "lockId", req.LockId)
 	if err := s.validator.ValidateBackoffAdviceRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodGetBackoffAdvice, ErrorTypeInvalidFormat)
@@ -1531,7 +1768,13 @@ func (s *raftLockServer) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAd
 	// This is a local read. For linearizable backoff advice, ReadIndex would be needed.
 	lockInfo, err := s.lockManager.GetLockInfo(ctx, types.LockID(req.LockId))
 	if err != nil && !errors.Is(err, lock.ErrLockNotFound) {
-		s.logger.Errorw("Failed to get lock info for backoff advice", "lockId", req.LockId, "error", err)
+		s.logger.Errorw(
+			"Failed to get lock info for backoff advice",
+			"lockId",
+			req.LockId,
+			"error",
+			err,
+		)
 		s.metrics.IncrServerError(MethodGetBackoffAdvice, ErrorTypeInternalError)
 
 		return &pb.BackoffAdviceResponse{
@@ -1559,7 +1802,10 @@ func (s *raftLockServer) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAd
 }
 
 // GetStatus returns a snapshot of Raft and server status.
-func (s *raftLockServer) GetStatus(ctx context.Context, req *pb.GetStatusRequest) (*pb.GetStatusResponse, error) {
+func (s *raftLockServer) GetStatus(
+	ctx context.Context,
+	req *pb.GetStatusRequest,
+) (*pb.GetStatusResponse, error) {
 	if err := s.validator.ValidateGetStatusRequest(req); err != nil {
 		s.metrics.IncrValidationError(MethodGetStatus, ErrorTypeInvalidFormat)
 		return nil, s.errorToGRPCStatus(err)
@@ -1579,7 +1825,10 @@ func (s *raftLockServer) GetStatus(ctx context.Context, req *pb.GetStatusRequest
 }
 
 // Health reports whether the server is currently serving requests.
-func (s *raftLockServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
+func (s *raftLockServer) Health(
+	ctx context.Context,
+	req *pb.HealthRequest,
+) (*pb.HealthResponse, error) {
 	s.logger.Debugw("Received Health request", "serviceName", req.ServiceName)
 
 	if err := s.validator.ValidateHealthRequest(req); err != nil {
@@ -1604,7 +1853,13 @@ func (s *raftLockServer) Health(ctx context.Context, req *pb.HealthRequest) (*pb
 
 	detailedHealthInfo := s.healthStatusToProto(isHealthy)
 
-	s.logger.Infow("Health check processed", "isHealthy", isHealthy, "reportedStatus", overallStatus)
+	s.logger.Infow(
+		"Health check processed",
+		"isHealthy",
+		isHealthy,
+		"reportedStatus",
+		overallStatus,
+	)
 
 	return &pb.HealthResponse{
 		Status:     overallStatus,
@@ -1646,7 +1901,9 @@ func (s *raftLockServer) performHealthCheck() bool {
 	}
 
 	if s.listener == nil {
-		s.logger.Warnw("Health check: gRPC listener is nil (server might not be fully started or stopped)")
+		s.logger.Warnw(
+			"Health check: gRPC listener is nil (server might not be fully started or stopped)",
+		)
 		return false
 	}
 
@@ -1707,16 +1964,42 @@ func (s *raftLockServer) submitAndProcessProposal(
 	cmd types.Command,
 	resultParser func(data any) (any, error),
 ) (any, error) {
-	s.logger.Debugw("Submitting Raft proposal", "method", method, "lockId", cmd.LockID, "clientId", cmd.ClientID, "op", cmd.Op)
+	s.logger.Debugw(
+		"Submitting Raft proposal",
+		"method",
+		method,
+		"lockId",
+		cmd.LockID,
+		"clientId",
+		cmd.ClientID,
+		"op",
+		cmd.Op,
+	)
 
 	proposalResult, err := s.submitRaftProposal(ctx, cmd)
 	if err != nil {
-		s.logger.Warnw("Raft proposal submission failed", "method", method, "lockId", cmd.LockID, "error", err)
+		s.logger.Warnw(
+			"Raft proposal submission failed",
+			"method",
+			method,
+			"lockId",
+			cmd.LockID,
+			"error",
+			err,
+		)
 		return nil, err
 	}
 
 	if !proposalResult.Success {
-		s.logger.Warnw("Raft proposal applied with failure", "method", method, "lockId", cmd.LockID, "proposalError", proposalResult.Error)
+		s.logger.Warnw(
+			"Raft proposal applied with failure",
+			"method",
+			method,
+			"lockId",
+			cmd.LockID,
+			"proposalError",
+			proposalResult.Error,
+		)
 		s.metrics.IncrServerError(method, ErrorTypeInternalError)
 		return nil, proposalResult.Error
 	}
@@ -1731,7 +2014,10 @@ func (s *raftLockServer) submitAndProcessProposal(
 
 // submitRaftProposal serializes the given command, proposes it to the Raft cluster,
 // tracks the proposal, and waits for its result or cancellation.
-func (s *raftLockServer) submitRaftProposal(ctx context.Context, cmd types.Command) (*types.ProposalResult, error) {
+func (s *raftLockServer) submitRaftProposal(
+	ctx context.Context,
+	cmd types.Command,
+) (*types.ProposalResult, error) {
 	startTime := s.clock.Now()
 
 	cmdData, err := s.serializer.EncodeCommand(cmd)
@@ -1798,11 +2084,23 @@ func (s *raftLockServer) requireLeader(method string) error {
 	leaderAddr := s.GetLeaderAddress()
 
 	if leaderAddr == "" {
-		s.logger.Warnw("RequireLeader check failed: not leader and leader address is unknown", "method", method)
+		s.logger.Warnw(
+			"RequireLeader check failed: not leader and leader address is unknown",
+			"method",
+			method,
+		)
 		return ErrNoLeader
 	}
 
-	s.logger.Infow("RequireLeader check failed: not leader, redirecting", "method", method, "leaderAddress", leaderAddr, "leaderID", leaderID)
+	s.logger.Infow(
+		"RequireLeader check failed: not leader, redirecting",
+		"method",
+		method,
+		"leaderAddress",
+		leaderAddr,
+		"leaderID",
+		leaderID,
+	)
 	return NewLeaderRedirectError(leaderAddr, string(leaderID))
 }
 

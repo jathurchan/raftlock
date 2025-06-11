@@ -161,7 +161,13 @@ func NewProposalTracker(logger logger.Logger, opts ...ProposalTrackerOption) Pro
 	}
 
 	pt.startPeriodicCleanup()
-	pt.logger.Infow("Proposal tracker initialized", "maxPendingAge", pt.maxPendingAge, "cleanupInterval", pt.cleanupInterval)
+	pt.logger.Infow(
+		"Proposal tracker initialized",
+		"maxPendingAge",
+		pt.maxPendingAge,
+		"cleanupInterval",
+		pt.cleanupInterval,
+	)
 	return pt
 }
 
@@ -246,7 +252,9 @@ func (pt *proposalTracker) Track(proposal *types.PendingProposal) error {
 
 // HandleAppliedCommand is called when a command has been applied to the state machine.
 func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg) {
-	proposalID := types.ProposalID(fmt.Sprintf("%d-%d", applyMsg.CommandTerm, applyMsg.CommandIndex))
+	proposalID := types.ProposalID(
+		fmt.Sprintf("%d-%d", applyMsg.CommandTerm, applyMsg.CommandIndex),
+	)
 	now := pt.clock.Now()
 
 	pt.mu.Lock()
@@ -295,7 +303,13 @@ func (pt *proposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg) {
 	pt.updateLatencyStatsLocked(duration)
 	pt.mu.Unlock()
 
-	pt.deliverAppliedResult(entry, applyMsg.CommandResultData, applyMsg.CommandResultError, now, duration)
+	pt.deliverAppliedResult(
+		entry,
+		applyMsg.CommandResultData,
+		applyMsg.CommandResultError,
+		now,
+		duration,
+	)
 }
 
 // handleCancelledProposal sends a failure result for a proposal whose client context
@@ -354,7 +368,10 @@ func (pt *proposalTracker) deliverAppliedResult(
 // HandleSnapshotApplied is invoked when a snapshot has been applied to the state machine.
 // It invalidates any pending proposals whose log index is at or below the snapshot index,
 // as those proposals are no longer guaranteed to be applied by Raft.
-func (pt *proposalTracker) HandleSnapshotApplied(snapshotIndex types.Index, snapshotTerm types.Term) {
+func (pt *proposalTracker) HandleSnapshotApplied(
+	snapshotIndex types.Index,
+	snapshotTerm types.Term,
+) {
 	now := pt.clock.Now()
 
 	pt.mu.Lock()
@@ -366,7 +383,10 @@ func (pt *proposalTracker) HandleSnapshotApplied(snapshotIndex types.Index, snap
 
 // invalidateProposalsFromSnapshotUnlocked removes and marks as invalid any proposal
 // whose index is covered by the given snapshot. Must be called with pt.mu held.
-func (pt *proposalTracker) invalidateProposalsFromSnapshotUnlocked(snapshotIndex types.Index, now time.Time) []*proposalEntry {
+func (pt *proposalTracker) invalidateProposalsFromSnapshotUnlocked(
+	snapshotIndex types.Index,
+	now time.Time,
+) []*proposalEntry {
 	var invalidated []*proposalEntry
 
 	for id, entry := range pt.proposals {
@@ -495,7 +515,9 @@ func (pt *proposalTracker) GetStats() types.ProposalStats {
 
 // GetPendingProposal returns a copy of the pending proposal with the given ID, if it exists.
 // If the proposal is not found or is no longer pending, it returns false.
-func (pt *proposalTracker) GetPendingProposal(proposalID types.ProposalID) (types.PendingProposal, bool) {
+func (pt *proposalTracker) GetPendingProposal(
+	proposalID types.ProposalID,
+) (types.PendingProposal, bool) {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 
@@ -598,26 +620,60 @@ func (pt *proposalTracker) updateLatencyStatsLocked(duration time.Duration) {
 func (pt *proposalTracker) sendResult(entry *proposalEntry, result types.ProposalResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			pt.logger.Warnw("Recovered from panic while sending proposal result (likely due to closed channel)",
-				"id", entry.ID, "op", entry.Operation, "panic", r)
+			pt.logger.Warnw(
+				"Recovered from panic while sending proposal result (likely due to closed channel)",
+				"id",
+				entry.ID,
+				"op",
+				entry.Operation,
+				"panic",
+				r,
+			)
 		}
 	}()
 
 	select {
 	case entry.ResultCh <- result:
-		pt.logger.Debugw("Sent proposal result (non-blocking)", "id", entry.ID, "op", entry.Operation)
+		pt.logger.Debugw(
+			"Sent proposal result (non-blocking)",
+			"id",
+			entry.ID,
+			"op",
+			entry.Operation,
+		)
 		return
 	default:
 		// Channel is full or unbuffered with no receiver.
 		// Fall back to a blocking send, respecting the client's context.
-		pt.logger.Debugw("Non-blocking send failed; retrying with blocking send using context", "id", entry.ID, "op", entry.Operation)
+		pt.logger.Debugw(
+			"Non-blocking send failed; retrying with blocking send using context",
+			"id",
+			entry.ID,
+			"op",
+			entry.Operation,
+		)
 		select {
 		case entry.ResultCh <- result:
-			pt.logger.Debugw("Sent proposal result (blocking with context)", "id", entry.ID, "op", entry.Operation)
+			pt.logger.Debugw(
+				"Sent proposal result (blocking with context)",
+				"id",
+				entry.ID,
+				"op",
+				entry.Operation,
+			)
 		case <-entry.Context.Done():
 			// Context cancelled before or during send; result likely not delivered.
-			pt.logger.Warnw("Context cancelled before result could be sent",
-				"id", entry.ID, "op", entry.Operation, "error", entry.Context.Err(), "resultErrorIfNotSent", result.Error)
+			pt.logger.Warnw(
+				"Context cancelled before result could be sent",
+				"id",
+				entry.ID,
+				"op",
+				entry.Operation,
+				"error",
+				entry.Context.Err(),
+				"resultErrorIfNotSent",
+				result.Error,
+			)
 		}
 	}
 }
@@ -658,7 +714,10 @@ func (pt *proposalTracker) Close() error {
 
 // failProposalsDueToShutdown marks all pending proposals as failed due to tracker shutdown
 // and sends a failure result to each client. Called asynchronously during Close.
-func (pt *proposalTracker) failProposalsDueToShutdown(proposals []*proposalEntry, shutdownTime time.Time) {
+func (pt *proposalTracker) failProposalsDueToShutdown(
+	proposals []*proposalEntry,
+	shutdownTime time.Time,
+) {
 	for _, entry := range proposals {
 		duration := shutdownTime.Sub(entry.submittedAt)
 
@@ -667,8 +726,12 @@ func (pt *proposalTracker) failProposalsDueToShutdown(proposals []*proposalEntry
 		pt.mu.Unlock()
 
 		result := types.ProposalResult{
-			Success:   false,
-			Error:     fmt.Errorf("proposal tracker shutdown; proposal %q (%s) invalidated", entry.ID, entry.Operation),
+			Success: false,
+			Error: fmt.Errorf(
+				"proposal tracker shutdown; proposal %q (%s) invalidated",
+				entry.ID,
+				entry.Operation,
+			),
 			AppliedAt: shutdownTime,
 			Duration:  duration,
 		}

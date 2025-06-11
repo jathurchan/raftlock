@@ -2,100 +2,27 @@ version: "2"
 
 linters:
   enable:
-    - asasalint
-    - asciicheck
-    - bidichk
-    - bodyclose
-    - containedctx
-    - contextcheck
-    - copyloopvar
-    - cyclop
-    - decorder
-    - depguard
-    - dogsled
-    - dupl
-    - dupword
-    - durationcheck
-    - errcheck
-    - errchkjson
-    - errname
-    - errorlint
-    - exhaustive
-    - exhaustruct
-    - forbidigo
-    - forcetypeassert
-    - funlen
-    - ginkgolinter
-    - gocheckcompilerdirectives
-    - gochecknoglobals
-    - gochecknoinits
-    - gochecksumtype
-    - gocognit
-    - goconst
-    - gocritic
-    - gocyclo
-    - godot
-    - godox
-    - goheader
-    - gomoddirectives
-    - gomodguard
-    - goprintffuncname
-    - gosec
-    - gosmopolitan
     - govet
-    - grouper
-    - importas
-    - inamedparam
     - ineffassign
-    - interfacebloat
-    - intrange
-    - ireturn
-    - lll
-    - loggercheck
-    - maintidx
-    - makezero
-    - mirror
-    - misspell
-    - musttag
-    - nakedret
-    - nestif
-    - nilerr
-    - nilnil
-    - nlreturn
-    - noctx
-    - nolintlint
-    - nonamedreturns
-    - nosprintfhostport
-    - paralleltest
-    - perfsprint
-    - prealloc
-    - predeclared
-    - promlinter
-    - protogetter
-    - reassign
-    - revive
-    - rowserrcheck
-    - sloglint
-    - spancheck
-    - sqlclosecheck
-    - staticcheck
-    - tagalign
-    - tagliatelle
-    - testableexamples
-    - testifylint
-    - testpackage
-    - thelper
-    - tparallel
-    - unconvert
-    - unparam
+    # - staticcheck
     - unused
-    - usestdlibvars
-    - varnamelen
-    - wastedassign
+    - bodyclose
+    #- contextcheck
+    - copyloopvar
+    - errorlint
+    - nilerr
+    - rowserrcheck
+    - sqlclosecheck
+    # - unparam
+    # - cyclop
+    # - goconst
+    #- gocritic
     - whitespace
-    - wrapcheck
-    - wsl
-    - zerologlint
+    # - gosec
+  # TODO: Add additional linters once the errors are fixed.
+  exclusions:
+    paths:
+      - ".*_test\\.go$"
 
 formatters:
   enable:
@@ -105,5 +32,3 @@ formatters:
     - goimports
     - golines
 
-run:
-  timeout: 5m

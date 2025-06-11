@@ -114,10 +114,14 @@ func (c *RaftLockServerConfig) Validate() error {
 		return NewRaftLockServerConfigError("Peers map cannot be nil")
 	}
 	if _, ok := c.Peers[c.NodeID]; !ok {
-		return NewRaftLockServerConfigError(fmt.Sprintf("Peers must include an entry for NodeID %q", c.NodeID))
+		return NewRaftLockServerConfigError(
+			fmt.Sprintf("Peers must include an entry for NodeID %q", c.NodeID),
+		)
 	}
 	if c.RaftConfig.ID != "" && c.RaftConfig.ID != c.NodeID {
-		return NewRaftLockServerConfigError(fmt.Sprintf("RaftConfig.ID (%s) must match NodeID (%s)", c.RaftConfig.ID, c.NodeID))
+		return NewRaftLockServerConfigError(
+			fmt.Sprintf("RaftConfig.ID (%s) must match NodeID (%s)", c.RaftConfig.ID, c.NodeID),
+		)
 	}
 
 	for peerID, cfg := range c.Peers {
@@ -125,7 +129,9 @@ func (c *RaftLockServerConfig) Validate() error {
 			return NewRaftLockServerConfigError("Peer ID cannot be empty")
 		}
 		if cfg.Address == "" {
-			return NewRaftLockServerConfigError(fmt.Sprintf("Peer %q must have a non-empty address", peerID))
+			return NewRaftLockServerConfigError(
+				fmt.Sprintf("Peer %q must have a non-empty address", peerID),
+			)
 		}
 	}
 

@@ -34,7 +34,12 @@ func AssertFalse(t testing.TB, condition bool, msgAndArgs ...any) {
 func AssertEqual(t testing.TB, expected, actual any, msgAndArgs ...any) {
 	t.Helper()
 	if !reflect.DeepEqual(expected, actual) {
-		t.Errorf("Not equal: \nexpected: %v\nactual  : %v\n%s", expected, actual, FormatMsgAndArgs(msgAndArgs...))
+		t.Errorf(
+			"Not equal: \nexpected: %v\nactual  : %v\n%s",
+			expected,
+			actual,
+			FormatMsgAndArgs(msgAndArgs...),
+		)
 	}
 }
 
@@ -55,7 +60,12 @@ func AssertError(t testing.TB, err error, msgAndArgs ...any) {
 func AssertErrorIs(t testing.TB, err, target error, msgAndArgs ...any) {
 	t.Helper()
 	if !errors.Is(err, target) {
-		t.Errorf("Expected error to be %v but got %v\n%s", target, err, FormatMsgAndArgs(msgAndArgs...))
+		t.Errorf(
+			"Expected error to be %v but got %v\n%s",
+			target,
+			err,
+			FormatMsgAndArgs(msgAndArgs...),
+		)
 	}
 }
 
@@ -63,7 +73,12 @@ func AssertLen(t testing.TB, object any, length int, msgAndArgs ...any) {
 	t.Helper()
 	v := reflect.ValueOf(object)
 	if v.Len() != length {
-		t.Errorf("Length not equal: \nexpected: %d\nactual  : %d\n%s", length, v.Len(), FormatMsgAndArgs(msgAndArgs...))
+		t.Errorf(
+			"Length not equal: \nexpected: %d\nactual  : %d\n%s",
+			length,
+			v.Len(),
+			FormatMsgAndArgs(msgAndArgs...),
+		)
 	}
 }
 
@@ -187,7 +202,12 @@ func RequireNotNil(t testing.TB, object any, msgAndArgs ...any) {
 func AssertContains(t testing.TB, s, substr string, msgAndArgs ...any) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
-		t.Errorf("Expected string to contain substring:\nstring: %q\nsubstring: %q\n%s", s, substr, FormatMsgAndArgs(msgAndArgs...))
+		t.Errorf(
+			"Expected string to contain substring:\nstring: %q\nsubstring: %q\n%s",
+			s,
+			substr,
+			FormatMsgAndArgs(msgAndArgs...),
+		)
 	}
 }
 
@@ -196,7 +216,12 @@ func AssertFileRemoved(t testing.TB, path string, removedFiles []string, msgAndA
 	t.Helper()
 	found := slices.Contains(removedFiles, path)
 	if !found {
-		t.Errorf("Expected file %q to be removed, but it wasn't in the list of removed files: %v\n%s", path, removedFiles, FormatMsgAndArgs(msgAndArgs...))
+		t.Errorf(
+			"Expected file %q to be removed, but it wasn't in the list of removed files: %v\n%s",
+			path,
+			removedFiles,
+			FormatMsgAndArgs(msgAndArgs...),
+		)
 	}
 }
 

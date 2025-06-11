@@ -76,7 +76,11 @@ func (w *defaultLogWriter) WriteEntriesToFile(
 				"offset", pos,
 				"error", err,
 			)
-			return nil, pos, fmt.Errorf("%w: failed writing log entry at index %d", ErrStorageIO, entry.Index)
+			return nil, pos, fmt.Errorf(
+				"%w: failed writing log entry at index %d",
+				ErrStorageIO,
+				entry.Index,
+			)
 		}
 		pos = newPos
 	}
@@ -91,7 +95,12 @@ func (w *defaultLogWriter) WriteEntriesToFile(
 
 // writeEntryToFile serializes and writes a single entry with a 4-byte length prefix.
 // Returns new offset after the write or an error on failure.
-func (w *defaultLogWriter) writeEntryToFile(f file, entry types.LogEntry, pos int64, lenBuf []byte) (int64, error) {
+func (w *defaultLogWriter) writeEntryToFile(
+	f file,
+	entry types.LogEntry,
+	pos int64,
+	lenBuf []byte,
+) (int64, error) {
 	data, err := w.serializer.MarshalLogEntry(entry)
 	if err != nil {
 		w.logger.Errorw("Failed to serialize log entry",
@@ -134,7 +143,11 @@ type appendResult struct {
 
 // logAppender defines the interface for safely validating and appending log entries to disk.
 type logAppender interface {
-	Append(ctx context.Context, entries []types.LogEntry, currentLast types.Index) (appendResult, error)
+	Append(
+		ctx context.Context,
+		entries []types.LogEntry,
+		currentLast types.Index,
+	) (appendResult, error)
 }
 
 // defaultLogAppender implements logAppender.
@@ -147,7 +160,13 @@ type defaultLogAppender struct {
 }
 
 // newLogAppender returns a new logAppender.
-func newLogAppender(logFilePath string, fs fileSystem, writer logWriter, log logger.Logger, sync bool) logAppender {
+func newLogAppender(
+	logFilePath string,
+	fs fileSystem,
+	writer logWriter,
+	log logger.Logger,
+	sync bool,
+) logAppender {
 	return &defaultLogAppender{
 		logFilePath:  logFilePath,
 		fileSystem:   fs,
@@ -159,7 +178,11 @@ func newLogAppender(logFilePath string, fs fileSystem, writer logWriter, log log
 
 // Append validates and appends a batch of log entries to the log file.
 // It performs rollback on failure and optionally syncs to disk.
-func (a *defaultLogAppender) Append(ctx context.Context, entries []types.LogEntry, currentLast types.Index) (appendResult, error) {
+func (a *defaultLogAppender) Append(
+	ctx context.Context,
+	entries []types.LogEntry,
+	currentLast types.Index,
+) (appendResult, error) {
 	if len(entries) == 0 {
 		return appendResult{}, ErrEmptyEntries
 	}
@@ -175,11 +198,16 @@ func (a *defaultLogAppender) Append(ctx context.Context, entries []types.LogEntr
 	if err != nil {
 		return appendResult{}, err
 	}
-	defer file.Close()
+
+	defer func() {
+		if err := file.Close(); err != nil {
+			a.logger.Errorw("error closing file: %v", err)
+		}
+	}()
 
 	offsets, _, err := a.writer.WriteEntriesToFile(ctx, file, startOffset, entries)
 	if err != nil {
-		a.failAndRollback(file, startOffset, ErrStorageIO, "logWriter failed")
+		_ = a.failAndRollback(file, startOffset, ErrStorageIO, "logWriter failed")
 		return appendResult{}, err
 	}
 
@@ -195,7 +223,10 @@ func (a *defaultLogAppender) Append(ctx context.Context, entries []types.LogEntr
 }
 
 // validateEntries checks index continuity and order.
-func (a *defaultLogAppender) validateEntries(entries []types.LogEntry, currentLast, first, last types.Index) error {
+func (a *defaultLogAppender) validateEntries(
+	entries []types.LogEntry,
+	currentLast, first, last types.Index,
+) error {
 	if first > last {
 		return ErrOutOfOrderEntries
 	}
@@ -205,10 +236,19 @@ func (a *defaultLogAppender) validateEntries(entries []types.LogEntry, currentLa
 		}
 	}
 	if currentLast > 0 && first != currentLast+1 {
-		return fmt.Errorf("%w: expected first index %d, got %d", ErrNonContiguousEntries, currentLast+1, first)
+		return fmt.Errorf(
+			"%w: expected first index %d, got %d",
+			ErrNonContiguousEntries,
+			currentLast+1,
+			first,
+		)
 	}
 	if currentLast == 0 && first != 1 {
-		return fmt.Errorf("%w: first index must be 1 for empty log, got %d", ErrNonContiguousEntries, first)
+		return fmt.Errorf(
+			"%w: first index must be 1 for empty log, got %d",
+			ErrNonContiguousEntries,
+			first,
+		)
 	}
 	return nil
 }
@@ -241,12 +281,8 @@ func (a *defaultLogAppender) syncIfNeeded(f file, start int64) error {
 
 // failAndRollback truncates the file back to the start offset after failure.
 func (a *defaultLogAppender) failAndRollback(f file, start int64, cause error, msg string) error {
-	if err := f.Close(); err != nil {
-		a.logger.Errorw("failed to close file during rollback",
-			"offset", start,
-			"error", err,
-		)
-	}
+	// Ignoring close error as we're already handling the main error
+	_ = f.Close()
 
 	truncErr := a.fileSystem.Truncate(a.logFilePath, start)
 	if truncErr != nil {
@@ -305,7 +341,10 @@ func newLogRewriter(logPath string, fs fileSystem, ser serializer, log logger.Lo
 //  4. Atomically renames it over the original log.
 //
 // If any step fails, it performs cleanup and returns an appropriate error.
-func (r *defaultLogRewriter) Rewrite(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error) {
+func (r *defaultLogRewriter) Rewrite(
+	ctx context.Context,
+	entries []types.LogEntry,
+) ([]types.IndexOffsetPair, error) {
 	tmpPath := r.fs.TempPath(r.logPath)
 
 	tmpFile, err := r.prepareTempFile(tmpPath)
@@ -355,7 +394,11 @@ func (r *defaultLogRewriter) prepareTempFile(tmpPath string) (file, error) {
 
 // writeAndSyncEntries writes all log entries to the given file,
 // ensures the data is flushed to disk, and closes the file.
-func (r *defaultLogRewriter) writeAndSyncEntries(ctx context.Context, f file, entries []types.LogEntry) ([]types.IndexOffsetPair, int64, error) {
+func (r *defaultLogRewriter) writeAndSyncEntries(
+	ctx context.Context,
+	f file,
+	entries []types.LogEntry,
+) ([]types.IndexOffsetPair, int64, error) {
 	_, err := f.Seek(0, io.SeekStart)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: failed to seek to start of temp file: %w", ErrStorageIO, err)

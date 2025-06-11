@@ -2,12 +2,12 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"sync/atomic"
-
 	"slices"
+	"sync/atomic"
 
 	"github.com/jathurchan/raftlock/types"
 )
@@ -90,7 +90,12 @@ func writeChunks(ctx context.Context, file file, data []byte, chunkSize int) err
 			return fmt.Errorf("%w: failed to write snapshot chunk", ErrStorageIO)
 		}
 		if n != len(chunk) {
-			return fmt.Errorf("%w: incomplete chunk write (%d/%d bytes)", ErrStorageIO, n, len(chunk))
+			return fmt.Errorf(
+				"%w: incomplete chunk write (%d/%d bytes)",
+				ErrStorageIO,
+				n,
+				len(chunk),
+			)
 		}
 	}
 
@@ -123,11 +128,14 @@ func readChunks(ctx context.Context, file file, size int64, chunkSize int) ([]by
 			bytesRead += int64(n)
 		}
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				if bytesRead == size {
 					break
 				}
-				return nil, fmt.Errorf("%w: unexpected EOF before reading all data", ErrCorruptedSnapshot)
+				return nil, fmt.Errorf(
+					"%w: unexpected EOF before reading all data",
+					ErrCorruptedSnapshot,
+				)
 			}
 			return nil, fmt.Errorf("%w: failed to read snapshot chunk", ErrStorageIO)
 		}

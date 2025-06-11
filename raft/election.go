@@ -48,7 +48,10 @@ type ElectionManager interface {
 	// HandleRequestVote processes an incoming RequestVote RPC from a candidate
 	// and returns a reply indicating whether the vote was granted, based on
 	// term, log freshness, and prior votes.
-	HandleRequestVote(ctx context.Context, args *types.RequestVoteArgs) (*types.RequestVoteReply, error)
+	HandleRequestVote(
+		ctx context.Context,
+		args *types.RequestVoteArgs,
+	) (*types.RequestVoteReply, error)
 
 	// Stop performs any necessary cleanup when shutting down the election manager.
 	Stop()
@@ -193,14 +196,32 @@ func validateElectionManagerDeps(deps ElectionManagerDeps) error {
 // applyDefaults assigns default values to election configuration parameters if unset or invalid.
 func (em *electionManager) applyDefaults() {
 	if em.electionTickCount <= 0 {
-		em.logger.Warnw("Invalid ElectionTickCount, using default", "provided", em.electionTickCount, "default", DefaultElectionTickCount)
+		em.logger.Warnw(
+			"Invalid ElectionTickCount, using default",
+			"provided",
+			em.electionTickCount,
+			"default",
+			DefaultElectionTickCount,
+		)
 		em.electionTickCount = DefaultElectionTickCount
 	}
 	if em.electionTickCount <= DefaultHeartbeatTickCount {
-		em.logger.Warnw("ElectionTickCount should be greater than HeartbeatTickCount", "electionTicks", em.electionTickCount, "heartbeatTicks", DefaultHeartbeatTickCount)
+		em.logger.Warnw(
+			"ElectionTickCount should be greater than HeartbeatTickCount",
+			"electionTicks",
+			em.electionTickCount,
+			"heartbeatTicks",
+			DefaultHeartbeatTickCount,
+		)
 	}
 	if em.randomizationFactor < 0.0 || em.randomizationFactor > 1.0 {
-		em.logger.Warnw("Invalid ElectionRandomizationFactor, using default", "provided", em.randomizationFactor, "default", DefaultElectionRandomizationFactor)
+		em.logger.Warnw(
+			"Invalid ElectionRandomizationFactor, using default",
+			"provided",
+			em.randomizationFactor,
+			"default",
+			DefaultElectionRandomizationFactor,
+		)
 		em.randomizationFactor = DefaultElectionRandomizationFactor
 	}
 }
@@ -224,7 +245,11 @@ func (em *electionManager) Initialize(ctx context.Context) error {
 
 	term, role, _ := em.stateMgr.GetState()
 	if term == 0 && role != types.RoleFollower {
-		err := fmt.Errorf("invalid initial state: term=%d, role=%s, expected RoleFollower at term 0", term, role)
+		err := fmt.Errorf(
+			"invalid initial state: term=%d, role=%s, expected RoleFollower at term 0",
+			term,
+			role,
+		)
 		em.logger.Errorw("Initialization failed: inconsistent initial state", "error", err)
 		return err
 	}
@@ -287,11 +312,21 @@ func (em *electionManager) Tick(ctx context.Context) {
 // based on configuration and current state. Called asynchronously after a timeout.
 func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
-		em.logger.Debugw("Election timeout handling aborted: parent context cancelled", "error", err, "nodeID", em.id)
+		em.logger.Debugw(
+			"Election timeout handling aborted: parent context cancelled",
+			"error",
+			err,
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 	if em.isShutdown.Load() {
-		em.logger.Debugw("Election timeout handling aborted: node is shutting down", "nodeID", em.id)
+		em.logger.Debugw(
+			"Election timeout handling aborted: node is shutting down",
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 
@@ -329,7 +364,13 @@ func (em *electionManager) defaultStartPreVote(ctx context.Context) {
 	lastIndex, lastTerm := em.logMgr.GetConsistentLastState()
 
 	if role == types.RoleLeader { // Check role again
-		em.logger.Infow("Pre-vote skipped: node is already the leader", "term", term, "nodeID", em.id)
+		em.logger.Infow(
+			"Pre-vote skipped: node is already the leader",
+			"term",
+			term,
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 
@@ -374,7 +415,11 @@ func (em *electionManager) defaultStartElection(ctx context.Context) {
 	defer cancelPersist()
 
 	if !em.stateMgr.BecomeCandidate(persistCtx, ElectionReasonTimeout) {
-		em.logger.Warnw("Election aborted: failed to transition to Candidate state", "nodeID", em.id)
+		em.logger.Warnw(
+			"Election aborted: failed to transition to Candidate state",
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 
@@ -382,8 +427,15 @@ func (em *electionManager) defaultStartElection(ctx context.Context) {
 	lastIndex, lastTerm := em.logMgr.GetConsistentLastState()
 
 	if role != types.RoleCandidate {
-		em.logger.Errorw("Election logic error: node role is not Candidate after successful BecomeCandidate call",
-			"nodeID", em.id, "role", role.String(), "term", currentTerm)
+		em.logger.Errorw(
+			"Election logic error: node role is not Candidate after successful BecomeCandidate call",
+			"nodeID",
+			em.id,
+			"role",
+			role.String(),
+			"term",
+			currentTerm,
+		)
 		return
 	}
 
@@ -393,7 +445,13 @@ func (em *electionManager) defaultStartElection(ctx context.Context) {
 	)
 
 	if len(em.peers) <= 1 {
-		em.logger.Infow("Single-node cluster: becoming leader immediately", "term", currentTerm, "nodeID", em.id)
+		em.logger.Infow(
+			"Single-node cluster: becoming leader immediately",
+			"term",
+			currentTerm,
+			"nodeID",
+			em.id,
+		)
 		go em.becomeLeaderIfWon(ctx)
 		return
 	}
@@ -418,7 +476,15 @@ func (em *electionManager) broadcastVoteRequests(
 	originatorTerm types.Term,
 	isPreVote bool,
 ) {
-	em.logger.Debugw("Broadcasting requests", "type", requestTypeLabel(isPreVote), "term", args.Term, "nodeID", em.id)
+	em.logger.Debugw(
+		"Broadcasting requests",
+		"type",
+		requestTypeLabel(isPreVote),
+		"term",
+		args.Term,
+		"nodeID",
+		em.id,
+	)
 
 	var wg sync.WaitGroup
 	peerCount := 0
@@ -471,14 +537,27 @@ func (em *electionManager) sendPreVoteRequest(
 	)
 
 	reply, err := em.networkMgr.SendRequestVote(ctx, targetPeerID, args)
-
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		switch {
+		case errors.Is(err, context.Canceled):
 			em.logger.Debugw("Pre-vote request canceled", "to", targetPeerID, "nodeID", em.id)
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			em.logger.Warnw("Pre-vote request timed out", "to", targetPeerID, "timeout", ctx.Err(), "nodeID", em.id)
-		} else {
-			em.logger.Warnw("Pre-vote request failed", "to", targetPeerID, "error", err, "nodeID", em.id)
+		case errors.Is(err, context.DeadlineExceeded):
+			em.logger.Warnw(
+				"Pre-vote request timed out",
+				"to", targetPeerID,
+				"timeout",
+				ctx.Err(),
+				"nodeID", em.id)
+		default:
+			em.logger.Warnw(
+				"Pre-vote request failed",
+				"to",
+				targetPeerID,
+				"error",
+				err,
+				"nodeID",
+				em.id,
+			)
 		}
 		return // Do not process reply if RPC failed
 	}
@@ -487,7 +566,11 @@ func (em *electionManager) sendPreVoteRequest(
 }
 
 // sendVoteRequest sends a single regular RequestVote RPC to a peer and handles the response.
-func (em *electionManager) sendVoteRequest(ctx context.Context, targetPeerID types.NodeID, args *types.RequestVoteArgs) {
+func (em *electionManager) sendVoteRequest(
+	ctx context.Context,
+	targetPeerID types.NodeID,
+	args *types.RequestVoteArgs,
+) {
 	em.logger.Debugw("Sending vote request",
 		"to", targetPeerID,
 		"term", args.Term,
@@ -496,14 +579,30 @@ func (em *electionManager) sendVoteRequest(ctx context.Context, targetPeerID typ
 		"nodeID", em.id)
 
 	reply, err := em.networkMgr.SendRequestVote(ctx, targetPeerID, args)
-
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		switch {
+		case errors.Is(err, context.Canceled):
 			em.logger.Debugw("Vote request canceled", "to", targetPeerID, "nodeID", em.id)
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			em.logger.Warnw("Vote request timed out", "to", targetPeerID, "timeout", ctx.Err(), "nodeID", em.id)
-		} else {
-			em.logger.Warnw("Vote request failed", "to", targetPeerID, "error", err, "nodeID", em.id)
+		case errors.Is(err, context.DeadlineExceeded):
+			em.logger.Warnw(
+				"Vote request timed out",
+				"to",
+				targetPeerID,
+				"timeout",
+				ctx.Err(),
+				"nodeID",
+				em.id,
+			)
+		default:
+			em.logger.Warnw(
+				"Vote request failed",
+				"to",
+				targetPeerID,
+				"error",
+				err,
+				"nodeID",
+				em.id,
+			)
 		}
 		return // Do not process reply if RPC failed
 	}
@@ -520,7 +619,13 @@ func (em *electionManager) processPreVoteReply(
 	reply *types.RequestVoteReply,
 ) {
 	if em.isShutdown.Load() {
-		em.logger.Debugw("Ignoring pre-vote reply: node is shutting down", "from", fromPeerID, "nodeID", em.id)
+		em.logger.Debugw(
+			"Ignoring pre-vote reply: node is shutting down",
+			"from",
+			fromPeerID,
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 
@@ -543,7 +648,15 @@ func (em *electionManager) processPreVoteReply(
 	}
 
 	if reply.VoteGranted {
-		em.logger.Debugw("Pre-vote granted", "from", fromPeerID, "preVoteTerm", preVoteTerm, "nodeID", em.id)
+		em.logger.Debugw(
+			"Pre-vote granted",
+			"from",
+			fromPeerID,
+			"preVoteTerm",
+			preVoteTerm,
+			"nodeID",
+			em.id,
+		)
 		quorumAchieved := em.recordVoteAndCheckQuorum(fromPeerID, preVoteTerm)
 
 		if quorumAchieved {
@@ -566,14 +679,33 @@ func (em *electionManager) processVoteReply(
 	reply *types.RequestVoteReply,
 ) {
 	if em.isShutdown.Load() {
-		em.logger.Debugw("Ignoring vote reply: node is shutting down", "from", fromPeerID, "nodeID", em.id)
+		em.logger.Debugw(
+			"Ignoring vote reply: node is shutting down",
+			"from",
+			fromPeerID,
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 
-	steppedDown, localTermBeforeStepDown := em.stateMgr.CheckTermAndStepDown(ctx, reply.Term, fromPeerID) // Leader hint might be inaccurate here
+	steppedDown, localTermBeforeStepDown := em.stateMgr.CheckTermAndStepDown(
+		ctx,
+		reply.Term,
+		fromPeerID,
+	) // Leader hint might be inaccurate here
 	if steppedDown {
-		em.logger.Infow("Stepped down due to higher term in vote reply",
-			"from", fromPeerID, "replyTerm", reply.Term, "localTermBefore", localTermBeforeStepDown, "nodeID", em.id)
+		em.logger.Infow(
+			"Stepped down due to higher term in vote reply",
+			"from",
+			fromPeerID,
+			"replyTerm",
+			reply.Term,
+			"localTermBefore",
+			localTermBeforeStepDown,
+			"nodeID",
+			em.id,
+		)
 		return
 	}
 
@@ -646,16 +778,33 @@ func (em *electionManager) ResetTimerOnHeartbeat() {
 }
 
 // HandleRequestVote processes an incoming RequestVote RPC.
-func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+func (em *electionManager) HandleRequestVote(
+	ctx context.Context,
+	args *types.RequestVoteArgs,
+) (*types.RequestVoteReply, error) {
 	if err := ctx.Err(); err != nil {
-		em.logger.Debugw("Rejecting vote request: context cancelled", "from", args.CandidateID, "error", err, "nodeID", em.id)
+		em.logger.Debugw(
+			"Rejecting vote request: context cancelled",
+			"from",
+			args.CandidateID,
+			"error",
+			err,
+			"nodeID",
+			em.id,
+		)
 		term, _, _ := em.stateMgr.GetState()
 		return &types.RequestVoteReply{Term: term, VoteGranted: false}, err
 	}
 
 	if em.isShutdown.Load() {
 		term, _, _ := em.stateMgr.GetState()
-		em.logger.Debugw("Rejecting vote request: node is shutting down", "from", args.CandidateID, "nodeID", em.id)
+		em.logger.Debugw(
+			"Rejecting vote request: node is shutting down",
+			"from",
+			args.CandidateID,
+			"nodeID",
+			em.id,
+		)
 		return &types.RequestVoteReply{Term: term, VoteGranted: false}, ErrShuttingDown
 	}
 
@@ -669,8 +818,18 @@ func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.Re
 	logType := requestTypeLabel(args.IsPreVote)
 
 	if args.Term < termBeforeCheck {
-		em.logger.Debugw(fmt.Sprintf("%s rejected: requester term %d lower than local term %d", logType, args.Term, termBeforeCheck),
-			"from", args.CandidateID, "nodeID", em.id)
+		em.logger.Debugw(
+			fmt.Sprintf(
+				"%s rejected: requester term %d lower than local term %d",
+				logType,
+				args.Term,
+				termBeforeCheck,
+			),
+			"from",
+			args.CandidateID,
+			"nodeID",
+			em.id,
+		)
 		return reply, nil // VoteGranted remains false
 	}
 
@@ -686,7 +845,15 @@ func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.Re
 
 	if args.IsPreVote {
 		reply.VoteGranted = true
-		em.logger.Debugw("Pre-vote granted", "to", args.CandidateID, "preVoteTerm", args.Term, "nodeID", em.id)
+		em.logger.Debugw(
+			"Pre-vote granted",
+			"to",
+			args.CandidateID,
+			"preVoteTerm",
+			args.Term,
+			"nodeID",
+			em.id,
+		)
 		return reply, nil
 	}
 
@@ -706,7 +873,12 @@ func (em *electionManager) HandleRequestVote(ctx context.Context, args *types.Re
 
 // isLogUpToDate returns true if the candidate's log term is greater than the local term,
 // or if terms are equal and the candidate's index is at least as large.
-func isLogUpToDate(candidateTerm types.Term, candidateIndex types.Index, localTerm types.Term, localIndex types.Index) bool {
+func isLogUpToDate(
+	candidateTerm types.Term,
+	candidateIndex types.Index,
+	localTerm types.Term,
+	localIndex types.Index,
+) bool {
 	return candidateTerm > localTerm || (candidateTerm == localTerm && candidateIndex >= localIndex)
 }
 

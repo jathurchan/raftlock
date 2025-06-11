@@ -63,7 +63,11 @@ type defaultSnapshotReader struct {
 	chunkSize       int
 }
 
-func (sw *defaultSnapshotWriter) Write(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+func (sw *defaultSnapshotWriter) Write(
+	ctx context.Context,
+	metadata types.SnapshotMetadata,
+	data []byte,
+) error {
 	metaPath := sw.fs.Path(sw.dir, snapshotMetaFilename)
 	dataPath := sw.fs.Path(sw.dir, snapshotDataFilename)
 	tmpMetaPath := sw.fs.TempPath(metaPath)
@@ -102,11 +106,11 @@ func (w *defaultSnapshotWriter) prepareSnapshotFiles(
 ) error {
 	metaBytes, err := w.serializer.MarshalSnapshotMetadata(metadata)
 	if err != nil {
-		return fmt.Errorf("%w: failed to marshal snapshot metadata: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to marshal snapshot metadata: %w", ErrStorageIO, err)
 	}
 
 	if err := w.fs.WriteFile(tmpMetaPath, metaBytes, ownRWOthR); err != nil {
-		return fmt.Errorf("%w: failed to write temp snapshot metadata: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to write temp snapshot metadata: %w", ErrStorageIO, err)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -124,19 +128,27 @@ func (w *defaultSnapshotWriter) prepareSnapshotFiles(
 	return nil
 }
 
-func (w *defaultSnapshotWriter) writeSnapshotData(ctx context.Context, path string, data []byte) error {
+func (w *defaultSnapshotWriter) writeSnapshotData(
+	ctx context.Context,
+	path string,
+	data []byte,
+) error {
 	file, err := w.fs.Open(path)
 	if err != nil {
-		return fmt.Errorf("%w: could not open snapshot file: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: could not open snapshot file: %w", ErrStorageIO, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			w.logger.Errorw("error closing file: %v", err)
+		}
+	}()
 
 	if w.enableChunkedIO && len(data) > w.chunkSize {
 		return writeChunks(ctx, file, data, w.chunkSize)
 	}
 
 	if _, err := file.Write(data); err != nil {
-		return fmt.Errorf("%w: failed to write snapshot data: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to write snapshot data: %w", ErrStorageIO, err)
 	}
 	return file.Sync()
 }
@@ -145,7 +157,7 @@ func (w *defaultSnapshotWriter) commitSnapshotFiles(
 	tmpMetaPath, tmpDataPath, finalMetaPath, finalDataPath string,
 ) error {
 	if err := atomicRenameOrCleanup(w.fs, tmpMetaPath, finalMetaPath); err != nil {
-		return fmt.Errorf("%w: failed to commit snapshot metadata: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to commit snapshot metadata: %w", ErrStorageIO, err)
 	}
 
 	if w.hooks != nil && w.hooks.OnMetadataCommitted != nil {
@@ -154,7 +166,7 @@ func (w *defaultSnapshotWriter) commitSnapshotFiles(
 
 	if err := atomicRenameOrCleanup(w.fs, tmpDataPath, finalDataPath); err != nil {
 		_ = w.fs.Remove(finalMetaPath) // rollback
-		return fmt.Errorf("%w: failed to commit snapshot data: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to commit snapshot data: %w", ErrStorageIO, err)
 	}
 
 	return nil
@@ -165,7 +177,12 @@ func (w *defaultSnapshotWriter) cleanupOnError(tmpMeta, tmpData string) {
 	_ = w.fs.Remove(tmpData)
 }
 
-func newSnapshotReader(fs fileSystem, serializer serializer, logger logger.Logger, dir string) snapshotReader {
+func newSnapshotReader(
+	fs fileSystem,
+	serializer serializer,
+	logger logger.Logger,
+	dir string,
+) snapshotReader {
 	return &defaultSnapshotReader{
 		fs:         fs,
 		serializer: serializer,
@@ -208,16 +225,27 @@ func (r *defaultSnapshotReader) readAndValidateMetadata() (types.SnapshotMetadat
 		if r.fs.IsNotExist(err) {
 			return types.SnapshotMetadata{}, ErrNoSnapshot
 		}
-		return types.SnapshotMetadata{}, fmt.Errorf("%w: could not read snapshot metadata: %v", ErrStorageIO, err)
+		return types.SnapshotMetadata{}, fmt.Errorf(
+			"%w: could not read snapshot metadata: %w",
+			ErrStorageIO,
+			err,
+		)
 	}
 
 	meta, err := r.serializer.UnmarshalSnapshotMetadata(metaBytes)
 	if err != nil {
-		return types.SnapshotMetadata{}, fmt.Errorf("%w: invalid snapshot metadata: %v", ErrCorruptedSnapshot, err)
+		return types.SnapshotMetadata{}, fmt.Errorf(
+			"%w: invalid snapshot metadata: %w",
+			ErrCorruptedSnapshot,
+			err,
+		)
 	}
 
 	if meta.LastIncludedIndex == 0 {
-		return types.SnapshotMetadata{}, fmt.Errorf("%w: LastIncludedIndex cannot be zero", ErrCorruptedSnapshot)
+		return types.SnapshotMetadata{}, fmt.Errorf(
+			"%w: LastIncludedIndex cannot be zero",
+			ErrCorruptedSnapshot,
+		)
 	}
 
 	return meta, nil
@@ -229,7 +257,7 @@ func (r *defaultSnapshotReader) readSnapshotData(ctx context.Context, path strin
 		if r.fs.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: snapshot data file does not exist", ErrCorruptedSnapshot)
 		}
-		return nil, fmt.Errorf("%w: unable to stat snapshot file: %v", ErrStorageIO, err)
+		return nil, fmt.Errorf("%w: unable to stat snapshot file: %w", ErrStorageIO, err)
 	}
 
 	size := info.Size()
@@ -238,20 +266,24 @@ func (r *defaultSnapshotReader) readSnapshotData(ctx context.Context, path strin
 	if useChunkedIO {
 		file, err := r.fs.Open(path)
 		if err != nil {
-			return nil, fmt.Errorf("%w: unable to open snapshot file: %v", ErrStorageIO, err)
+			return nil, fmt.Errorf("%w: unable to open snapshot file: %w", ErrStorageIO, err)
 		}
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				r.logger.Errorw("error closing file: %v", err)
+			}
+		}()
 
 		data, err := readChunks(ctx, file, size, r.chunkSize)
 		if err != nil {
-			return nil, fmt.Errorf("%w: chunked read failed: %v", ErrStorageIO, err)
+			return nil, fmt.Errorf("%w: chunked read failed: %w", ErrStorageIO, err)
 		}
 		return data, nil
 	}
 
 	data, err := r.fs.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read snapshot file: %v", ErrStorageIO, err)
+		return nil, fmt.Errorf("%w: failed to read snapshot file: %w", ErrStorageIO, err)
 	}
 	return data, nil
 }
