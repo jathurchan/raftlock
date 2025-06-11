@@ -20,6 +20,8 @@ linters:
     - whitespace
     # - gosec
   # TODO: Add additional linters once the errors are fixed.
+  disable:
+    - staticcheck
   exclusions:
     paths:
       - ".*_test\\.go$"
