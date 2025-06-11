@@ -60,10 +60,10 @@ jobs:
       - name: Run linting
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v1.57.2
           args: |
             --timeout=5m
-            --format=colored-line-number
+            --out-format=colored-line-number
             --exclude-dirs=proto
       
       - name: Run tests with coverage (entire repo, excluding .pb.go)
