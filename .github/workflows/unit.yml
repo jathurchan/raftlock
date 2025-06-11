@@ -60,7 +60,7 @@ jobs:
       - name: Run linting
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.57.2
+          version: latest
           args: |
             --timeout=5m
             --out-format=colored-line-number
