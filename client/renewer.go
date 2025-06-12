@@ -39,12 +39,12 @@ type autoRenewer struct {
 
 	clock raft.Clock // Clock used for scheduling (mockable for tests).
 
+	mu     sync.RWMutex
 	ctx    context.Context    // Context controlling the renewal loop.
 	cancel context.CancelFunc // Cancels the renewal loop.
 	wg     sync.WaitGroup     // Waits for the renewal goroutine to exit in Stop.
 
-	errMu sync.RWMutex // Protects concurrent access to err.
-	err   error        // Terminal error that stopped the renewer, if any.
+	err error // Terminal error that stopped the renewer, if any.
 }
 
 // AutoRenewerOptions holds optional configuration for an AutoRenewer.
@@ -97,9 +97,13 @@ func NewAutoRenewer(handle LockHandle, interval, ttl time.Duration, opts ...Auto
 
 // Start begins the auto-renewal process in a background goroutine.
 func (r *autoRenewer) Start(ctx context.Context) {
-	r.errMu.Lock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.cancel != nil {
+		return
+	}
 	r.ctx, r.cancel = context.WithCancel(ctx)
-	r.errMu.Unlock()
 
 	r.wg.Add(1)
 	go r.run()
@@ -107,9 +111,9 @@ func (r *autoRenewer) Start(ctx context.Context) {
 
 // Stop gracefully stops the auto-renewal process.
 func (r *autoRenewer) Stop(ctx context.Context) error {
-	r.errMu.RLock()
+	r.mu.RLock()
 	cancel := r.cancel
-	r.errMu.RUnlock()
+	r.mu.RUnlock()
 
 	if cancel == nil {
 		return nil // Not started
@@ -133,9 +137,9 @@ func (r *autoRenewer) Stop(ctx context.Context) error {
 
 // Done returns a channel that is closed when the renewer stops.
 func (r *autoRenewer) Done() <-chan struct{} {
-	r.errMu.RLock()
+	r.mu.RLock()
 	ctx := r.ctx
-	r.errMu.RUnlock()
+	r.mu.RUnlock()
 
 	if ctx == nil {
 		// Return a closed channel if Start hasn't been called.
@@ -148,15 +152,15 @@ func (r *autoRenewer) Done() <-chan struct{} {
 
 // Err returns the error that caused the renewer to stop.
 func (r *autoRenewer) Err() error {
-	r.errMu.RLock()
-	defer r.errMu.RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.err
 }
 
 // setError sets the error field in a thread-safe way.
 func (r *autoRenewer) setError(err error) {
-	r.errMu.Lock()
-	defer r.errMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.err = err
 }
 
