@@ -19,7 +19,13 @@ var (
 )
 
 // DoWithLock acquires a lock, executes a function, and then releases the lock.
-func DoWithLock(ctx context.Context, client RaftLockClient, lockID, clientID string, ttl time.Duration, fn func(ctx context.Context) error) (err error) {
+func DoWithLock(
+	ctx context.Context,
+	client RaftLockClient,
+	lockID, clientID string,
+	ttl time.Duration,
+	fn func(ctx context.Context) error,
+) (err error) {
 	handle, err := NewLockHandleFunc(client, lockID, clientID)
 	if err != nil {
 		return fmt.Errorf("failed to create lock handle: %w", err)
@@ -39,7 +45,13 @@ func DoWithLock(ctx context.Context, client RaftLockClient, lockID, clientID str
 }
 
 // RunWithLock is similar to DoWithLock but also sets up an auto-renewer.
-func RunWithLock(ctx context.Context, client RaftLockClient, lockID, clientID string, ttl, interval time.Duration, fn func(context.Context) error) (err error) {
+func RunWithLock(
+	ctx context.Context,
+	client RaftLockClient,
+	lockID, clientID string,
+	ttl, interval time.Duration,
+	fn func(context.Context) error,
+) (err error) {
 	handle, err := NewLockHandleFunc(client, lockID, clientID)
 	if err != nil {
 		return fmt.Errorf("failed to create lock handle: %w", err)

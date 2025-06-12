@@ -57,7 +57,11 @@ func NewAdminClient(config Config) (AdminClient, error) {
 // validateAdminConfig checks if the given config is suitable for admin operations.
 func validateAdminConfig(config Config) error {
 	if len(config.Endpoints) == 0 {
-		return NewValidationError("endpoints", config.Endpoints, "at least one endpoint must be provided")
+		return NewValidationError(
+			"endpoints",
+			config.Endpoints,
+			"at least one endpoint must be provided",
+		)
 	}
 	if config.RequestTimeout > 0 && config.RequestTimeout < defaultMinAdminTimeout {
 		return NewValidationError("requestTimeout", config.RequestTimeout,
@@ -68,32 +72,38 @@ func validateAdminConfig(config Config) error {
 
 // GetStatus retrieves cluster status, including Raft state, lock stats, and health info.
 // If IncludeReplicationDetails is true, replication data is also included.
-func (c *adminClient) GetStatus(ctx context.Context, req *GetStatusRequest) (*ClusterStatus, error) {
+func (c *adminClient) GetStatus(
+	ctx context.Context,
+	req *GetStatusRequest,
+) (*ClusterStatus, error) {
 	if req == nil {
 		return nil, NewValidationError("request", nil, "request cannot be nil")
 	}
 
 	var result *ClusterStatus
-	err := c.executeWithRetry(ctx, "GetStatus", func(ctx context.Context, client pb.RaftLockClient) error {
-		pbReq := &pb.GetStatusRequest{
-			IncludeReplicationDetails: req.IncludeReplicationDetails,
-		}
+	err := c.executeWithRetry(
+		ctx,
+		"GetStatus",
+		func(ctx context.Context, client pb.RaftLockClient) error {
+			pbReq := &pb.GetStatusRequest{
+				IncludeReplicationDetails: req.IncludeReplicationDetails,
+			}
 
-		resp, err := client.GetStatus(ctx, pbReq)
-		if err != nil {
-			return fmt.Errorf("GetStatus RPC failed: %w", err)
-		}
-		if resp == nil {
-			return fmt.Errorf("nil GetStatus response")
-		}
+			resp, err := client.GetStatus(ctx, pbReq)
+			if err != nil {
+				return fmt.Errorf("GetStatus RPC failed: %w", err)
+			}
+			if resp == nil {
+				return fmt.Errorf("nil GetStatus response")
+			}
 
-		result = protoToClusterStatus(resp)
-		if result == nil {
-			return fmt.Errorf("failed to convert GetStatus response")
-		}
-		return nil
-	})
-
+			result = protoToClusterStatus(resp)
+			if result == nil {
+				return fmt.Errorf("failed to convert GetStatus response")
+			}
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("GetStatus failed: %w", err)
 	}
@@ -108,26 +118,29 @@ func (c *adminClient) Health(ctx context.Context, req *HealthRequest) (*HealthSt
 	}
 
 	var result *HealthStatus
-	err := c.executeWithRetry(ctx, "Health", func(ctx context.Context, client pb.RaftLockClient) error {
-		pbReq := &pb.HealthRequest{
-			ServiceName: req.ServiceName,
-		}
+	err := c.executeWithRetry(
+		ctx,
+		"Health",
+		func(ctx context.Context, client pb.RaftLockClient) error {
+			pbReq := &pb.HealthRequest{
+				ServiceName: req.ServiceName,
+			}
 
-		resp, err := client.Health(ctx, pbReq)
-		if err != nil {
-			return fmt.Errorf("Health RPC failed: %w", err)
-		}
-		if resp == nil {
-			return fmt.Errorf("nil Health response")
-		}
+			resp, err := client.Health(ctx, pbReq)
+			if err != nil {
+				return fmt.Errorf("Health RPC failed: %w", err)
+			}
+			if resp == nil {
+				return fmt.Errorf("nil Health response")
+			}
 
-		result = protoToHealthStatusFromHealthResponse(resp)
-		if result == nil {
-			return fmt.Errorf("failed to convert Health response")
-		}
-		return nil
-	})
-
+			result = protoToHealthStatusFromHealthResponse(resp)
+			if result == nil {
+				return fmt.Errorf("failed to convert Health response")
+			}
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("Health check failed: %w", err)
 	}
@@ -136,7 +149,10 @@ func (c *adminClient) Health(ctx context.Context, req *HealthRequest) (*HealthSt
 
 // GetBackoffAdvice returns backoff guidance for the given lock ID.
 // Used by clients to implement smarter retries under contention.
-func (c *adminClient) GetBackoffAdvice(ctx context.Context, req *BackoffAdviceRequest) (*BackoffAdvice, error) {
+func (c *adminClient) GetBackoffAdvice(
+	ctx context.Context,
+	req *BackoffAdviceRequest,
+) (*BackoffAdvice, error) {
 	if req == nil {
 		return nil, NewValidationError("request", nil, "request cannot be nil")
 	}
@@ -145,26 +161,29 @@ func (c *adminClient) GetBackoffAdvice(ctx context.Context, req *BackoffAdviceRe
 	}
 
 	var result *BackoffAdvice
-	err := c.executeWithRetry(ctx, "GetBackoffAdvice", func(ctx context.Context, client pb.RaftLockClient) error {
-		pbReq := &pb.BackoffAdviceRequest{
-			LockId: req.LockID,
-		}
+	err := c.executeWithRetry(
+		ctx,
+		"GetBackoffAdvice",
+		func(ctx context.Context, client pb.RaftLockClient) error {
+			pbReq := &pb.BackoffAdviceRequest{
+				LockId: req.LockID,
+			}
 
-		resp, err := client.GetBackoffAdvice(ctx, pbReq)
-		if err != nil {
-			return fmt.Errorf("GetBackoffAdvice RPC failed: %w", err)
-		}
-		if resp == nil || resp.Advice == nil {
-			return fmt.Errorf("invalid GetBackoffAdvice response")
-		}
+			resp, err := client.GetBackoffAdvice(ctx, pbReq)
+			if err != nil {
+				return fmt.Errorf("GetBackoffAdvice RPC failed: %w", err)
+			}
+			if resp == nil || resp.Advice == nil {
+				return fmt.Errorf("invalid GetBackoffAdvice response")
+			}
 
-		result = protoToBackoffAdvice(resp.Advice)
-		if result == nil {
-			return fmt.Errorf("failed to convert GetBackoffAdvice response")
-		}
-		return nil
-	})
-
+			result = protoToBackoffAdvice(resp.Advice)
+			if result == nil {
+				return fmt.Errorf("failed to convert GetBackoffAdvice response")
+			}
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("GetBackoffAdvice failed: %w", err)
 	}

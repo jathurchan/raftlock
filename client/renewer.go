@@ -66,7 +66,11 @@ func WithClock(clock raft.Clock) AutoRenewerOption {
 // NewAutoRenewer creates a new AutoRenewer for the given lock handle.
 // It attempts to renew the lock at the specified interval using the given TTL.
 // Optional configurations (e.g., custom clock for testing) can be provided via opts.
-func NewAutoRenewer(handle LockHandle, interval, ttl time.Duration, opts ...AutoRenewerOption) (AutoRenewer, error) {
+func NewAutoRenewer(
+	handle LockHandle,
+	interval, ttl time.Duration,
+	opts ...AutoRenewerOption,
+) (AutoRenewer, error) {
 	if handle == nil {
 		return nil, errors.New("lock handle cannot be nil")
 	}
@@ -74,7 +78,11 @@ func NewAutoRenewer(handle LockHandle, interval, ttl time.Duration, opts ...Auto
 		return nil, errors.New("renewal interval must be positive")
 	}
 	if ttl <= interval {
-		return nil, fmt.Errorf("lock TTL (%v) must be greater than renewal interval (%v)", ttl, interval)
+		return nil, fmt.Errorf(
+			"lock TTL (%v) must be greater than renewal interval (%v)",
+			ttl,
+			interval,
+		)
 	}
 
 	options := &AutoRenewerOptions{}

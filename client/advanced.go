@@ -31,7 +31,10 @@ func NewAdvancedClient(config Config) (AdvancedClient, error) {
 
 // EnqueueWaiter requests to enqueue the client as a waiter on a specific lock.
 // The caller must provide a valid lock ID, client ID, and a positive timeout.
-func (c *advancedClient) EnqueueWaiter(ctx context.Context, req *EnqueueWaiterRequest) (*EnqueueResult, error) {
+func (c *advancedClient) EnqueueWaiter(
+	ctx context.Context,
+	req *EnqueueWaiterRequest,
+) (*EnqueueResult, error) {
 	if req == nil {
 		return nil, errors.New("request cannot be nil")
 	}
@@ -46,22 +49,25 @@ func (c *advancedClient) EnqueueWaiter(ctx context.Context, req *EnqueueWaiterRe
 	}
 
 	var result *EnqueueResult
-	err := c.executeWithRetry(ctx, "EnqueueWaiter", func(ctx context.Context, client pb.RaftLockClient) error {
-		pbReq := &pb.EnqueueWaiterRequest{
-			LockId:   req.LockID,
-			ClientId: req.ClientID,
-			Priority: req.Priority,
-			Version:  req.Version,
-			Timeout:  durationpb.New(req.Timeout),
-		}
-		resp, err := client.EnqueueWaiter(ctx, pbReq)
-		if err != nil {
-			return fmt.Errorf("enqueue waiter RPC failed: %w", err)
-		}
-		result = protoToEnqueueResult(resp)
-		return nil
-	})
-
+	err := c.executeWithRetry(
+		ctx,
+		"EnqueueWaiter",
+		func(ctx context.Context, client pb.RaftLockClient) error {
+			pbReq := &pb.EnqueueWaiterRequest{
+				LockId:   req.LockID,
+				ClientId: req.ClientID,
+				Priority: req.Priority,
+				Version:  req.Version,
+				Timeout:  durationpb.New(req.Timeout),
+			}
+			resp, err := client.EnqueueWaiter(ctx, pbReq)
+			if err != nil {
+				return fmt.Errorf("enqueue waiter RPC failed: %w", err)
+			}
+			result = protoToEnqueueResult(resp)
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to enqueue waiter for lock %s: %w", req.LockID, err)
 	}
@@ -69,7 +75,10 @@ func (c *advancedClient) EnqueueWaiter(ctx context.Context, req *EnqueueWaiterRe
 }
 
 // CancelWait cancels a previously enqueued waiter for a given lock and client.
-func (c *advancedClient) CancelWait(ctx context.Context, req *CancelWaitRequest) (*CancelWaitResult, error) {
+func (c *advancedClient) CancelWait(
+	ctx context.Context,
+	req *CancelWaitRequest,
+) (*CancelWaitResult, error) {
 	if req == nil {
 		return nil, errors.New("request cannot be nil")
 	}
@@ -81,20 +90,23 @@ func (c *advancedClient) CancelWait(ctx context.Context, req *CancelWaitRequest)
 	}
 
 	var result *CancelWaitResult
-	err := c.executeWithRetry(ctx, "CancelWait", func(ctx context.Context, client pb.RaftLockClient) error {
-		pbReq := &pb.CancelWaitRequest{
-			LockId:   req.LockID,
-			ClientId: req.ClientID,
-			Version:  req.Version,
-		}
-		resp, err := client.CancelWait(ctx, pbReq)
-		if err != nil {
-			return fmt.Errorf("cancel wait RPC failed: %w", err)
-		}
-		result = protoToCancelWaitResult(resp)
-		return nil
-	})
-
+	err := c.executeWithRetry(
+		ctx,
+		"CancelWait",
+		func(ctx context.Context, client pb.RaftLockClient) error {
+			pbReq := &pb.CancelWaitRequest{
+				LockId:   req.LockID,
+				ClientId: req.ClientID,
+				Version:  req.Version,
+			}
+			resp, err := client.CancelWait(ctx, pbReq)
+			if err != nil {
+				return fmt.Errorf("cancel wait RPC failed: %w", err)
+			}
+			result = protoToCancelWaitResult(resp)
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel wait for lock %s: %w", req.LockID, err)
 	}
