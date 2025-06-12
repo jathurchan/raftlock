@@ -276,7 +276,7 @@ type mockRaftLockClient struct {
 
 func (m *mockRaftLockClient) Acquire(ctx context.Context, req *pb.AcquireRequest, opts ...grpc.CallOption) (*pb.AcquireResponse, error) {
 	if m.acquireFunc != nil {
-		return m.acquireFunc(ctx, req, opts...)
+		return m.acquireFunc(ctx, req)
 	}
 	return &pb.AcquireResponse{Acquired: true}, nil
 }
@@ -482,4 +482,161 @@ func (m *mockBaseClient) setConnector(connector connector) {
 	if m.setConnectorFunc != nil {
 		m.setConnectorFunc(connector)
 	}
+}
+
+type mockLockClient struct {
+	acquireFunc     func(ctx context.Context, req *AcquireRequest) (*AcquireResult, error)
+	releaseFunc     func(ctx context.Context, req *ReleaseRequest) (*ReleaseResult, error)
+	renewFunc       func(ctx context.Context, req *RenewRequest) (*RenewResult, error)
+	getLockInfoFunc func(ctx context.Context, req *GetLockInfoRequest) (*LockInfo, error)
+	getLocksFunc    func(ctx context.Context, req *GetLocksRequest) (*GetLocksResult, error)
+	closeFunc       func() error
+
+	AcquireCalls     []AcquireCall
+	ReleaseCalls     []ReleaseCall
+	RenewCalls       []RenewCall
+	GetLockInfoCalls []GetLockInfoCall
+	GetLocksCalls    []GetLocksCall
+	CloseCalls       int
+
+	mu sync.Mutex
+}
+
+type AcquireCall struct {
+	Ctx context.Context
+	Req *AcquireRequest
+}
+
+type ReleaseCall struct {
+	Ctx context.Context
+	Req *ReleaseRequest
+}
+
+type RenewCall struct {
+	Ctx context.Context
+	Req *RenewRequest
+}
+
+type GetLockInfoCall struct {
+	Ctx context.Context
+	Req *GetLockInfoRequest
+}
+
+type GetLocksCall struct {
+	Ctx context.Context
+	Req *GetLocksRequest
+}
+
+func (m *mockLockClient) Acquire(ctx context.Context, req *AcquireRequest) (*AcquireResult, error) {
+	m.mu.Lock()
+	m.AcquireCalls = append(m.AcquireCalls, AcquireCall{Ctx: ctx, Req: req})
+	m.mu.Unlock()
+
+	if m.acquireFunc != nil {
+		return m.acquireFunc(ctx, req)
+	}
+
+	return &AcquireResult{Acquired: true}, nil
+}
+
+func (m *mockLockClient) Release(ctx context.Context, req *ReleaseRequest) (*ReleaseResult, error) {
+	m.mu.Lock()
+	m.ReleaseCalls = append(m.ReleaseCalls, ReleaseCall{Ctx: ctx, Req: req})
+	m.mu.Unlock()
+
+	if m.releaseFunc != nil {
+		return m.releaseFunc(ctx, req)
+	}
+
+	return &ReleaseResult{Released: true}, nil
+}
+
+func (m *mockLockClient) Renew(ctx context.Context, req *RenewRequest) (*RenewResult, error) {
+	m.mu.Lock()
+	m.RenewCalls = append(m.RenewCalls, RenewCall{Ctx: ctx, Req: req})
+	m.mu.Unlock()
+
+	if m.renewFunc != nil {
+		return m.renewFunc(ctx, req)
+	}
+
+	return &RenewResult{Renewed: true}, nil
+}
+
+func (m *mockLockClient) GetLockInfo(ctx context.Context, req *GetLockInfoRequest) (*LockInfo, error) {
+	m.mu.Lock()
+	m.GetLockInfoCalls = append(m.GetLockInfoCalls, GetLockInfoCall{Ctx: ctx, Req: req})
+	m.mu.Unlock()
+
+	if m.getLockInfoFunc != nil {
+		return m.getLockInfoFunc(ctx, req)
+	}
+	return &LockInfo{}, nil
+}
+
+func (m *mockLockClient) GetLocks(ctx context.Context, req *GetLocksRequest) (*GetLocksResult, error) {
+	m.mu.Lock()
+	m.GetLocksCalls = append(m.GetLocksCalls, GetLocksCall{Ctx: ctx, Req: req})
+	m.mu.Unlock()
+
+	if m.getLocksFunc != nil {
+		return m.getLocksFunc(ctx, req)
+	}
+	return &GetLocksResult{}, nil
+}
+
+func (m *mockLockClient) Close() error {
+	m.mu.Lock()
+	m.CloseCalls++
+	m.mu.Unlock()
+
+	if m.closeFunc != nil {
+		return m.closeFunc()
+	}
+	return nil
+}
+
+func (m *mockLockClient) GetAcquireCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.AcquireCalls)
+}
+
+func (m *mockLockClient) GetReleaseCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.ReleaseCalls)
+}
+
+func (m *mockLockClient) GetRenewCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.RenewCalls)
+}
+
+func (m *mockLockClient) GetLastAcquireCall() *AcquireCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.AcquireCalls) == 0 {
+		return nil
+	}
+	return &m.AcquireCalls[len(m.AcquireCalls)-1]
+}
+
+func (m *mockLockClient) GetLastReleaseCall() *ReleaseCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.ReleaseCalls) == 0 {
+		return nil
+	}
+	return &m.ReleaseCalls[len(m.ReleaseCalls)-1]
+}
+
+func (m *mockLockClient) GetLastRenewCall() *RenewCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.RenewCalls) == 0 {
+		return nil
+	}
+	return &m.RenewCalls[len(m.RenewCalls)-1]
 }
