@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"slices"
 
 	pb "github.com/jathurchan/raftlock/proto"
 	"github.com/jathurchan/raftlock/raft"
@@ -19,69 +18,89 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// baseClient defines the core client interface used internally by higher-level clients.
-// It enables mocking of client logic in tests.
+// connector defines an interface for establishing gRPC connections.
+// Useful for injecting mocks in tests.
+type connector interface {
+	// GetConnection returns a cached gRPC connection or creates a new one.
+	GetConnection(endpoint string, opts ...grpc.DialOption) (*grpc.ClientConn, error)
+}
+
+// grpcConnector implements the default connector.
+type grpcConnector struct{}
+
+// GetConnection establishes a new gRPC connection to the given endpoint.
+func (c *grpcConnector) GetConnection(endpoint string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	return grpc.NewClient(endpoint, opts...)
+}
+
+// baseClient defines the internal RaftLock client interface.
+// It manages retries, leader tracking, and metrics.
 type baseClient interface {
-	// executeWithRetry performs an operation with retries and leader redirection.
+	// executeWithRetry runs an operation with retry, backoff, and leader redirection.
 	executeWithRetry(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error
 
-	// getCurrentLeader returns the current leader address.
+	// getCurrentLeader returns the current known leader address.
 	getCurrentLeader() string
 
-	// setCurrentLeader updates the leader address.
+	// setCurrentLeader sets the current leader address.
 	setCurrentLeader(leader string)
 
-	// isConnected reports whether there are any active connections.
+	// isConnected reports whether the client has active connections.
 	isConnected() bool
 
-	// close shuts down all connections and marks the client as closed.
+	// close releases all resources and shuts down the client.
 	close() error
 
-	// setRetryPolicy replaces the current retry policy.
+	// setRetryPolicy sets the retry policy for operations.
 	setRetryPolicy(policy RetryPolicy)
 
-	// setRand sets a custom random source, used primarily for testing.
+	// setRand sets the random source used for jitter in backoff calculations.
 	setRand(r raft.Rand)
 
-	// getMetrics returns the active metrics collector.
+	// getMetrics returns the metrics recorder used by the client.
 	getMetrics() Metrics
+
+	// setConnector replaces the connector (mainly for testing).
+	setConnector(connector connector)
 }
 
-// baseClientImpl implements baseClient and provides core functionality shared
-// by all RaftLock clients, including connection management, retry logic, and metrics.
+// baseClientImpl provides the default implementation of baseClient.
 type baseClientImpl struct {
 	config    Config
-	endpoints []string // Initial list of server endpoints.
+	endpoints []string
 
-	mu            sync.RWMutex                // Protects conns and currentLeader
-	conns         map[string]*grpc.ClientConn // Active gRPC connections by endpoint
-	currentLeader string                      // Address of the last known leader
+	mu            sync.RWMutex
+	conns         map[string]*grpc.ClientConn
+	currentLeader string
 
-	metrics Metrics
-	closed  atomic.Bool // Tracks whether the client has been closed
-	rand    raft.Rand   // Source of randomness for backoff jitter (mockable for tests)
+	metrics   Metrics
+	closed    atomic.Bool
+	clock     raft.Clock
+	rand      raft.Rand
+	connector connector
+
+	tryEndpointFunc func(ctx context.Context, endpoint string, fn func(context.Context, pb.RaftLockClient) error) error
 }
 
-// newBaseClient creates and initializes a defaultClient using the provided config.
+// newBaseClient creates a new base client with the given configuration.
 func newBaseClient(config Config) (baseClient, error) {
 	if len(config.Endpoints) == 0 {
 		return nil, errors.New("at least one endpoint must be provided")
 	}
-
-	client := &baseClientImpl{
+	c := &baseClientImpl{
 		config:    config,
 		endpoints: config.Endpoints,
 		conns:     make(map[string]*grpc.ClientConn),
+		clock:     raft.NewStandardClock(),
 		rand:      raft.NewStandardRand(),
+		connector: &grpcConnector{},
 	}
-
 	if config.EnableMetrics {
-		client.metrics = newMetrics()
+		c.metrics = newMetrics()
 	} else {
-		client.metrics = &noOpMetrics{}
+		c.metrics = &noOpMetrics{}
 	}
-
-	return client, nil
+	return c, nil
 }
 
 // setRetryPolicy updates the client's retry policy in a thread-safe manner.
@@ -101,39 +120,13 @@ func (c *baseClientImpl) getMetrics() Metrics {
 	return c.metrics
 }
 
-// getConnection returns a gRPC connection to the specified endpoint,
-// creating it if one doesn’t already exist.
-func (c *baseClientImpl) getConnection(endpoint string) (*grpc.ClientConn, error) {
-	if c.closed.Load() {
-		return nil, ErrClientClosed
-	}
-
-	c.mu.RLock()
-	if conn, exists := c.conns[endpoint]; exists {
-		c.mu.RUnlock()
-		return conn, nil
-	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if conn, exists := c.conns[endpoint]; exists {
-		return conn, nil
-	}
-
-	conn, err := grpc.NewClient(endpoint, c.buildDialOptions()...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize client connection to %s: %w", endpoint, err)
-	}
-
-	c.conns[endpoint] = conn
-	return conn, nil
-}
-
-// buildDialOptions constructs gRPC dial options from the client's config.
+// buildDialOptions returns gRPC dial options based on the current configuration.
 func (c *baseClientImpl) buildDialOptions() []grpc.DialOption {
-	opts := []grpc.DialOption{
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                c.config.KeepAlive.Time,
 			Timeout:             c.config.KeepAlive.Timeout,
@@ -144,32 +137,53 @@ func (c *baseClientImpl) buildDialOptions() []grpc.DialOption {
 			grpc.MaxCallSendMsgSize(c.config.MaxMessageSize),
 		),
 	}
-
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	return opts
 }
 
-// executeWithRetry runs a gRPC operation with retry and optional leader redirection.
+// getConnection returns a cached connection or establishes a new one.
+func (c *baseClientImpl) getConnection(endpoint string) (*grpc.ClientConn, error) {
+	if c.closed.Load() {
+		return nil, ErrClientClosed
+	}
+
+	c.mu.RLock()
+	if conn, ok := c.conns[endpoint]; ok {
+		c.mu.RUnlock()
+		return conn, nil
+	}
+	c.mu.RUnlock()
+
+	dialOpts := c.buildDialOptions()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if conn, ok := c.conns[endpoint]; ok {
+		return conn, nil
+	}
+
+	conn, err := c.connector.GetConnection(endpoint, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial %s: %w", endpoint, err)
+	}
+	c.conns[endpoint] = conn
+	return conn, nil
+}
+
+// executeWithRetry runs an operation with retry logic, including backoff and leader redirection.
 func (c *baseClientImpl) executeWithRetry(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error {
-	start := time.Now()
-	defer func() {
-		c.metrics.ObserveLatency(operation, time.Since(start))
-	}()
+	if c.closed.Load() {
+		return ErrClientClosed
+	}
+	start := c.clock.Now()
+	defer c.metrics.ObserveLatency(operation, c.clock.Since(start))
+
+	c.mu.RLock()
+	maxRetries := c.config.RetryPolicy.MaxRetries
+	c.mu.RUnlock()
 
 	var lastErr error
-	for attempt := 0; attempt <= c.config.RetryPolicy.MaxRetries; attempt++ {
-		if c.closed.Load() {
-			return ErrClientClosed
-		}
-
-		if attempt > 0 {
-			c.metrics.IncrRetry(operation)
-			backoff := c.calculateBackoff(attempt)
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		err := c.tryOperation(ctx, operation, fn)
@@ -179,79 +193,113 @@ func (c *baseClientImpl) executeWithRetry(ctx context.Context, operation string,
 		}
 		lastErr = err
 
-		if !c.isRetryable(err) {
-			break
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
 		}
 
 		if c.handleLeaderRedirect(err) {
 			c.metrics.IncrLeaderRedirect()
+			attempt-- // Redirects are not counted as retries.
 			continue
+		}
+
+		if !c.isRetryable(err) || attempt == maxRetries {
+			break
+		}
+
+		c.metrics.IncrRetry(operation)
+		backoff := c.calculateBackoff(attempt + 1)
+
+		select {
+		case <-c.clock.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
 	c.metrics.IncrFailure(operation)
-	return lastErr
+	return fmt.Errorf("operation %q failed after %d attempts: %w", operation, maxRetries, lastErr)
 }
 
-// tryOperation attempts the operation on the known leader first,
-// then falls back to all other endpoints.
+// tryOperation attempts the operation on the current leader or iterates over all endpoints.
 func (c *baseClientImpl) tryOperation(ctx context.Context, operation string, fn func(context.Context, pb.RaftLockClient) error) error {
-	if leader := c.getCurrentLeader(); leader != "" {
-		if err := c.tryEndpoint(ctx, leader, fn); err == nil {
-			return nil
+	leader := c.getCurrentLeader()
+	if leader != "" {
+		err := c.tryEndpoint(ctx, leader, fn)
+		detail := extractErrorDetail(err)
+		if err == nil || (detail != nil && detail.Code != pb.ErrorCode_NOT_LEADER) {
+			return err
 		}
+		c.setCurrentLeader("")
 	}
 
+	var lastErr error
 	for _, endpoint := range c.endpoints {
-		if endpoint == c.getCurrentLeader() {
-			continue
-		}
-		if err := c.tryEndpoint(ctx, endpoint, fn); err == nil {
+		err := c.tryEndpoint(ctx, endpoint, fn)
+		if err == nil {
 			c.setCurrentLeader(endpoint)
 			return nil
 		}
+		lastErr = err
+	}
+
+	if lastErr != nil {
+		return lastErr
 	}
 	return fmt.Errorf("no available servers for operation %s", operation)
 }
 
-// tryEndpoint runs the operation against a single endpoint.
+// tryEndpoint invokes the operation on the specified endpoint.
 func (c *baseClientImpl) tryEndpoint(ctx context.Context, endpoint string, fn func(context.Context, pb.RaftLockClient) error) error {
+	if c.tryEndpointFunc != nil {
+		return c.tryEndpointFunc(ctx, endpoint, fn)
+	}
+
 	conn, err := c.getConnection(endpoint)
 	if err != nil {
 		return err
 	}
-
 	client := pb.NewRaftLockClient(conn)
-	reqCtx := ctx
-	if c.config.RequestTimeout > 0 {
-		var cancel context.CancelFunc
-		reqCtx, cancel = context.WithTimeout(ctx, c.config.RequestTimeout)
-		defer cancel()
+
+	c.mu.RLock()
+	timeout := c.config.RequestTimeout
+	c.mu.RUnlock()
+
+	reqCtx, cancel := ctx, context.CancelFunc(func() {})
+	if timeout > 0 {
+		reqCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
+	defer cancel()
+
 	return fn(reqCtx, client)
 }
 
-// calculateBackoff computes a backoff duration for the given retry attempt, including jitter.
+// calculateBackoff computes exponential backoff with optional jitter.
 func (c *baseClientImpl) calculateBackoff(attempt int) time.Duration {
+	c.mu.RLock()
 	policy := c.config.RetryPolicy
-	backoff := policy.InitialBackoff
+	c.mu.RUnlock()
+
+	backoff := float64(policy.InitialBackoff)
 	for i := 1; i < attempt; i++ {
-		backoff = time.Duration(float64(backoff) * policy.BackoffMultiplier)
+		backoff *= policy.BackoffMultiplier
 	}
-	if backoff > policy.MaxBackoff {
-		backoff = policy.MaxBackoff
+	if backoff > float64(policy.MaxBackoff) {
+		backoff = float64(policy.MaxBackoff)
 	}
+
 	if policy.JitterFactor > 0 {
-		jitter := time.Duration(policy.JitterFactor * float64(backoff) * (c.rand.Float64()*2 - 1))
+		jitter := (c.rand.Float64()*2 - 1) * policy.JitterFactor * backoff
 		backoff += jitter
 	}
+
 	if backoff < 0 {
 		return 0
 	}
-	return backoff
+	return time.Duration(backoff)
 }
 
-// isRetryable returns true if the given error is considered transient and retryable.
+// isRetryable returns true if the error is considered retryable by config or gRPC code.
 func (c *baseClientImpl) isRetryable(err error) bool {
 	st, ok := status.FromError(err)
 	if ok {
@@ -260,22 +308,24 @@ func (c *baseClientImpl) isRetryable(err error) bool {
 			return true
 		}
 	}
-	if errDetail := extractErrorDetail(err); errDetail != nil {
-		if slices.Contains(c.config.RetryPolicy.RetryableErrors, errDetail.Code) {
-			return true
-		}
+	c.mu.RLock()
+	retryable := c.config.RetryPolicy.RetryableErrors
+	c.mu.RUnlock()
+
+	if detail := extractErrorDetail(err); detail != nil {
+		return slices.Contains(retryable, detail.Code)
 	}
 	return false
 }
 
-// handleLeaderRedirect updates the current leader address based on error metadata.
+// handleLeaderRedirect checks for a NOT_LEADER error and updates the leader address.
 func (c *baseClientImpl) handleLeaderRedirect(err error) bool {
-	errDetail := extractErrorDetail(err)
-	if errDetail == nil || errDetail.Code != pb.ErrorCode_NOT_LEADER {
+	detail := extractErrorDetail(err)
+	if detail == nil || detail.Code != pb.ErrorCode_NOT_LEADER {
 		return false
 	}
-	if leaderAddr, ok := errDetail.Details["leader_address"]; ok && leaderAddr != "" {
-		c.setCurrentLeader(leaderAddr)
+	if addr, ok := detail.Details["leader_address"]; ok && addr != "" {
+		c.setCurrentLeader(addr)
 		return true
 	}
 	return false
@@ -304,36 +354,44 @@ func (c *baseClientImpl) isConnected() bool {
 	return len(c.conns) > 0
 }
 
-// close closes all connections and marks the client as closed.
+// close shuts down all gRPC connections and marks the client as closed.
 func (c *baseClientImpl) close() error {
 	if !c.closed.CompareAndSwap(false, true) {
-		return nil
+		return ErrClientClosed
 	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	var errs []error
-	for endpoint, conn := range c.conns {
+	for ep, conn := range c.conns {
 		if err := conn.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close connection to %s: %w", endpoint, err))
+			errs = append(errs, fmt.Errorf("failed to close connection to %s: %w", ep, err))
 		}
 	}
 	c.conns = make(map[string]*grpc.ClientConn)
+
 	if len(errs) > 0 {
-		return fmt.Errorf("errors closing connections: %v", errs)
+		return fmt.Errorf("errors while closing connections: %v", errs)
 	}
 	return nil
 }
 
-// extractErrorDetail extracts a custom ErrorDetail message from a gRPC error, if present.
+// extractErrorDetail extracts a RaftLock error detail from a gRPC status error.
 func extractErrorDetail(err error) *pb.ErrorDetail {
 	st, ok := status.FromError(err)
 	if !ok {
 		return nil
 	}
-	for _, detail := range st.Details() {
-		if errDetail, ok := detail.(*pb.ErrorDetail); ok {
-			return errDetail
+	for _, d := range st.Details() {
+		if ed, ok := d.(*pb.ErrorDetail); ok {
+			return ed
 		}
 	}
 	return nil
+}
+
+// setConnector replaces the connector (mainly for testing).
+func (c *baseClientImpl) setConnector(conn connector) {
+	c.connector = conn
 }
