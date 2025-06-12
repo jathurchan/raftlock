@@ -48,10 +48,16 @@ type connectionManager struct {
 
 // NewConnectionManager returns a new ConnectionManager.
 // Uses the provided metrics, logger, and clock. Falls back to raft.StandardClock if none is given.
-func NewConnectionManager(metrics ServerMetrics, logger logger.Logger, clock raft.Clock) ConnectionManager {
+func NewConnectionManager(
+	metrics ServerMetrics,
+	logger logger.Logger,
+	clock raft.Clock,
+) ConnectionManager {
 	if clock == nil {
 		clock = raft.NewStandardClock()
-		logger.Warnw("ConnectionManager initialized with default raft.StandardClock (no clock provided)")
+		logger.Warnw(
+			"ConnectionManager initialized with default raft.StandardClock (no clock provided)",
+		)
 	}
 	return &connectionManager{
 		connections: make(map[string]*ConnectionInfo),
@@ -95,7 +101,13 @@ func (cm *connectionManager) OnDisconnect(remoteAddr string) {
 		if cm.metrics != nil {
 			cm.metrics.SetActiveConnections(len(cm.connections))
 		}
-		cm.logger.Debugw("Client connection closed", "remote_addr", remoteAddr, "total_connections", len(cm.connections))
+		cm.logger.Debugw(
+			"Client connection closed",
+			"remote_addr",
+			remoteAddr,
+			"total_connections",
+			len(cm.connections),
+		)
 	}
 }
 
@@ -115,7 +127,6 @@ func (cm *connectionManager) OnRequest(remoteAddr string) {
 
 	conn.LastActive = now
 	conn.RequestCount++
-
 }
 
 // GetActiveConnections returns the current number of active connections.

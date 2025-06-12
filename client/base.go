@@ -29,7 +29,10 @@ type connector interface {
 type grpcConnector struct{}
 
 // GetConnection establishes a new gRPC connection to the given endpoint.
-func (c *grpcConnector) GetConnection(endpoint string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+func (c *grpcConnector) GetConnection(
+	endpoint string,
+	opts ...grpc.DialOption,
+) (*grpc.ClientConn, error) {
 	return grpc.NewClient(endpoint, opts...)
 }
 
@@ -37,7 +40,11 @@ func (c *grpcConnector) GetConnection(endpoint string, opts ...grpc.DialOption) 
 // It manages retries, leader tracking, and metrics.
 type baseClient interface {
 	// executeWithRetry runs an operation with retry, backoff, and leader redirection.
-	executeWithRetry(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error
+	executeWithRetry(
+		ctx context.Context,
+		operation string,
+		fn func(ctx context.Context, client pb.RaftLockClient) error,
+	) error
 
 	// getCurrentLeader returns the current known leader address.
 	getCurrentLeader() string
@@ -169,7 +176,11 @@ func (c *baseClientImpl) getConnection(endpoint string) (*grpc.ClientConn, error
 }
 
 // executeWithRetry runs an operation with retry logic, including backoff and leader redirection.
-func (c *baseClientImpl) executeWithRetry(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error {
+func (c *baseClientImpl) executeWithRetry(
+	ctx context.Context,
+	operation string,
+	fn func(ctx context.Context, client pb.RaftLockClient) error,
+) error {
 	if c.closed.Load() {
 		return ErrClientClosed
 	}
@@ -222,7 +233,11 @@ func (c *baseClientImpl) executeWithRetry(ctx context.Context, operation string,
 }
 
 // tryOperation attempts the operation on the current leader or iterates over all endpoints.
-func (c *baseClientImpl) tryOperation(ctx context.Context, operation string, fn func(context.Context, pb.RaftLockClient) error) error {
+func (c *baseClientImpl) tryOperation(
+	ctx context.Context,
+	operation string,
+	fn func(context.Context, pb.RaftLockClient) error,
+) error {
 	leader := c.getCurrentLeader()
 	if leader != "" {
 		err := c.tryEndpoint(ctx, leader, fn)
@@ -250,7 +265,11 @@ func (c *baseClientImpl) tryOperation(ctx context.Context, operation string, fn 
 }
 
 // tryEndpoint invokes the operation on the specified endpoint.
-func (c *baseClientImpl) tryEndpoint(ctx context.Context, endpoint string, fn func(context.Context, pb.RaftLockClient) error) error {
+func (c *baseClientImpl) tryEndpoint(
+	ctx context.Context,
+	endpoint string,
+	fn func(context.Context, pb.RaftLockClient) error,
+) error {
 	if c.tryEndpointFunc != nil {
 		return c.tryEndpointFunc(ctx, endpoint, fn)
 	}

@@ -85,7 +85,12 @@ type Metrics interface {
 	// ObserveLogTruncate records the result of a log truncation.
 	// Counters: raft_log_truncates_total, raft_log_entries_truncated_total (labeled by type and success)
 	// Histogram: raft_log_truncate_latency_seconds (labeled by type)
-	ObserveLogTruncate(truncateType LogTruncateType, entriesRemoved int, latency time.Duration, success bool)
+	ObserveLogTruncate(
+		truncateType LogTruncateType,
+		entriesRemoved int,
+		latency time.Duration,
+		success bool,
+	)
 
 	// ObserveLogConsistencyError records a log consistency issue.
 	// Counter: raft_log_consistency_errors_total
@@ -273,27 +278,51 @@ func (m *noOpMetrics) ObserveLeaderNotificationDropped()                        
 func (m *noOpMetrics) ObserveLeadershipLost(term types.Term, reason string)          {}
 func (m *noOpMetrics) ObserveApplyNotificationDropped()                              {}
 func (m *noOpMetrics) ObserveApplyLoopStopped(reason string)                         {}
-func (m *noOpMetrics) ObserveRoleChange(newRole types.NodeRole, oldRole types.NodeRole, term types.Term) {
+
+func (m *noOpMetrics) ObserveRoleChange(
+	newRole types.NodeRole,
+	oldRole types.NodeRole,
+	term types.Term,
+) {
 }
 func (m *noOpMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {}
 func (m *noOpMetrics) ObserveVoteGranted(term types.Term)                          {}
 func (m *noOpMetrics) ObserveLogState(firstIndex, lastIndex types.Index, lastTerm types.Term) {
 }
+
 func (m *noOpMetrics) ObserveLogAppend(entryCount int, latency time.Duration, success bool) {
 }
+
 func (m *noOpMetrics) ObserveLogRead(readType LogReadType, latency time.Duration, success bool) {
 }
-func (m *noOpMetrics) ObserveLogTruncate(truncateType LogTruncateType, entriesRemoved int, latency time.Duration, success bool) {
+
+func (m *noOpMetrics) ObserveLogTruncate(
+	truncateType LogTruncateType,
+	entriesRemoved int,
+	latency time.Duration,
+	success bool,
+) {
 }
 func (m *noOpMetrics) ObserveLogConsistencyError()                                            {}
 func (m *noOpMetrics) ObserveElectionElapsed(nodeID types.NodeID, term types.Term, ticks int) {}
 func (m *noOpMetrics) ObserveProposal(success bool, reason ProposalResult)                    {}
 func (m *noOpMetrics) ObserveReadIndex(success bool, path string)                             {}
-func (m *noOpMetrics) ObserveSnapshot(action SnapshotAction, status SnapshotStatus, labels ...string) {
+
+func (m *noOpMetrics) ObserveSnapshot(
+	action SnapshotAction,
+	status SnapshotStatus,
+	labels ...string,
+) {
 }
+
 func (m *noOpMetrics) ObserveSnapshotRecovery(status SnapshotStatus, reason SnapshotReason) {
 }
-func (m *noOpMetrics) ObservePeerReplication(peerID types.NodeID, success bool, reason ReplicationResult) {
+
+func (m *noOpMetrics) ObservePeerReplication(
+	peerID types.NodeID,
+	success bool,
+	reason ReplicationResult,
+) {
 }
 func (m *noOpMetrics) ObserveHeartbeat(peerID types.NodeID, success bool, latency time.Duration) {}
 func (m *noOpMetrics) ObserveHeartbeatSent()                                                     {}

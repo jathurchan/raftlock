@@ -29,6 +29,7 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
           cache: true
+
       
       - name: Verify dependencies
         run: go mod verify
@@ -56,14 +57,12 @@ jobs:
         run: go mod tidy # Ensures go.mod and go.sum are consistent
       
       
-      # - name: Run linting
-      #   uses: golangci/golangci-lint-action@v4
-      #   with:
-      #     version: latest
-      #     args: |
-      #       --timeout=5m
-      #       --out-format=colored-line-number
-      #       --exclude-dirs=proto
+      - name: Run linting
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: |
+            --timeout=5m
       
       - name: Run tests with coverage (entire repo, excluding .pb.go)
         run: |

@@ -36,7 +36,11 @@ type defaultLogEntryReader struct {
 }
 
 // newLogEntryReader constructs a defaultLogEntryReader with the given limits and serializer.
-func newLogEntryReader(maxSize, prefixSize int, serializer serializer, log logger.Logger) logEntryReader {
+func newLogEntryReader(
+	maxSize, prefixSize int,
+	serializer serializer,
+	log logger.Logger,
+) logEntryReader {
 	return &defaultLogEntryReader{
 		maxSize:    maxSize,
 		prefixSize: prefixSize,
@@ -62,7 +66,7 @@ func (r *defaultLogEntryReader) ReadNext(file file) (types.LogEntry, int64, erro
 	n, err := file.ReadFull(lenBuf)
 	bytesRead += int64(n)
 	if err != nil {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			r.logger.Debugw("EOF or partial read while reading prefix", "bytesRead", bytesRead)
 			return types.LogEntry{}, bytesRead, io.EOF
 		}
@@ -90,7 +94,11 @@ func (r *defaultLogEntryReader) ReadNext(file file) (types.LogEntry, int64, erro
 	entry, err := r.serializer.UnmarshalLogEntry(data)
 	if err != nil {
 		r.logger.Warnw("Failed to deserialize log entry", "error", err)
-		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: deserialization failed: %v", ErrCorruptedLog, err)
+		return types.LogEntry{}, bytesRead, fmt.Errorf(
+			"%w: deserialization failed: %w",
+			ErrCorruptedLog,
+			err,
+		)
 	}
 
 	r.logger.Debugw("Read log entry", "index", entry.Index, "term", entry.Term, "size", bytesRead)
@@ -104,9 +112,17 @@ func (r *defaultLogEntryReader) ReadNext(file file) (types.LogEntry, int64, erro
 //   - Parsed LogEntry
 //   - Total bytes read
 //   - Error (including index mismatch or deserialization failure)
-func (r *defaultLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error) {
+func (r *defaultLogEntryReader) ReadAtOffset(
+	file file,
+	offset int64,
+	expectedIndex types.Index,
+) (types.LogEntry, int64, error) {
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return types.LogEntry{}, 0, fmt.Errorf("%w: failed to seek to offset: %v", ErrStorageIO, err)
+		return types.LogEntry{}, 0, fmt.Errorf(
+			"%w: failed to seek to offset: %w",
+			ErrStorageIO,
+			err,
+		)
 	}
 
 	entry, bytesRead, err := r.ReadNext(file)
@@ -115,7 +131,12 @@ func (r *defaultLogEntryReader) ReadAtOffset(file file, offset int64, expectedIn
 	}
 
 	if expectedIndex != 0 && entry.Index != expectedIndex {
-		return types.LogEntry{}, bytesRead, fmt.Errorf("%w: index mismatch (expected %d, got %d)", ErrCorruptedLog, expectedIndex, entry.Index)
+		return types.LogEntry{}, bytesRead, fmt.Errorf(
+			"%w: index mismatch (expected %d, got %d)",
+			ErrCorruptedLog,
+			expectedIndex,
+			entry.Index,
+		)
 	}
 
 	return entry, bytesRead, nil
@@ -124,7 +145,11 @@ func (r *defaultLogEntryReader) ReadAtOffset(file file, offset int64, expectedIn
 // ScanRange reads log entries from the file sequentially,
 // returning only those within the [start, end) index range.
 // Stops reading on EOF or when an entry exceeds the end index.
-func (r *defaultLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+func (r *defaultLogEntryReader) ScanRange(
+	ctx context.Context,
+	file file,
+	start, end types.Index,
+) ([]types.LogEntry, error) {
 	if start >= end {
 		return []types.LogEntry{}, nil
 	}
@@ -141,7 +166,7 @@ func (r *defaultLogEntryReader) ScanRange(ctx context.Context, file file, start,
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("%w: failed to scan log entry: %v", ErrCorruptedLog, err)
+			return nil, fmt.Errorf("%w: failed to scan log entry: %w", ErrCorruptedLog, err)
 		}
 
 		if entry.Index < start {

@@ -161,7 +161,11 @@ func (r *defaultRecoveryService) readSnapshotMarker(path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("%w: failed to open snapshot marker: %w", ErrStorageIO, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			r.logger.Errorw("error closing file: %v", err)
+		}
+	}()
 
 	data, err := file.ReadAll()
 	if err != nil {
@@ -192,7 +196,9 @@ func (r *defaultRecoveryService) recoverSnapshot(metaCommitted bool) error {
 }
 
 // evaluateSnapshotRecoveryState determines the current snapshot recovery state.
-func (r *defaultRecoveryService) evaluateSnapshotRecoveryState(metaCommitted bool) (snapshotRecoveryState, error) {
+func (r *defaultRecoveryService) evaluateSnapshotRecoveryState(
+	metaCommitted bool,
+) (snapshotRecoveryState, error) {
 	if r.EvaluateSnapshotRecoveryStateFunc != nil {
 		return r.EvaluateSnapshotRecoveryStateFunc(metaCommitted)
 	}
@@ -256,8 +262,19 @@ func (r *defaultRecoveryService) completeSnapshotDataCommit() error {
 		if r.mode == normalMode {
 			removeErr := r.fs.Remove(metaFile)
 			if removeErr != nil {
-				r.logger.Errorw("Failed to rollback metadata after data commit failure", "metadataFile", metaFile, "error", removeErr)
-				return fmt.Errorf("%w: failed to complete snapshot commit and rollback metadata: data rename error (%v), metadata rollback error (%v)", ErrStorageIO, err, removeErr)
+				r.logger.Errorw(
+					"Failed to rollback metadata after data commit failure",
+					"metadataFile",
+					metaFile,
+					"error",
+					removeErr,
+				)
+				return fmt.Errorf(
+					"%w: failed to complete snapshot commit and rollback metadata: data rename error (%w), metadata rollback error (%w)",
+					ErrStorageIO,
+					err,
+					removeErr,
+				)
 			}
 			r.logger.Warnw("Rolled back metadata due to failed data commit (normal mode)")
 			return fmt.Errorf("%w: failed to complete snapshot commit: %w", ErrStorageIO, err)
@@ -332,7 +349,12 @@ func (r *defaultRecoveryService) handleMissingLogFile(metaFile string) error {
 
 // CreateRecoveryMarker writes a marker with system info for crash recovery detection.
 func (r *defaultRecoveryService) CreateRecoveryMarker() error {
-	data := fmt.Sprintf("pid=%d,time=%d,host=%s", r.proc.PID(), r.proc.NowUnixMilli(), r.proc.Hostname())
+	data := fmt.Sprintf(
+		"pid=%d,time=%d,host=%s",
+		r.proc.PID(),
+		r.proc.NowUnixMilli(),
+		r.proc.Hostname(),
+	)
 	return r.fs.WriteFile(r.path(recoveryMarkerFilename), []byte(data), ownRWOthR)
 }
 
@@ -354,7 +376,10 @@ func (r *defaultRecoveryService) CleanupTempFiles() error {
 		for _, match := range matches {
 			if err := r.fs.Remove(match); err != nil && !r.fs.IsNotExist(err) {
 				r.logger.Warnw("Failed to remove temp file", "file", match, "error", err)
-				errs = append(errs, fmt.Errorf("%w: failed to remove %q: %w", ErrStorageIO, match, err))
+				errs = append(
+					errs,
+					fmt.Errorf("%w: failed to remove %q: %w", ErrStorageIO, match, err),
+				)
 			}
 		}
 	}
@@ -367,7 +392,9 @@ func (r *defaultRecoveryService) RemoveRecoveryMarker() error {
 }
 
 // CreateSnapshotRecoveryMarker writes a snapshot marker for crash recovery purposes.
-func (r *defaultRecoveryService) CreateSnapshotRecoveryMarker(metadata types.SnapshotMetadata) error {
+func (r *defaultRecoveryService) CreateSnapshotRecoveryMarker(
+	metadata types.SnapshotMetadata,
+) error {
 	markerPath := r.path(snapshotMarkerFilename)
 	markerData := fmt.Sprintf(
 		"pid=%d,time=%d,last_idx=%d,last_term=%d",
@@ -377,7 +404,7 @@ func (r *defaultRecoveryService) CreateSnapshotRecoveryMarker(metadata types.Sna
 		metadata.LastIncludedTerm,
 	)
 	if err := r.fs.WriteFile(markerPath, []byte(markerData), ownRWOthR); err != nil {
-		return fmt.Errorf("%w: failed to write snapshot marker: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to write snapshot marker: %w", ErrStorageIO, err)
 	}
 	return nil
 }
@@ -388,12 +415,12 @@ func (r *defaultRecoveryService) UpdateSnapshotMarkerStatus(status string) error
 
 	data, err := r.fs.ReadFile(markerPath)
 	if err != nil {
-		return fmt.Errorf("%w: failed to read snapshot marker: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to read snapshot marker: %w", ErrStorageIO, err)
 	}
 
 	updated := string(data) + "," + status
 	if err := r.fs.WriteFile(markerPath, []byte(updated), ownRWOthR); err != nil {
-		return fmt.Errorf("%w: failed to update snapshot marker: %v", ErrStorageIO, err)
+		return fmt.Errorf("%w: failed to update snapshot marker: %w", ErrStorageIO, err)
 	}
 
 	return nil

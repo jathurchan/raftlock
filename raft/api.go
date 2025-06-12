@@ -44,7 +44,10 @@ type Raft interface {
 	//   - ErrNotLeader if the node is not leader.
 	//   - ErrTimeout if the proposal could not be processed in time.
 	//   - ErrShuttingDown if the node is shutting down.
-	Propose(ctx context.Context, command []byte) (index types.Index, term types.Term, isLeader bool, err error)
+	Propose(
+		ctx context.Context,
+		command []byte,
+	) (index types.Index, term types.Term, isLeader bool, err error)
 
 	// ReadIndex issues a linearizable read request, returning the commit index at the time the request is processed.
 	//
@@ -110,12 +113,18 @@ type RPCHandler interface {
 	// The context must be respected for deadlines and cancellations.
 	// Returns a reply indicating whether the entries were successfully appended, the receiver’s term,
 	// and conflict information if applicable, or an error if the operation failed.
-	AppendEntries(ctx context.Context, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)
+	AppendEntries(
+		ctx context.Context,
+		args *types.AppendEntriesArgs,
+	) (*types.AppendEntriesReply, error)
 
 	// InstallSnapshot handles an InstallSnapshot RPC, typically sent by the leader.
 	// It installs a snapshot on the receiver, replacing existing log entries covered by the snapshot,
 	// and bringing the follower up to date if it has fallen too far behind.
 	// The context must be respected for deadlines and cancellations.
 	// Returns a reply containing the receiver’s current term, or an error if the snapshot installation failed.
-	InstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)
+	InstallSnapshot(
+		ctx context.Context,
+		args *types.InstallSnapshotArgs,
+	) (*types.InstallSnapshotReply, error)
 }

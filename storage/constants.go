@@ -4,10 +4,10 @@ import "time"
 
 const (
 	// ownRWOthR represents file permission 0644 (owner read/write, others read).
-	ownRWOthR = 0644
+	ownRWOthR = 0o644
 
 	// ownRWXOthRX represents directory permission 0755 (owner read/write/execute, others read/execute).
-	ownRWXOthRX = 0755
+	ownRWXOthRX = 0o755
 
 	// defaultLockTimeoutSeconds is the default timeout for lock acquisition.
 	defaultLockTimeoutSeconds = 5

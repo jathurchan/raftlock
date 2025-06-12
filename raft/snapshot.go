@@ -49,10 +49,17 @@ var _ ReplicationStateUpdater = NoOpReplicationStateUpdater{}
 // It performs no actions and is useful for testing or disabled snapshot/replication logic.
 type NoOpReplicationStateUpdater struct{}
 
-func (NoOpReplicationStateUpdater) UpdatePeerAfterSnapshotSend(peerID types.NodeID, snapshotIndex types.Index) {
+func (NoOpReplicationStateUpdater) UpdatePeerAfterSnapshotSend(
+	peerID types.NodeID,
+	snapshotIndex types.Index,
+) {
 }
 
-func (NoOpReplicationStateUpdater) SetPeerSnapshotInProgress(peerID types.NodeID, inProgress bool) {}
+func (NoOpReplicationStateUpdater) SetPeerSnapshotInProgress(
+	peerID types.NodeID,
+	inProgress bool,
+) {
+}
 
 func (NoOpReplicationStateUpdater) MaybeAdvanceCommitIndex() {}
 
@@ -82,7 +89,10 @@ type SnapshotManager interface {
 	// HandleInstallSnapshot processes an incoming InstallSnapshot RPC from a leader.
 	// It persists the received snapshot, restores the state machine, updates the
 	// local Raft state, and truncates the log to align with the snapshot.
-	HandleInstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)
+	HandleInstallSnapshot(
+		ctx context.Context,
+		args *types.InstallSnapshotArgs,
+	) (*types.InstallSnapshotReply, error)
 
 	// SendSnapshot sends the current snapshot to the specified follower node.
 	// This is invoked when the follower is too far behind in the log to be caught up
@@ -264,11 +274,17 @@ func (sm *snapshotManager) Initialize(ctx context.Context) error {
 
 // loadSnapshot attempts to load the latest snapshot from persistent storage.
 // Handles ErrNoSnapshot and ErrCorruptedSnapshot gracefully.
-func (sm *snapshotManager) loadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
+func (sm *snapshotManager) loadSnapshot(
+	ctx context.Context,
+) (types.SnapshotMetadata, []byte, error) {
 	meta, data, err := sm.storage.LoadSnapshot(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrNoSnapshot) || errors.Is(err, storage.ErrCorruptedSnapshot) {
-			sm.logger.Infow("No valid snapshot found in storage; initializing with zero state", "error", err)
+			sm.logger.Infow(
+				"No valid snapshot found in storage; initializing with zero state",
+				"error",
+				err,
+			)
 			return types.SnapshotMetadata{}, nil, nil
 		}
 
@@ -287,7 +303,11 @@ func (sm *snapshotManager) loadSnapshot(ctx context.Context) (types.SnapshotMeta
 
 // maybeRestoreState restores the state machine if the loaded snapshot is newer than the last applied index.
 // Ensures commit index is at least the snapshot index otherwise.
-func (sm *snapshotManager) maybeRestoreState(ctx context.Context, meta types.SnapshotMetadata, data []byte) error {
+func (sm *snapshotManager) maybeRestoreState(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+	data []byte,
+) error {
 	lastApplied := sm.stateMgr.GetLastApplied()
 
 	if meta.LastIncludedIndex > lastApplied {
@@ -333,11 +353,21 @@ func (sm *snapshotManager) maybeTruncateLog(ctx context.Context, snapshotIndex t
 	defer cancel()
 
 	if err := sm.logMgr.TruncatePrefix(truncateCtx, truncateBeforeIndex); err != nil {
-		sm.logger.Warnw("Log truncation failed (best effort)", "error", err, "truncateBeforeIndex", truncateBeforeIndex)
+		sm.logger.Warnw(
+			"Log truncation failed (best effort)",
+			"error",
+			err,
+			"truncateBeforeIndex",
+			truncateBeforeIndex,
+		)
 		return
 	}
 
-	sm.logger.Infow("Log truncated successfully based on loaded snapshot", "truncatedBeforeIndex", truncateBeforeIndex)
+	sm.logger.Infow(
+		"Log truncated successfully based on loaded snapshot",
+		"truncatedBeforeIndex",
+		truncateBeforeIndex,
+	)
 }
 
 // Tick checks if a new snapshot should be created based on the configured threshold.
@@ -427,11 +457,19 @@ func (sm *snapshotManager) createSnapshot(ctx context.Context) {
 
 	sm.finalizeSnapshot(metadata, data, start)
 	sm.maybeTriggerLogCompaction(ctx, metadata)
-	sm.logger.Infow("Snapshot creation process completed", "index", metadata.LastIncludedIndex, "term", metadata.LastIncludedTerm)
+	sm.logger.Infow(
+		"Snapshot creation process completed",
+		"index",
+		metadata.LastIncludedIndex,
+		"term",
+		metadata.LastIncludedTerm,
+	)
 }
 
 // captureSnapshot gets the current state from the Applier and necessary metadata.
-func (sm *snapshotManager) captureSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
+func (sm *snapshotManager) captureSnapshot(
+	ctx context.Context,
+) (types.SnapshotMetadata, []byte, error) {
 	snapCtx, cancel := context.WithTimeout(ctx, defaultSnapshotCaptureTimeout)
 	defer cancel()
 	lastAppliedIdx, data, err := sm.applier.Snapshot(snapCtx)
@@ -444,10 +482,16 @@ func (sm *snapshotManager) captureSnapshot(ctx context.Context) (types.SnapshotM
 
 	if lastAppliedIdx == 0 {
 		if len(data) == 0 {
-			sm.logger.Infow("Applier returned zero index and empty data, interpreting as empty snapshot")
+			sm.logger.Infow(
+				"Applier returned zero index and empty data, interpreting as empty snapshot",
+			)
 			return types.SnapshotMetadata{}, nil, nil
 		}
-		sm.logger.Warnw("Applier returned snapshot with index 0 but non-empty data", "dataSize", len(data))
+		sm.logger.Warnw(
+			"Applier returned snapshot with index 0 but non-empty data",
+			"dataSize",
+			len(data),
+		)
 	}
 
 	termCtx, cancelTerm := context.WithTimeout(ctx, defaultSnapshotLogTermTimeout)
@@ -460,38 +504,78 @@ func (sm *snapshotManager) captureSnapshot(ctx context.Context) (types.SnapshotM
 		)
 		sm.metrics.ObserveSnapshot(SnapshotActionCapture, SnapshotStatusFailure,
 			"reason", string(SnapshotReasonLogTermError))
-		return types.SnapshotMetadata{}, nil, fmt.Errorf("logMgr.GetTerm failed for index %d: %w", lastAppliedIdx, err)
+		return types.SnapshotMetadata{}, nil, fmt.Errorf(
+			"logMgr.GetTerm failed for index %d: %w",
+			lastAppliedIdx,
+			err,
+		)
 	}
 
 	meta := types.SnapshotMetadata{
 		LastIncludedIndex: lastAppliedIdx,
 		LastIncludedTerm:  lastAppliedTerm,
 	}
-	sm.logger.Debugw("Snapshot captured successfully", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm, "size", len(data))
+	sm.logger.Debugw(
+		"Snapshot captured successfully",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+		"size",
+		len(data),
+	)
 	return meta, data, nil
 }
 
 // persistSnapshot writes the captured snapshot data and metadata to stable storage.
-func (sm *snapshotManager) persistSnapshot(ctx context.Context, meta types.SnapshotMetadata, data []byte) error {
+func (sm *snapshotManager) persistSnapshot(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+	data []byte,
+) error {
 	saveCtx, cancel := context.WithTimeout(ctx, defaultSnapshotPersistTimeout)
 	defer cancel()
 
-	sm.logger.Debugw("Persisting snapshot to storage", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm, "size", len(data))
+	sm.logger.Debugw(
+		"Persisting snapshot to storage",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+		"size",
+		len(data),
+	)
 
 	if err := sm.storage.SaveSnapshot(saveCtx, meta, data); err != nil {
-		sm.logger.Errorw("Failed to persist snapshot to storage", "error", err, "index", meta.LastIncludedIndex)
+		sm.logger.Errorw(
+			"Failed to persist snapshot to storage",
+			"error",
+			err,
+			"index",
+			meta.LastIncludedIndex,
+		)
 		sm.metrics.ObserveSnapshot(SnapshotActionPersist, SnapshotStatusFailure,
 			"reason", string(SnapshotReasonStorageError))
 		return fmt.Errorf("storage.SaveSnapshot failed: %w", err)
 	}
 
-	sm.logger.Infow("Snapshot persisted successfully", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm)
+	sm.logger.Infow(
+		"Snapshot persisted successfully",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+	)
 	sm.metrics.ObserveSnapshot(SnapshotActionPersist, SnapshotStatusSuccess)
 	return nil
 }
 
 // finalizeSnapshot updates the snapshot manager's internal metadata after successful persistence.
-func (sm *snapshotManager) finalizeSnapshot(meta types.SnapshotMetadata, data []byte, start time.Time) {
+func (sm *snapshotManager) finalizeSnapshot(
+	meta types.SnapshotMetadata,
+	data []byte,
+	start time.Time,
+) {
 	sm.mu.Lock()
 	prevIndex := sm.lastSnapshotIndex
 	prevTerm := sm.lastSnapshotTerm
@@ -515,7 +599,10 @@ func (sm *snapshotManager) finalizeSnapshot(meta types.SnapshotMetadata, data []
 
 // maybeTriggerLogCompaction potentially truncates the log prefix after a snapshot.
 // This runs after the snapshot is successfully created and finalized.
-func (sm *snapshotManager) maybeTriggerLogCompaction(ctx context.Context, snapshotMeta types.SnapshotMetadata) {
+func (sm *snapshotManager) maybeTriggerLogCompaction(
+	ctx context.Context,
+	snapshotMeta types.SnapshotMetadata,
+) {
 	minEntries := sm.cfg.Options.LogCompactionMinEntries
 	if minEntries <= 0 {
 		sm.logger.Debugw("Log compaction skipped: disabled (LogCompactionMinEntries <= 0)")
@@ -584,7 +671,10 @@ func (sm *snapshotManager) GetSnapshotMetadataUnsafe() types.SnapshotMetadata {
 
 // HandleInstallSnapshot processes an incoming InstallSnapshot RPC from a leader.
 // This runs in the RPC handler goroutine.
-func (sm *snapshotManager) HandleInstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) { //
+func (sm *snapshotManager) HandleInstallSnapshot(
+	ctx context.Context,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) { //
 	if sm.isShutdownOrContextDone(ctx, "HandleInstallSnapshot") {
 		return nil, ErrShuttingDown
 	}
@@ -604,7 +694,13 @@ func (sm *snapshotManager) HandleInstallSnapshot(ctx context.Context, args *type
 
 	reply, err := sm.processInstallSnapshot(ctx, args)
 	if err != nil {
-		sm.logger.Warnw("Failed to process InstallSnapshot RPC", "error", err, "from", args.LeaderID)
+		sm.logger.Warnw(
+			"Failed to process InstallSnapshot RPC",
+			"error",
+			err,
+			"from",
+			args.LeaderID,
+		)
 		return nil, err
 	}
 
@@ -619,7 +715,10 @@ func (sm *snapshotManager) HandleInstallSnapshot(ctx context.Context, args *type
 }
 
 // processInstallSnapshot contains the core logic for handling an InstallSnapshot RPC.
-func (sm *snapshotManager) processInstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) { //
+func (sm *snapshotManager) processInstallSnapshot(
+	ctx context.Context,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) { //
 	steppedDown, _ := sm.stateMgr.CheckTermAndStepDown(ctx, args.Term, args.LeaderID)
 	currentTerm, currentRole, _ := sm.stateMgr.GetState()
 	reply := &types.InstallSnapshotReply{Term: currentTerm}
@@ -627,12 +726,25 @@ func (sm *snapshotManager) processInstallSnapshot(ctx context.Context, args *typ
 	if args.Term < currentTerm {
 		sm.logger.Warnw("Rejecting InstallSnapshot: Stale RPC term",
 			"rpcTerm", args.Term, "currentTerm", currentTerm, "from", args.LeaderID)
-		sm.metrics.ObserveSnapshot(SnapshotActionReceive, SnapshotStatusFailure, "reason", string(SnapshotReasonStaleTerm))
+		sm.metrics.ObserveSnapshot(
+			SnapshotActionReceive,
+			SnapshotStatusFailure,
+			"reason",
+			string(SnapshotReasonStaleTerm),
+		)
 		return reply, nil
 	}
 
 	if steppedDown || currentRole != types.RoleFollower {
-		sm.logger.Infow("Becoming follower due to InstallSnapshot RPC", "term", currentTerm, "leader", args.LeaderID, "previousRole", currentRole)
+		sm.logger.Infow(
+			"Becoming follower due to InstallSnapshot RPC",
+			"term",
+			currentTerm,
+			"leader",
+			args.LeaderID,
+			"previousRole",
+			currentRole,
+		)
 		sm.stateMgr.BecomeFollower(ctx, currentTerm, args.LeaderID)
 		currentTerm, _, _ = sm.stateMgr.GetState()
 		reply.Term = currentTerm
@@ -643,12 +755,18 @@ func (sm *snapshotManager) processInstallSnapshot(ctx context.Context, args *typ
 		LastIncludedTerm:  args.LastIncludedTerm,
 	}
 	if sm.isStaleSnapshot(incomingMeta) {
-		sm.logger.Infow("Ignoring stale InstallSnapshot RPC: index/term is not newer than current snapshot",
-			"receivedIndex", incomingMeta.LastIncludedIndex,
-			"receivedTerm", incomingMeta.LastIncludedTerm,
-			"currentIndex", sm.lastSnapshotIndex,
-			"currentTerm", sm.lastSnapshotTerm,
-			"from", args.LeaderID,
+		sm.logger.Infow(
+			"Ignoring stale InstallSnapshot RPC: index/term is not newer than current snapshot",
+			"receivedIndex",
+			incomingMeta.LastIncludedIndex,
+			"receivedTerm",
+			incomingMeta.LastIncludedTerm,
+			"currentIndex",
+			sm.lastSnapshotIndex,
+			"currentTerm",
+			sm.lastSnapshotTerm,
+			"from",
+			args.LeaderID,
 		)
 		return reply, nil
 	}
@@ -676,58 +794,124 @@ func (sm *snapshotManager) isStaleSnapshot(incoming types.SnapshotMetadata) bool
 	if incoming.LastIncludedIndex < sm.lastSnapshotIndex {
 		return true
 	}
-	if incoming.LastIncludedIndex == sm.lastSnapshotIndex && incoming.LastIncludedTerm <= sm.lastSnapshotTerm {
+	if incoming.LastIncludedIndex == sm.lastSnapshotIndex &&
+		incoming.LastIncludedTerm <= sm.lastSnapshotTerm {
 		return true
 	}
 	return false
 }
 
 // saveSnapshotToStorage persists the received snapshot.
-func (sm *snapshotManager) saveSnapshotToStorage(ctx context.Context, meta types.SnapshotMetadata, data []byte) error {
+func (sm *snapshotManager) saveSnapshotToStorage(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+	data []byte,
+) error {
 	saveCtx, cancel := context.WithTimeout(ctx, defaultSnapshotPersistTimeout)
 	defer cancel()
 
-	sm.logger.Debugw("Saving received snapshot to local storage", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm, "size", len(data))
+	sm.logger.Debugw(
+		"Saving received snapshot to local storage",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+		"size",
+		len(data),
+	)
 
 	if err := sm.storage.SaveSnapshot(saveCtx, meta, data); err != nil {
-		sm.logger.Errorw("Failed to persist received snapshot", "error", err, "index", meta.LastIncludedIndex)
-		sm.metrics.ObserveSnapshot(SnapshotActionReceive, SnapshotStatusFailure, "reason", string(SnapshotReasonStorageError))
+		sm.logger.Errorw(
+			"Failed to persist received snapshot",
+			"error",
+			err,
+			"index",
+			meta.LastIncludedIndex,
+		)
+		sm.metrics.ObserveSnapshot(
+			SnapshotActionReceive,
+			SnapshotStatusFailure,
+			"reason",
+			string(SnapshotReasonStorageError),
+		)
 		return fmt.Errorf("snapshot save failed: %w", err)
 	}
 
-	sm.logger.Infow("Received snapshot saved successfully", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm)
+	sm.logger.Infow(
+		"Received snapshot saved successfully",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+	)
 	return nil
 }
 
 // restoreSnapshotToStateMachine applies the snapshot to the state machine via the Applier.
-func (sm *snapshotManager) restoreSnapshotToStateMachine(ctx context.Context, meta types.SnapshotMetadata, data []byte) error {
+func (sm *snapshotManager) restoreSnapshotToStateMachine(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+	data []byte,
+) error {
 	restoreCtx, cancel := context.WithTimeout(ctx, defaultSnapshotRestoreTimeout)
 	defer cancel()
 
-	sm.logger.Debugw("Restoring state machine from received snapshot", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm)
+	sm.logger.Debugw(
+		"Restoring state machine from received snapshot",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+	)
 
 	if err := sm.restoreSnapshot(restoreCtx, meta, data); err != nil {
-		sm.metrics.ObserveSnapshot(SnapshotActionReceive, SnapshotStatusFailure, "reason", string(SnapshotReasonRestoreError))
+		sm.metrics.ObserveSnapshot(
+			SnapshotActionReceive,
+			SnapshotStatusFailure,
+			"reason",
+			string(SnapshotReasonRestoreError),
+		)
 		return fmt.Errorf("snapshot restore failed: %w", err)
 	}
 
-	sm.logger.Infow("State machine restored successfully from received snapshot", "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm)
+	sm.logger.Infow(
+		"State machine restored successfully from received snapshot",
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+	)
 	return nil
 }
 
 // truncateLogAfterSnapshot attempts log truncation after successfully installing a snapshot. Best effort.
-func (sm *snapshotManager) truncateLogAfterSnapshot(ctx context.Context, snapshotIndex types.Index) {
+func (sm *snapshotManager) truncateLogAfterSnapshot(
+	ctx context.Context,
+	snapshotIndex types.Index,
+) {
 	if snapshotIndex == 0 {
 		return
 	}
 	truncateBeforeIndex := snapshotIndex + 1
-	sm.logger.Debugw("Attempting log truncation after installing snapshot", "snapshotIndex", snapshotIndex, "truncateBeforeIndex", truncateBeforeIndex)
+	sm.logger.Debugw(
+		"Attempting log truncation after installing snapshot",
+		"snapshotIndex",
+		snapshotIndex,
+		"truncateBeforeIndex",
+		truncateBeforeIndex,
+	)
 
 	truncateCtx, cancel := context.WithTimeout(ctx, defaultSnapshotLogTruncateTimeout)
 	defer cancel()
 
 	if err := sm.logMgr.TruncatePrefix(truncateCtx, truncateBeforeIndex); err != nil {
-		sm.logger.Warnw("Log truncation failed after snapshot installation (best effort)", "error", err, "truncateBeforeIndex", truncateBeforeIndex)
+		sm.logger.Warnw(
+			"Log truncation failed after snapshot installation (best effort)",
+			"error",
+			err,
+			"truncateBeforeIndex",
+			truncateBeforeIndex,
+		)
 	} else {
 		sm.logger.Infow("Log truncated successfully after snapshot installation", "truncatedBeforeIndex", truncateBeforeIndex)
 	}
@@ -735,7 +919,11 @@ func (sm *snapshotManager) truncateLogAfterSnapshot(ctx context.Context, snapsho
 
 // SendSnapshot sends the current snapshot to a follower that is lagging too far behind.
 // This runs in a leader's goroutine dedicated to a specific follower.
-func (sm *snapshotManager) SendSnapshot(ctx context.Context, targetID types.NodeID, term types.Term) {
+func (sm *snapshotManager) SendSnapshot(
+	ctx context.Context,
+	targetID types.NodeID,
+	term types.Term,
+) {
 	if sm.isShutdownOrContextDone(ctx, "SendSnapshot") {
 		sm.logger.Debugw("SendSnapshot aborted: shutdown or context done", "peer", targetID)
 		return
@@ -757,12 +945,25 @@ func (sm *snapshotManager) SendSnapshot(ctx context.Context, targetID types.Node
 
 	meta, data, err := sm.loadSnapshotForSending(ctx, targetID)
 	if err != nil {
-		sm.logger.Errorw("Aborting snapshot send: failed to load snapshot", "peer", targetID, "error", err)
+		sm.logger.Errorw(
+			"Aborting snapshot send: failed to load snapshot",
+			"peer",
+			targetID,
+			"error",
+			err,
+		)
 		return
 	}
 	if meta.LastIncludedIndex == 0 {
 		sm.logger.Warnw("Aborting snapshot send: loaded snapshot is empty", "peer", targetID)
-		sm.metrics.ObserveSnapshot(SnapshotActionSend, SnapshotStatusFailure, "peer", string(targetID), "reason", "empty_snapshot_loaded")
+		sm.metrics.ObserveSnapshot(
+			SnapshotActionSend,
+			SnapshotStatusFailure,
+			"peer",
+			string(targetID),
+			"reason",
+			"empty_snapshot_loaded",
+		)
 		return
 	}
 
@@ -786,11 +987,20 @@ func (sm *snapshotManager) SendSnapshot(ctx context.Context, targetID types.Node
 
 	sm.processSnapshotReply(targetID, term, meta, reply, start)
 
-	sm.logger.Infow("Snapshot send process finished", "peer", targetID, "snapshotIndex", meta.LastIncludedIndex)
+	sm.logger.Infow(
+		"Snapshot send process finished",
+		"peer",
+		targetID,
+		"snapshotIndex",
+		meta.LastIncludedIndex,
+	)
 }
 
 // loadSnapshotForSending loads snapshot data from storage for sending to a peer.
-func (sm *snapshotManager) loadSnapshotForSending(ctx context.Context, targetID types.NodeID) (types.SnapshotMetadata, []byte, error) {
+func (sm *snapshotManager) loadSnapshotForSending(
+	ctx context.Context,
+	targetID types.NodeID,
+) (types.SnapshotMetadata, []byte, error) {
 	loadCtx, cancel := context.WithTimeout(ctx, defaultSnapshotLoadTimeout)
 	defer cancel()
 
@@ -804,12 +1014,25 @@ func (sm *snapshotManager) loadSnapshotForSending(ctx context.Context, targetID 
 		return types.SnapshotMetadata{}, nil, fmt.Errorf("storage.LoadSnapshot failed: %w", err)
 	}
 
-	sm.logger.Debugw("Snapshot loaded successfully for sending", "peer", targetID, "index", meta.LastIncludedIndex, "term", meta.LastIncludedTerm, "size", len(data))
+	sm.logger.Debugw(
+		"Snapshot loaded successfully for sending",
+		"peer",
+		targetID,
+		"index",
+		meta.LastIncludedIndex,
+		"term",
+		meta.LastIncludedTerm,
+		"size",
+		len(data),
+	)
 	return meta, data, nil
 }
 
 // validateLeadershipBeforeSend checks if the node is still the leader in the expected term.
-func (sm *snapshotManager) validateLeadershipBeforeSend(targetID types.NodeID, expectedTerm types.Term) bool {
+func (sm *snapshotManager) validateLeadershipBeforeSend(
+	targetID types.NodeID,
+	expectedTerm types.Term,
+) bool {
 	currentTerm, role, _ := sm.stateMgr.GetState()
 
 	if role != types.RoleLeader || currentTerm != expectedTerm {
@@ -824,12 +1047,22 @@ func (sm *snapshotManager) validateLeadershipBeforeSend(targetID types.NodeID, e
 		return false
 	}
 
-	sm.logger.Debugw("Leadership validated before sending snapshot", "peer", targetID, "term", currentTerm)
+	sm.logger.Debugw(
+		"Leadership validated before sending snapshot",
+		"peer",
+		targetID,
+		"term",
+		currentTerm,
+	)
 	return true
 }
 
 // sendInstallSnapshotRPC performs the network call to send the snapshot.
-func (sm *snapshotManager) sendInstallSnapshotRPC(ctx context.Context, peer types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+func (sm *snapshotManager) sendInstallSnapshotRPC(
+	ctx context.Context,
+	peer types.NodeID,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) {
 	sendCtx, cancel := context.WithTimeout(ctx, defaultSnapshotSendRPCTimeout)
 	defer cancel()
 
@@ -877,8 +1110,15 @@ func (sm *snapshotManager) processSnapshotReply(
 	currentLocalTerm, currentRole, _ := sm.stateMgr.GetStateUnsafe()
 
 	if reply.Term > currentLocalTerm {
-		sm.logger.Infow("Stepping down: follower responded with higher term in InstallSnapshotReply",
-			"peer", peer, "replyTerm", reply.Term, "currentLocalTerm", currentLocalTerm)
+		sm.logger.Infow(
+			"Stepping down: follower responded with higher term in InstallSnapshotReply",
+			"peer",
+			peer,
+			"replyTerm",
+			reply.Term,
+			"currentLocalTerm",
+			currentLocalTerm,
+		)
 		sm.stateMgr.BecomeFollower(context.Background(), reply.Term, peer)
 		sm.mu.Unlock()
 		sm.metrics.ObserveSnapshot(SnapshotActionSend, SnapshotStatusFailure,
@@ -887,15 +1127,33 @@ func (sm *snapshotManager) processSnapshotReply(
 	}
 
 	if reply.Term < sentTerm || currentLocalTerm != sentTerm {
-		sm.logger.Debugw("Ignoring stale InstallSnapshotReply",
-			"peer", peer, "replyTerm", reply.Term, "sentTerm", sentTerm, "currentLocalTerm", currentLocalTerm)
+		sm.logger.Debugw(
+			"Ignoring stale InstallSnapshotReply",
+			"peer",
+			peer,
+			"replyTerm",
+			reply.Term,
+			"sentTerm",
+			sentTerm,
+			"currentLocalTerm",
+			currentLocalTerm,
+		)
 		sm.mu.Unlock()
 		return
 	}
 
 	if currentRole != types.RoleLeader {
-		sm.logger.Warnw("Snapshot reply processed, but node is no longer leader in the expected term.",
-			"peer", peer, "currentRole", currentRole.String(), "currentTerm", currentLocalTerm, "sentTerm", sentTerm)
+		sm.logger.Warnw(
+			"Snapshot reply processed, but node is no longer leader in the expected term.",
+			"peer",
+			peer,
+			"currentRole",
+			currentRole.String(),
+			"currentTerm",
+			currentLocalTerm,
+			"sentTerm",
+			sentTerm,
+		)
 		sm.mu.Unlock()
 		return
 	}
@@ -951,7 +1209,11 @@ func (sm *snapshotManager) Stop() {
 }
 
 // restoreSnapshot applies snapshot data to the Applier and updates Raft state.
-func (sm *snapshotManager) restoreSnapshot(ctx context.Context, meta types.SnapshotMetadata, data []byte) error {
+func (sm *snapshotManager) restoreSnapshot(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+	data []byte,
+) error {
 	if sm.isShutdownOrContextDone(ctx, "restoreSnapshot") {
 		return ErrShuttingDown
 	}
@@ -967,7 +1229,13 @@ func (sm *snapshotManager) restoreSnapshot(ctx context.Context, meta types.Snaps
 	defer cancel()
 
 	if err := sm.applier.RestoreSnapshot(restoreCtx, meta.LastIncludedIndex, meta.LastIncludedTerm, data); err != nil {
-		sm.logger.Errorw("Applier failed to restore snapshot", "error", err, "index", meta.LastIncludedIndex)
+		sm.logger.Errorw(
+			"Applier failed to restore snapshot",
+			"error",
+			err,
+			"index",
+			meta.LastIncludedIndex,
+		)
 		sm.metrics.ObserveSnapshot(SnapshotActionApply, SnapshotStatusFailure,
 			"reason", string(SnapshotReasonApplierRestoreFailed))
 		return fmt.Errorf("applier.RestoreSnapshot failed: %w", err)
@@ -997,7 +1265,6 @@ func (sm *snapshotManager) updateSnapshotMetadata(meta types.SnapshotMetadata) {
 
 	if meta.LastIncludedIndex > sm.lastSnapshotIndex ||
 		(meta.LastIncludedIndex == sm.lastSnapshotIndex && meta.LastIncludedTerm > sm.lastSnapshotTerm) {
-
 		sm.logger.Debugw("Updating internal snapshot metadata",
 			"oldIndex", sm.lastSnapshotIndex, "oldTerm", sm.lastSnapshotTerm,
 			"newIndex", meta.LastIncludedIndex, "newTerm", meta.LastIncludedTerm)

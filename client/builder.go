@@ -42,7 +42,9 @@ func (b *RaftLockClientBuilder) WithEndpoints(endpoints []string) *RaftLockClien
 }
 
 // WithTimeouts sets the dial and request timeouts.
-func (b *RaftLockClientBuilder) WithTimeouts(dialTimeout, requestTimeout time.Duration) *RaftLockClientBuilder {
+func (b *RaftLockClientBuilder) WithTimeouts(
+	dialTimeout, requestTimeout time.Duration,
+) *RaftLockClientBuilder {
 	if dialTimeout > 0 {
 		b.config.DialTimeout = dialTimeout
 	}
@@ -53,7 +55,10 @@ func (b *RaftLockClientBuilder) WithTimeouts(dialTimeout, requestTimeout time.Du
 }
 
 // WithKeepAlive sets gRPC keepalive parameters.
-func (b *RaftLockClientBuilder) WithKeepAlive(time, timeout time.Duration, permitWithoutStream bool) *RaftLockClientBuilder {
+func (b *RaftLockClientBuilder) WithKeepAlive(
+	time, timeout time.Duration,
+	permitWithoutStream bool,
+) *RaftLockClientBuilder {
 	b.config.KeepAlive = KeepAliveConfig{
 		Time:                time,
 		Timeout:             timeout,
@@ -69,7 +74,11 @@ func (b *RaftLockClientBuilder) WithRetryPolicy(policy RetryPolicy) *RaftLockCli
 }
 
 // WithRetryOptions updates the default retry policy parameters.
-func (b *RaftLockClientBuilder) WithRetryOptions(maxRetries int, initialBackoff, maxBackoff time.Duration, multiplier float64) *RaftLockClientBuilder {
+func (b *RaftLockClientBuilder) WithRetryOptions(
+	maxRetries int,
+	initialBackoff, maxBackoff time.Duration,
+	multiplier float64,
+) *RaftLockClientBuilder {
 	if maxRetries >= 0 {
 		b.config.RetryPolicy.MaxRetries = maxRetries
 	}

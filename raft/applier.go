@@ -60,5 +60,10 @@ type Applier interface {
 	// context expires.
 	//
 	// This is critical for correctness and must be implemented carefully.
-	RestoreSnapshot(ctx context.Context, lastIncludedIndex types.Index, lastIncludedTerm types.Term, snapshotData []byte) error
+	RestoreSnapshot(
+		ctx context.Context,
+		lastIncludedIndex types.Index,
+		lastIncludedTerm types.Term,
+		snapshotData []byte,
+	) error
 }

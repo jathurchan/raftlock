@@ -27,35 +27,64 @@ type LockManager interface {
 	//   - *LockInfo if the lock is granted.
 	//   - ErrLockHeld if the lock is already taken.
 	//   - ErrInvalidTTL, ErrResourceNotFound, or other fatal errors.
-	ApplyAcquire(ctx context.Context, lockID types.LockID, clientID types.ClientID, ttl time.Duration, version types.Index) (*types.LockInfo, error)
+	ApplyAcquire(
+		ctx context.Context,
+		lockID types.LockID,
+		clientID types.ClientID,
+		ttl time.Duration,
+		version types.Index,
+	) (*types.LockInfo, error)
 
 	// ApplyRelease releases a lock held by the specified client and version.
 	//
 	// Returns:
 	//   - true if the release succeeds.
 	//   - ErrLockNotHeld, ErrNotLockOwner, ErrVersionMismatch, or fatal errors.
-	ApplyRelease(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error)
+	ApplyRelease(
+		ctx context.Context,
+		lockID types.LockID,
+		clientID types.ClientID,
+		version types.Index,
+	) (bool, error)
 
 	// ApplyRenew extends the TTL of a held lock if the client and version match.
 	//
 	// Returns:
 	//   - nil on success.
 	//   - ErrLockNotHeld, ErrNotLockOwner, ErrVersionMismatch, ErrInvalidTTL, or fatal errors.
-	ApplyRenew(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index, ttl time.Duration) error
+	ApplyRenew(
+		ctx context.Context,
+		lockID types.LockID,
+		clientID types.ClientID,
+		version types.Index,
+		ttl time.Duration,
+	) error
 
 	// ApplyWaitQueue enqueues a client into the lock's wait queue, optionally with priority.
 	//
 	// Returns:
 	//   - The client's position in the queue.
 	//   - ErrWaitQueueFull, ErrInvalidTimeout, or fatal errors.
-	ApplyWaitQueue(ctx context.Context, lockID types.LockID, clientID types.ClientID, timeout time.Duration, version types.Index, priority int) (int, error)
+	ApplyWaitQueue(
+		ctx context.Context,
+		lockID types.LockID,
+		clientID types.ClientID,
+		timeout time.Duration,
+		version types.Index,
+		priority int,
+	) (int, error)
 
 	// ApplyCancelWait removes a client from a lock’s wait queue.
 	//
 	// Returns:
 	//   - true if the client was removed.
 	//   - ErrNotWaiting or a fatal error.
-	ApplyCancelWait(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error)
+	ApplyCancelWait(
+		ctx context.Context,
+		lockID types.LockID,
+		clientID types.ClientID,
+		version types.Index,
+	) (bool, error)
 
 	// GetLockInfo retrieves the current state of a lock.
 	//
@@ -71,7 +100,12 @@ type LockManager interface {
 	//   - A slice of *LockInfo.
 	//   - The total number of matching locks.
 	//   - An error if retrieval fails.
-	GetLocks(ctx context.Context, filter LockFilter, limit int, offset int) (locks []*types.LockInfo, total int, err error)
+	GetLocks(
+		ctx context.Context,
+		filter LockFilter,
+		limit int,
+		offset int,
+	) (locks []*types.LockInfo, total int, err error)
 
 	// Tick advances the internal clock to trigger TTL expirations
 	// and wait queue promotions.

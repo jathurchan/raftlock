@@ -140,7 +140,11 @@ func (h *lockHandle) Release(ctx context.Context) error {
 		if result.Error != nil {
 			return ErrorFromCode(result.Error.Code)
 		}
-		return fmt.Errorf("failed to release lock for client %s on resource %s", h.clientID, h.lockID)
+		return fmt.Errorf(
+			"failed to release lock for client %s on resource %s",
+			h.clientID,
+			h.lockID,
+		)
 	}
 
 	h.lock = nil

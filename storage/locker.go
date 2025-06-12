@@ -16,7 +16,6 @@ import (
 // of critical sections using RWMutex. It includes optional timeout handling
 // and slow-operation tracking. Both read and write operations are supported.
 type rwOperationLocker interface {
-
 	// DoRead executes the given function under a read lock.
 	// It respects context cancellation and logs if the operation is slow or blocked.
 	DoRead(ctx context.Context, fn func() error) error

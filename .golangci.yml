@@ -1,0 +1,36 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - ineffassign
+    # - staticcheck
+    - unused
+    - bodyclose
+    #- contextcheck
+    - copyloopvar
+    - errorlint
+    - nilerr
+    - rowserrcheck
+    - sqlclosecheck
+    # - unparam
+    # - cyclop
+    # - goconst
+    #- gocritic
+    - whitespace
+    # - gosec
+  # TODO: Add additional linters once the errors are fixed.
+  disable:
+    - staticcheck
+  exclusions:
+    paths:
+      - ".*_test\\.go$"
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
+

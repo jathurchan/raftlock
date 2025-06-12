@@ -137,7 +137,11 @@ func NewLockManager(opts ...LockManagerOption) LockManager {
 }
 
 // Apply routes a committed Raft command to the appropriate lock operation
-func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []byte) (resultData any, err error) {
+func (lm *lockManager) Apply(
+	ctx context.Context,
+	index types.Index,
+	cmdData []byte,
+) (resultData any, err error) {
 	if len(cmdData) == 0 {
 		lm.logger.Errorw("Apply received an empty command", "index", index)
 		return nil, errors.New("empty command")
@@ -145,7 +149,15 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 
 	cmd, err := lm.config.Serializer.DecodeCommand(cmdData)
 	if err != nil {
-		lm.logger.Errorw("Failed to decode command", "index", index, "error", err, "commandData", string(cmdData))
+		lm.logger.Errorw(
+			"Failed to decode command",
+			"index",
+			index,
+			"error",
+			err,
+			"commandData",
+			string(cmdData),
+		)
 		return nil, fmt.Errorf("failed to decode command: %w", err)
 	}
 
@@ -153,7 +165,15 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 	defer lm.mu.Unlock()
 
 	if index <= lm.lastAppliedIndex { // Idempotency
-		lm.logger.Debugw("Skipping already applied command", "commandIndex", index, "lastAppliedIndex", lm.lastAppliedIndex, "operation", cmd.Op)
+		lm.logger.Debugw(
+			"Skipping already applied command",
+			"commandIndex",
+			index,
+			"lastAppliedIndex",
+			lm.lastAppliedIndex,
+			"operation",
+			cmd.Op,
+		)
 		return nil, nil
 	}
 
@@ -163,16 +183,32 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 
 	switch cmd.Op {
 	case types.OperationAcquire:
-		opResultData, opErr = lm.applyAcquireLocked(cmd.LockID, cmd.ClientID, time.Duration(cmd.TTL)*time.Millisecond, index)
+		opResultData, opErr = lm.applyAcquireLocked(
+			cmd.LockID,
+			cmd.ClientID,
+			time.Duration(cmd.TTL)*time.Millisecond,
+			index,
+		)
 	case types.OperationRelease:
 		opResultData, opErr = lm.applyReleaseLocked(cmd.LockID, cmd.ClientID, cmd.Version)
 	case types.OperationRenew:
-		opErr = lm.applyRenewLocked(cmd.LockID, cmd.ClientID, cmd.Version, time.Duration(cmd.TTL)*time.Millisecond)
+		opErr = lm.applyRenewLocked(
+			cmd.LockID,
+			cmd.ClientID,
+			cmd.Version,
+			time.Duration(cmd.TTL)*time.Millisecond,
+		)
 		if opErr == nil {
 			opResultData = true
 		}
 	case types.OperationEnqueueWaiter:
-		opResultData, opErr = lm.applyWaitQueueLocked(cmd.LockID, cmd.ClientID, time.Duration(cmd.Timeout)*time.Millisecond, cmd.Version, cmd.Priority)
+		opResultData, opErr = lm.applyWaitQueueLocked(
+			cmd.LockID,
+			cmd.ClientID,
+			time.Duration(cmd.Timeout)*time.Millisecond,
+			cmd.Version,
+			cmd.Priority,
+		)
 	case types.OperationCancelWait:
 		opResultData, opErr = lm.applyCancelWaitLocked(cmd.LockID, cmd.ClientID, cmd.Version)
 	default:
@@ -183,8 +219,21 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 	latency := lm.clock.Now().Sub(startTime)
 
 	if opErr != nil {
-		lm.logger.Errorw("Failed to apply command",
-			"index", index, "operation", cmd.Op, "lockID", cmd.LockID, "clientID", cmd.ClientID, "error", opErr, "latency", latency)
+		lm.logger.Errorw(
+			"Failed to apply command",
+			"index",
+			index,
+			"operation",
+			cmd.Op,
+			"lockID",
+			cmd.LockID,
+			"clientID",
+			cmd.ClientID,
+			"error",
+			opErr,
+			"latency",
+			latency,
+		)
 	} else {
 		lm.lastAppliedIndex = index
 		lm.logger.Debugw("Successfully applied command",
@@ -200,7 +249,13 @@ func (lm *lockManager) Apply(ctx context.Context, index types.Index, cmdData []b
 
 // ApplyAcquire attempts to acquire a lock for the specified client
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) ApplyAcquire(ctx context.Context, lockID types.LockID, clientID types.ClientID, ttl time.Duration, version types.Index) (*types.LockInfo, error) {
+func (lm *lockManager) ApplyAcquire(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	ttl time.Duration,
+	version types.Index,
+) (*types.LockInfo, error) {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	return lm.applyAcquireLocked(lockID, clientID, ttl, version)
@@ -208,7 +263,12 @@ func (lm *lockManager) ApplyAcquire(ctx context.Context, lockID types.LockID, cl
 
 // applyAcquireLocked attempts to acquire a lock for the specified client.
 // This method must be called with the lockManager's internal mutex held.
-func (lm *lockManager) applyAcquireLocked(lockID types.LockID, clientID types.ClientID, ttl time.Duration, version types.Index) (*types.LockInfo, error) {
+func (lm *lockManager) applyAcquireLocked(
+	lockID types.LockID,
+	clientID types.ClientID,
+	ttl time.Duration,
+	version types.Index,
+) (*types.LockInfo, error) {
 	startTime := lm.clock.Now()
 	var (
 		success   bool
@@ -340,7 +400,12 @@ func (lm *lockManager) assignLockOwnership(
 
 // ApplyRelease releases a lock held by the specified client and version
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) ApplyRelease(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error) {
+func (lm *lockManager) ApplyRelease(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (bool, error) {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	return lm.applyReleaseLocked(lockID, clientID, version)
@@ -348,7 +413,11 @@ func (lm *lockManager) ApplyRelease(ctx context.Context, lockID types.LockID, cl
 
 // applyReleaseLocked releases a lock held by the specified client.
 // This method must be invoked with the lockManager's internal mutex held.
-func (lm *lockManager) applyReleaseLocked(lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error) {
+func (lm *lockManager) applyReleaseLocked(
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (bool, error) {
 	startTime := lm.clock.Now()
 	var success bool
 
@@ -378,7 +447,11 @@ func (lm *lockManager) applyReleaseLocked(lockID types.LockID, clientID types.Cl
 }
 
 // validateRelease checks if the release request is valid and returns the lock if so.
-func (lm *lockManager) validateRelease(lockID types.LockID, clientID types.ClientID, version types.Index) (*lockState, error) {
+func (lm *lockManager) validateRelease(
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (*lockState, error) {
 	lock, exists := lm.locks[lockID]
 	if !exists || lock.Owner == "" {
 		lm.logger.Warnw("Release failed: lock not found or not held",
@@ -402,7 +475,11 @@ func (lm *lockManager) validateRelease(lockID types.LockID, clientID types.Clien
 }
 
 // performRelease clears the lock owner and updates internal state and metrics.
-func (lm *lockManager) performRelease(lockID types.LockID, clientID types.ClientID, lock *lockState) {
+func (lm *lockManager) performRelease(
+	lockID types.LockID,
+	clientID types.ClientID,
+	lock *lockState,
+) {
 	now := lm.clock.Now()
 	lock.Owner = ""
 	lock.LastModified = now
@@ -416,7 +493,13 @@ func (lm *lockManager) performRelease(lockID types.LockID, clientID types.Client
 
 // ApplyRenew extends the TTL of a held lock if the client and version match
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) ApplyRenew(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index, ttl time.Duration) error {
+func (lm *lockManager) ApplyRenew(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+	ttl time.Duration,
+) error {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	return lm.applyRenewLocked(lockID, clientID, version, ttl)
@@ -424,7 +507,12 @@ func (lm *lockManager) ApplyRenew(ctx context.Context, lockID types.LockID, clie
 
 // applyRenewLocked attempts to renew the TTL of a lock currently held by the specified client.
 // This method must be called with the lockManager's internal mutex held.
-func (lm *lockManager) applyRenewLocked(lockID types.LockID, clientID types.ClientID, commandVersion types.Index, ttl time.Duration) error {
+func (lm *lockManager) applyRenewLocked(
+	lockID types.LockID,
+	clientID types.ClientID,
+	commandVersion types.Index,
+	ttl time.Duration,
+) error {
 	startTime := lm.clock.Now()
 	var success bool
 
@@ -456,7 +544,10 @@ func (lm *lockManager) applyRenewLocked(lockID types.LockID, clientID types.Clie
 }
 
 // validateRenewRequest ensures the lock exists and is currently held by the requesting client.
-func (lm *lockManager) validateRenewRequest(lockID types.LockID, clientID types.ClientID) (*lockState, error) {
+func (lm *lockManager) validateRenewRequest(
+	lockID types.LockID,
+	clientID types.ClientID,
+) (*lockState, error) {
 	lock, exists := lm.locks[lockID]
 	if !exists || lock.Owner == "" {
 		lm.logger.Warnw("Renew failed: lock not found or not currently held",
@@ -472,7 +563,12 @@ func (lm *lockManager) validateRenewRequest(lockID types.LockID, clientID types.
 }
 
 // renewLockTTL updates the TTL and version of the lock.
-func (lm *lockManager) renewLockTTL(lockID types.LockID, lock *lockState, newVersion types.Index, ttl time.Duration) {
+func (lm *lockManager) renewLockTTL(
+	lockID types.LockID,
+	lock *lockState,
+	newVersion types.Index,
+	ttl time.Duration,
+) {
 	now := lm.clock.Now()
 	lock.ExpiresAt = now.Add(ttl)
 	lock.Version = newVersion
@@ -483,7 +579,14 @@ func (lm *lockManager) renewLockTTL(lockID types.LockID, lock *lockState, newVer
 
 // ApplyWaitQueue enqueues a client into the lock's wait queue, optionally with priority
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) ApplyWaitQueue(ctx context.Context, lockID types.LockID, clientID types.ClientID, timeout time.Duration, version types.Index, priority int) (int, error) {
+func (lm *lockManager) ApplyWaitQueue(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	timeout time.Duration,
+	version types.Index,
+	priority int,
+) (int, error) {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	return lm.applyWaitQueueLocked(lockID, clientID, timeout, version, priority)
@@ -491,7 +594,13 @@ func (lm *lockManager) ApplyWaitQueue(ctx context.Context, lockID types.LockID, 
 
 // applyWaitQueueLocked enqueues a client into the wait queue for the specified lock.
 // This method must be called with the lockManager's internal mutex held.
-func (lm *lockManager) applyWaitQueueLocked(lockID types.LockID, clientID types.ClientID, timeout time.Duration, version types.Index, priority int) (int, error) {
+func (lm *lockManager) applyWaitQueueLocked(
+	lockID types.LockID,
+	clientID types.ClientID,
+	timeout time.Duration,
+	version types.Index,
+	priority int,
+) (int, error) {
 	start := lm.clock.Now()
 	var success bool
 
@@ -624,7 +733,12 @@ func (lm *lockManager) enqueueNewWaiter(
 
 // ApplyCancelWait removes a client from a lock's wait queue
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) ApplyCancelWait(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error) {
+func (lm *lockManager) ApplyCancelWait(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (bool, error) {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	return lm.applyCancelWaitLocked(lockID, clientID, version)
@@ -632,7 +746,11 @@ func (lm *lockManager) ApplyCancelWait(ctx context.Context, lockID types.LockID,
 
 // applyCancelWaitLocked removes a client from the wait queue of the specified lock.
 // This method must be called with the lockManager's internal mutex held.
-func (lm *lockManager) applyCancelWaitLocked(lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error) {
+func (lm *lockManager) applyCancelWaitLocked(
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (bool, error) {
 	success := false
 	defer func() {
 		lm.metrics.IncrWaitCancelRequest(lockID, success)
@@ -690,7 +808,11 @@ func (lm *lockManager) removePendingWaiter(lockID types.LockID, clientID types.C
 // removeWaiterFromHeap removes a client from the wait queue heap.
 // If the waiter's index is known and valid, it is used; otherwise a linear search is performed.
 // Returns true if the waiter was successfully removed.
-func (lm *lockManager) removeWaiterFromHeap(wq *waitQueue, clientID types.ClientID, knownIndex int) bool {
+func (lm *lockManager) removeWaiterFromHeap(
+	wq *waitQueue,
+	clientID types.ClientID,
+	knownIndex int,
+) bool {
 	if knownIndex >= 0 && knownIndex < wq.Len() { // Fast path: known and correct index.
 		if (*wq)[knownIndex].clientID == clientID {
 			heap.Remove(wq, knownIndex)
@@ -717,7 +839,10 @@ func (lm *lockManager) removeWaiterFromHeap(wq *waitQueue, clientID types.Client
 // GetLockInfo retrieves the current state of a lock
 // If limit <= 0, all items from offset are returned.
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) GetLockInfo(ctx context.Context, lockID types.LockID) (*types.LockInfo, error) {
+func (lm *lockManager) GetLockInfo(
+	ctx context.Context,
+	lockID types.LockID,
+) (*types.LockInfo, error) {
 	if lm.config.EnableCache && lm.cache != nil {
 		if info, found := lm.cache.Get(lockID); found {
 			lm.metrics.IncrCacheHit(lockID)
@@ -744,7 +869,12 @@ func (lm *lockManager) GetLockInfo(ctx context.Context, lockID types.LockID) (*t
 
 // GetLocks returns a paginated list of locks matching an optional filter
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) GetLocks(ctx context.Context, filter LockFilter, limit int, offset int) ([]*types.LockInfo, int, error) {
+func (lm *lockManager) GetLocks(
+	ctx context.Context,
+	filter LockFilter,
+	limit int,
+	offset int,
+) ([]*types.LockInfo, int, error) {
 	lm.mu.RLock()
 	defer lm.mu.RUnlock()
 
@@ -772,7 +902,11 @@ func (lm *lockManager) filterLocks(filter LockFilter) []*types.LockInfo {
 // paginateLocks returns a sub-slice of lock info based on the provided limit and offset.
 // If limit <= 0, all items from offset are returned.
 // If offset is beyond the slice length, an empty slice is returned.
-func (lm *lockManager) paginateLocks(locks []*types.LockInfo, limit int, offset int) []*types.LockInfo {
+func (lm *lockManager) paginateLocks(
+	locks []*types.LockInfo,
+	limit int,
+	offset int,
+) []*types.LockInfo {
 	total := len(locks)
 
 	if offset >= total {
@@ -843,7 +977,15 @@ func (lm *lockManager) cleanupTimedOutWaiters(now time.Time) {
 		for i < wq.Len() {
 			waiter := (*wq)[i]
 			if now.After(waiter.timeoutAt) {
-				lm.logger.Infow("Waiter timed out", "lockID", lockID, "clientID", waiter.clientID, "timeoutAt", waiter.timeoutAt)
+				lm.logger.Infow(
+					"Waiter timed out",
+					"lockID",
+					lockID,
+					"clientID",
+					waiter.clientID,
+					"timeoutAt",
+					waiter.timeoutAt,
+				)
 				lm.metrics.IncrTimeoutWaiter(lockID)
 
 				lm.cleanupPendingWaiter(lockID, waiter)
@@ -922,7 +1064,12 @@ func (lm *lockManager) snapshotWaiters() map[types.LockID][]*waiter {
 
 // RestoreSnapshot loads a LockManager state from a Raft snapshot
 // Note: ctx is currently unused but included for future support.
-func (lm *lockManager) RestoreSnapshot(ctx context.Context, lastIndex types.Index, lastTerm types.Term, data []byte) error {
+func (lm *lockManager) RestoreSnapshot(
+	ctx context.Context,
+	lastIndex types.Index,
+	lastTerm types.Term,
+	data []byte,
+) error {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 
@@ -935,7 +1082,13 @@ func (lm *lockManager) RestoreSnapshot(ctx context.Context, lastIndex types.Inde
 	}()
 
 	if lastIndex < lm.lastAppliedIndex {
-		lm.logger.Warnw("Ignored stale snapshot", "snapshotIndex", lastIndex, "currentLastApplied", lm.lastAppliedIndex)
+		lm.logger.Warnw(
+			"Ignored stale snapshot",
+			"snapshotIndex",
+			lastIndex,
+			"currentLastApplied",
+			lm.lastAppliedIndex,
+		)
 		return nil
 	}
 
@@ -970,7 +1123,10 @@ func (lm *lockManager) RestoreSnapshot(ctx context.Context, lastIndex types.Inde
 // restoreLocksUnlocked replaces the current lock map with the snapshot's lock state
 // and updates the last applied index for Raft consistency.
 // This method must be called with the lockManager's internal mutex held.
-func (lm *lockManager) restoreLocksUnlocked(locks map[types.LockID]*lockState, lastIndex types.Index) {
+func (lm *lockManager) restoreLocksUnlocked(
+	locks map[types.LockID]*lockState,
+	lastIndex types.Index,
+) {
 	lm.locks = locks
 	lm.lastAppliedIndex = lastIndex
 }
@@ -1066,7 +1222,15 @@ func (lm *lockManager) Close() error {
 // validateTTL ensures the provided TTL is within configured bounds.
 func (lm *lockManager) validateTTL(ttl time.Duration) error {
 	if ttl < MinLockTTL || ttl > lm.config.MaxTTL {
-		lm.logger.Warnw("Invalid TTL specified for lock operation", "ttl", ttl, "minAllowed", MinLockTTL, "maxAllowed", lm.config.MaxTTL)
+		lm.logger.Warnw(
+			"Invalid TTL specified for lock operation",
+			"ttl",
+			ttl,
+			"minAllowed",
+			MinLockTTL,
+			"maxAllowed",
+			lm.config.MaxTTL,
+		)
 		return ErrInvalidTTL
 	}
 	return nil
@@ -1097,7 +1261,10 @@ func (lm *lockManager) createLockInfoFromState(state *lockState) *types.LockInfo
 // addToExpirationHeapLocked adds a lock to the expiration heap.
 // Assumes caller holds lm.mu.
 func (lm *lockManager) addToExpirationHeapLocked(lockID types.LockID, expiresAt time.Time) {
-	heap.Push(lm.expirationHeap, &expirationItem{lockID: lockID, expiresAt: expiresAt}) // no need to set index (heap.Interface)
+	heap.Push(
+		lm.expirationHeap,
+		&expirationItem{lockID: lockID, expiresAt: expiresAt},
+	) // no need to set index (heap.Interface)
 }
 
 // updateExpirationLocked updates a lock's expiration time in the heap.

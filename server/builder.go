@@ -46,7 +46,9 @@ func (b *RaftLockServerBuilder) WithListenAddress(address string) *RaftLockServe
 
 // WithPeers sets the Raft cluster configuration.
 // The map must include an entry for this node's NodeID. This must be set explicitly.
-func (b *RaftLockServerBuilder) WithPeers(peers map[types.NodeID]raft.PeerConfig) *RaftLockServerBuilder {
+func (b *RaftLockServerBuilder) WithPeers(
+	peers map[types.NodeID]raft.PeerConfig,
+) *RaftLockServerBuilder {
 	b.config.Peers = peers
 	b.hasPeers = true
 	return b
@@ -68,7 +70,9 @@ func (b *RaftLockServerBuilder) WithRaftConfig(raftConfig raft.Config) *RaftLock
 
 // WithTimeouts sets timeouts for request handling, shutdown, and leader redirection.
 // Values <= 0 leave the defaults unchanged.
-func (b *RaftLockServerBuilder) WithTimeouts(requestTimeout, shutdownTimeout, redirectTimeout time.Duration) *RaftLockServerBuilder {
+func (b *RaftLockServerBuilder) WithTimeouts(
+	requestTimeout, shutdownTimeout, redirectTimeout time.Duration,
+) *RaftLockServerBuilder {
 	if requestTimeout > 0 {
 		b.config.RequestTimeout = requestTimeout
 	}
@@ -83,7 +87,9 @@ func (b *RaftLockServerBuilder) WithTimeouts(requestTimeout, shutdownTimeout, re
 
 // WithLimits sets request size and concurrency limits.
 // Values <= 0 leave the defaults unchanged.
-func (b *RaftLockServerBuilder) WithLimits(maxRequestSize, maxResponseSize, maxConcurrentReqs int) *RaftLockServerBuilder {
+func (b *RaftLockServerBuilder) WithLimits(
+	maxRequestSize, maxResponseSize, maxConcurrentReqs int,
+) *RaftLockServerBuilder {
 	if maxRequestSize > 0 {
 		b.config.MaxRequestSize = maxRequestSize
 	}
@@ -98,7 +104,11 @@ func (b *RaftLockServerBuilder) WithLimits(maxRequestSize, maxResponseSize, maxC
 
 // WithRateLimit configures rate limiting.
 // Values <= 0 use the default if rate limiting is enabled.
-func (b *RaftLockServerBuilder) WithRateLimit(enabled bool, rateLimit, burst int, window time.Duration) *RaftLockServerBuilder {
+func (b *RaftLockServerBuilder) WithRateLimit(
+	enabled bool,
+	rateLimit, burst int,
+	window time.Duration,
+) *RaftLockServerBuilder {
 	b.config.EnableRateLimit = enabled
 	if enabled {
 		if rateLimit > 0 {
@@ -116,7 +126,9 @@ func (b *RaftLockServerBuilder) WithRateLimit(enabled bool, rateLimit, burst int
 
 // WithHealthCheck sets the health check interval and timeout.
 // Values <= 0 use the default values.
-func (b *RaftLockServerBuilder) WithHealthCheck(interval, timeout time.Duration) *RaftLockServerBuilder {
+func (b *RaftLockServerBuilder) WithHealthCheck(
+	interval, timeout time.Duration,
+) *RaftLockServerBuilder {
 	if interval > 0 {
 		b.config.HealthCheckInterval = interval
 	}
@@ -213,7 +225,12 @@ func (b *RaftLockServerBuilder) Build() (RaftLockServer, error) {
 }
 
 // RaftLockServerQuickBuild is a convenience method for building a server with minimal configuration.
-func RaftLockServerQuickBuild(nodeID types.NodeID, listenAddr string, peers map[types.NodeID]raft.PeerConfig, dataDir string) (RaftLockServer, error) {
+func RaftLockServerQuickBuild(
+	nodeID types.NodeID,
+	listenAddr string,
+	peers map[types.NodeID]raft.PeerConfig,
+	dataDir string,
+) (RaftLockServer, error) {
 	return NewRaftLockServerBuilder().
 		WithNodeID(nodeID).
 		WithListenAddress(listenAddr).

@@ -53,7 +53,11 @@ type StateManager interface {
 	// CheckTermAndStepDown compares the given term with the local term.
 	// If the given term is higher, steps down and updates state.
 	// Returns whether a step-down occurred and the previous term.
-	CheckTermAndStepDown(ctx context.Context, rpcTerm types.Term, rpcLeader types.NodeID) (steppedDown bool, previousTerm types.Term)
+	CheckTermAndStepDown(
+		ctx context.Context,
+		rpcTerm types.Term,
+		rpcLeader types.NodeID,
+	) (steppedDown bool, previousTerm types.Term)
 
 	// GrantVote attempts to grant a vote to the given candidate for the specified term,
 	// checking term validity and if the node has already voted in this term.
@@ -120,8 +124,12 @@ type stateManager struct {
 
 // NewStateManager creates and initializes a new state manager.
 func NewStateManager(mu *sync.RWMutex, shutdownFlag *atomic.Bool, deps Dependencies,
-	nodeID types.NodeID, leaderChangeCh chan<- types.NodeID) StateManager {
-	if mu == nil || shutdownFlag == nil || deps.Storage == nil || deps.Metrics == nil || deps.Logger == nil || nodeID == "" || leaderChangeCh == nil {
+	nodeID types.NodeID, leaderChangeCh chan<- types.NodeID,
+) StateManager {
+	if mu == nil || shutdownFlag == nil || deps.Storage == nil || deps.Metrics == nil ||
+		deps.Logger == nil ||
+		nodeID == "" ||
+		leaderChangeCh == nil {
 		panic("raft: invalid arguments provided to NewStateManager")
 	}
 	return &stateManager{
@@ -146,7 +154,11 @@ func (sm *stateManager) Initialize(ctx context.Context) error {
 	state, err := sm.storage.LoadState(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrCorruptedState) {
-			sm.logger.Warnw("Persistent state corrupted or missing, initializing default state", "error", err)
+			sm.logger.Warnw(
+				"Persistent state corrupted or missing, initializing default state",
+				"error",
+				err,
+			)
 			return sm.initializeDefaultState(ctx)
 		}
 
@@ -291,7 +303,11 @@ func (sm *stateManager) BecomeLeader(ctx context.Context) bool {
 // BecomeFollower transitions the node into Follower state for the specified term and leader.
 // If the provided term is greater than the current term, it updates the term and resets votedFor,
 // persisting the new state.
-func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID) {
+func (sm *stateManager) BecomeFollower(
+	ctx context.Context,
+	term types.Term,
+	leaderID types.NodeID,
+) {
 	if sm.isShutdown.Load() {
 		sm.logger.Debugw("Attempted BecomeFollower on shutdown node")
 		return
@@ -324,8 +340,13 @@ func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, lea
 		termChanged = true
 
 		if err := sm.persistState(ctx, sm.currentTerm, sm.votedFor); err != nil {
-			sm.logger.Errorw("Failed to persist state change in BecomeFollower, rolling back term/vote",
-				"new_term", sm.currentTerm, "error", err)
+			sm.logger.Errorw(
+				"Failed to persist state change in BecomeFollower, rolling back term/vote",
+				"new_term",
+				sm.currentTerm,
+				"error",
+				err,
+			)
 			sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
 			sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, previousTerm)
 			return
@@ -344,7 +365,11 @@ func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, lea
 // CheckTermAndStepDown compares an RPC term with the local term and potentially steps down.
 // Returns true if the node stepped down (became Follower), false otherwise.
 // Also returns the node's term before any potential change.
-func (sm *stateManager) CheckTermAndStepDown(ctx context.Context, rpcTerm types.Term, rpcLeader types.NodeID) (steppedDown bool, previousTerm types.Term) {
+func (sm *stateManager) CheckTermAndStepDown(
+	ctx context.Context,
+	rpcTerm types.Term,
+	rpcLeader types.NodeID,
+) (steppedDown bool, previousTerm types.Term) {
 	if sm.isShutdown.Load() {
 		sm.mu.RLock()
 		prevTerm := sm.currentTerm
@@ -375,7 +400,8 @@ func (sm *stateManager) CheckTermAndStepDown(ctx context.Context, rpcTerm types.
 	}
 
 	if rpcTerm == sm.currentTerm {
-		if currentRole != types.RoleFollower || (rpcLeader != unknownNodeID && rpcLeader != currentLeader) {
+		if currentRole != types.RoleFollower ||
+			(rpcLeader != unknownNodeID && rpcLeader != currentLeader) {
 			if currentRole != types.RoleFollower {
 				sm.logger.Infow("Same term RPC received; stepping down from non-follower role",
 					"term", sm.currentTerm,
@@ -401,7 +427,11 @@ func (sm *stateManager) CheckTermAndStepDown(ctx context.Context, rpcTerm types.
 
 // stepDownToHigherTermLocked updates term, resets vote, becomes follower, and persists state.
 // Must be called with sm.mu.Lock() held. Returns error from persistence.
-func (sm *stateManager) stepDownToHigherTermLocked(ctx context.Context, newTerm types.Term, leaderHint types.NodeID) error {
+func (sm *stateManager) stepDownToHigherTermLocked(
+	ctx context.Context,
+	newTerm types.Term,
+	leaderHint types.NodeID,
+) error {
 	previousTerm := sm.currentTerm
 	previousVotedFor := sm.votedFor
 
@@ -426,7 +456,11 @@ func (sm *stateManager) stepDownToHigherTermLocked(ctx context.Context, newTerm 
 
 // GrantVote attempts to grant a vote for the given candidate in the specified term.
 // Checks term validity and ensures only one vote is cast per term. Persists the vote if granted.
-func (sm *stateManager) GrantVote(ctx context.Context, candidateID types.NodeID, term types.Term) bool {
+func (sm *stateManager) GrantVote(
+	ctx context.Context,
+	candidateID types.NodeID,
+	term types.Term,
+) bool {
 	if sm.isShutdown.Load() {
 		sm.logger.Infow("Vote rejected: node is shut down",
 			"requested_term", term,
@@ -597,7 +631,11 @@ func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor typ
 
 // setRoleAndLeaderLocked updates the role and leaderID, logging the change and notifying listeners.
 // Must be called with sm.mu.Lock() held.
-func (sm *stateManager) setRoleAndLeaderLocked(newRole types.NodeRole, newLeader types.NodeID, term types.Term) {
+func (sm *stateManager) setRoleAndLeaderLocked(
+	newRole types.NodeRole,
+	newLeader types.NodeID,
+	term types.Term,
+) {
 	oldRole := sm.role
 	oldLeader := sm.leaderID
 
@@ -628,7 +666,11 @@ func (sm *stateManager) setRoleAndLeaderLocked(newRole types.NodeRole, newLeader
 }
 
 // persistState saves the given term and votedFor to stable storage.
-func (sm *stateManager) persistState(ctx context.Context, term types.Term, votedFor types.NodeID) error {
+func (sm *stateManager) persistState(
+	ctx context.Context,
+	term types.Term,
+	votedFor types.NodeID,
+) error {
 	state := types.PersistentState{
 		CurrentTerm: term,
 		VotedFor:    votedFor,
@@ -642,7 +684,12 @@ func (sm *stateManager) persistState(ctx context.Context, term types.Term, voted
 			"votedFor", state.VotedFor,
 			"error", err)
 
-		return fmt.Errorf("failed to save state (term: %d, votedFor: '%s'): %w", state.CurrentTerm, state.VotedFor, err)
+		return fmt.Errorf(
+			"failed to save state (term: %d, votedFor: '%s'): %w",
+			state.CurrentTerm,
+			state.VotedFor,
+			err,
+		)
 	}
 	sm.logger.Debugw("State persisted successfully", "term", term, "voted_for", votedFor)
 	return nil

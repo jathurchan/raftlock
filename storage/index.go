@@ -35,7 +35,12 @@ type indexService interface {
 
 	// ReadInRange returns log entries in the specified [start, end) index range using the index map.
 	// Offsets from the index map are used to seek entries directly within the log file.
-	ReadInRange(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error)
+	ReadInRange(
+		ctx context.Context,
+		logPath string,
+		indexMap []types.IndexOffsetPair,
+		start, end types.Index,
+	) ([]types.LogEntry, int64, error)
 
 	// VerifyConsistency ensures that the provided index-offset map contains
 	// strictly increasing and gapless indices. If any discontinuity or out-of-order
@@ -129,9 +134,18 @@ func (is *defaultIndexService) Build(logPath string) (buildResult, error) {
 func (is *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, error) {
 	file, err := is.fs.Open(logPath)
 	if err != nil {
-		return buildResult{}, fmt.Errorf("%w: failed to open log file %q: %v", ErrStorageIO, logPath, err)
+		return buildResult{}, fmt.Errorf(
+			"%w: failed to open log file %q: %w",
+			ErrStorageIO,
+			logPath,
+			err,
+		)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			is.logger.Errorw("error closing file: %v", err)
+		}
+	}()
 
 	var (
 		offset      int64
@@ -153,7 +167,7 @@ func (is *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, 
 		offset += bytesRead
 
 		switch {
-		case err == io.EOF:
+		case errors.Is(err, io.EOF):
 			is.logger.Infow("Log scan complete", "entriesRead", entriesRead, "finalOffset", offset)
 			return buildResult{
 				IndexMap:       indexMap,
@@ -169,7 +183,11 @@ func (is *defaultIndexService) scanLogAndBuildMap(logPath string) (buildResult, 
 		// Ensure log indices are strictly increasing and contiguous
 		if lastIndex > 0 {
 			if entry.Index <= lastIndex {
-				reason := fmt.Sprintf("out-of-order index (current=%d, last=%d)", entry.Index, lastIndex)
+				reason := fmt.Sprintf(
+					"out-of-order index (current=%d, last=%d)",
+					entry.Index,
+					lastIndex,
+				)
 				return is.buildCorruptionResult(indexMap, lastIndex,
 					is.handleCorruption(logPath, entryOffset, reason, nil))
 			}
@@ -205,7 +223,12 @@ func (is *defaultIndexService) buildCorruptionResult(
 }
 
 // handleCorruption logs the corruption details and attempts to truncate the log at the given offset.
-func (is *defaultIndexService) handleCorruption(path string, offset int64, reason string, err error) error {
+func (is *defaultIndexService) handleCorruption(
+	path string,
+	offset int64,
+	reason string,
+	err error,
+) error {
 	logFields := []any{
 		"logPath", path,
 		"offset", offset,
@@ -252,7 +275,13 @@ func (is *defaultIndexService) ReadInRange(
 	start, end types.Index,
 ) ([]types.LogEntry, int64, error) {
 	if start >= end {
-		is.logger.Debugw("Start index is greater than or equal to end index", "start", start, "end", end)
+		is.logger.Debugw(
+			"Start index is greater than or equal to end index",
+			"start",
+			start,
+			"end",
+			end,
+		)
 		return []types.LogEntry{}, 0, ErrInvalidLogRange
 	}
 
@@ -265,23 +294,56 @@ func (is *defaultIndexService) ReadInRange(
 	last := indexMap[len(indexMap)-1].Index
 
 	if start < first || end > last+1 {
-		is.logger.Debugw("Requested range is out of bounds", "start", start, "end", end, "mapFirst", first, "mapLast", last)
+		is.logger.Debugw(
+			"Requested range is out of bounds",
+			"start",
+			start,
+			"end",
+			end,
+			"mapFirst",
+			first,
+			"mapLast",
+			last,
+		)
 		return []types.LogEntry{}, 0, ErrIndexOutOfRange
 	}
 
 	file, err := is.fs.Open(logPath)
 	if err != nil {
 		is.logger.Errorw("Failed to open log file for reading", "path", logPath, "error", err)
-		return []types.LogEntry{}, 0, fmt.Errorf("%w: failed to open log file: %v", ErrStorageIO, err)
+		return []types.LogEntry{}, 0, fmt.Errorf(
+			"%w: failed to open log file: %w",
+			ErrStorageIO,
+			err,
+		)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			is.logger.Errorw("error closing file: %v", err)
+		}
+	}()
 
 	startIdx := findStartIndexInMap(indexMap, start)
 	estimatedCap := estimateCapacity(indexMap, start, end)
 
-	entries, totalBytes, err := is.readEntriesInRange(ctx, file, indexMap, startIdx, end, estimatedCap)
+	entries, totalBytes, err := is.readEntriesInRange(
+		ctx,
+		file,
+		indexMap,
+		startIdx,
+		end,
+		estimatedCap,
+	)
 	if err != nil {
-		is.logger.Errorw("Failed to read entries in range", "start", start, "end", end, "error", err)
+		is.logger.Errorw(
+			"Failed to read entries in range",
+			"start",
+			start,
+			"end",
+			end,
+			"error",
+			err,
+		)
 		return entries, totalBytes, err
 	}
 
@@ -333,7 +395,13 @@ func (is *defaultIndexService) readEntriesInRange(
 		}
 
 		if i%20 == 0 && ctx.Err() != nil {
-			is.logger.Warnw("Context canceled during ReadInRange", "cancelIndex", pair.Index, "error", ctx.Err())
+			is.logger.Warnw(
+				"Context canceled during ReadInRange",
+				"cancelIndex",
+				pair.Index,
+				"error",
+				ctx.Err(),
+			)
 			return entries, totalBytes, ctx.Err()
 		}
 
@@ -349,7 +417,15 @@ func (is *defaultIndexService) readEntriesInRange(
 		}
 
 		if err != nil {
-			is.logger.Errorw("Failed to read entry", "index", pair.Index, "offset", pair.Offset, "error", err)
+			is.logger.Errorw(
+				"Failed to read entry",
+				"index",
+				pair.Index,
+				"offset",
+				pair.Offset,
+				"error",
+				err,
+			)
 			return entries, totalBytes, err
 		}
 
@@ -399,8 +475,10 @@ func (is *defaultIndexService) VerifyConsistency(indexMap []types.IndexOffsetPai
 //
 // This method is typically used during recovery or reconciliation to determine whether metadata
 // should be updated, and whether such an update represents a reset due to log truncation or corruption.
-func (s *defaultIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
-
+func (s *defaultIndexService) GetBounds(
+	indexMap []types.IndexOffsetPair,
+	currentFirst, currentLast types.Index,
+) boundsResult {
 	s.logger.Debugw("Calculating bounds",
 		"currentFirst", currentFirst,
 		"currentLast", currentLast,
@@ -439,24 +517,41 @@ func (s *defaultIndexService) GetBounds(indexMap []types.IndexOffsetPair, curren
 }
 
 // Append extends the existing index-offset map with new entries.
-func (s *defaultIndexService) Append(base, additions []types.IndexOffsetPair) []types.IndexOffsetPair {
+func (s *defaultIndexService) Append(
+	base, additions []types.IndexOffsetPair,
+) []types.IndexOffsetPair {
 	if len(additions) == 0 {
 		s.logger.Debugw("No additions to append", "baseLen", len(base))
 		return base
 	}
-	s.logger.Debugw("Appending entries to index map", "baseLen", len(base), "addLen", len(additions))
+	s.logger.Debugw(
+		"Appending entries to index map",
+		"baseLen",
+		len(base),
+		"addLen",
+		len(additions),
+	)
 	return append(base, additions...)
 }
 
 // TruncateLast removes the last 'count' entries from the index-offset map.
-func (s *defaultIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair {
+func (s *defaultIndexService) TruncateLast(
+	indexMap []types.IndexOffsetPair,
+	count int,
+) []types.IndexOffsetPair {
 	if count <= 0 {
 		s.logger.Debugw("No truncation needed", "mapSize", len(indexMap))
 		return indexMap
 	}
 
 	if count >= len(indexMap) {
-		s.logger.Warnw("Truncation count exceeds or matches map size — returning empty", "count", count, "mapSize", len(indexMap))
+		s.logger.Warnw(
+			"Truncation count exceeds or matches map size — returning empty",
+			"count",
+			count,
+			"mapSize",
+			len(indexMap),
+		)
 		return []types.IndexOffsetPair{}
 	}
 
@@ -475,30 +570,55 @@ func (s *defaultIndexService) TruncateLast(indexMap []types.IndexOffsetPair, cou
 //	map = [{Index: 5}, {Index: 7}, {Index: 9}]
 //	target = 6 -> returns 1 (index 7)
 //	target = 10 -> returns 3 (past end)
-func (s *defaultIndexService) FindFirstIndexAtOrAfter(indexMap []types.IndexOffsetPair, target types.Index) int {
+func (s *defaultIndexService) FindFirstIndexAtOrAfter(
+	indexMap []types.IndexOffsetPair,
+	target types.Index,
+) int {
 	return sort.Search(len(indexMap), func(i int) bool {
 		return indexMap[i].Index >= target
 	})
 }
 
-func (s *defaultIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+func (s *defaultIndexService) TruncateAfter(
+	indexMap []types.IndexOffsetPair,
+	target types.Index,
+) []types.IndexOffsetPair {
 	if len(indexMap) == 0 {
 		return []types.IndexOffsetPair{}
 	}
 	pos := sort.Search(len(indexMap), func(i int) bool {
 		return indexMap[i].Index > target
 	})
-	s.logger.Debugw("Truncating after index", "target", target, "originalLen", len(indexMap), "newLen", pos)
+	s.logger.Debugw(
+		"Truncating after index",
+		"target",
+		target,
+		"originalLen",
+		len(indexMap),
+		"newLen",
+		pos,
+	)
 	return indexMap[:pos]
 }
 
-func (s *defaultIndexService) TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+func (s *defaultIndexService) TruncateBefore(
+	indexMap []types.IndexOffsetPair,
+	target types.Index,
+) []types.IndexOffsetPair {
 	if len(indexMap) == 0 {
 		return []types.IndexOffsetPair{}
 	}
 	pos := sort.Search(len(indexMap), func(i int) bool {
 		return indexMap[i].Index >= target
 	})
-	s.logger.Debugw("Truncating before index", "target", target, "originalLen", len(indexMap), "newLen", len(indexMap)-pos)
+	s.logger.Debugw(
+		"Truncating before index",
+		"target",
+		target,
+		"originalLen",
+		len(indexMap),
+		"newLen",
+		len(indexMap)-pos,
+	)
 	return indexMap[pos:]
 }

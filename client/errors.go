@@ -96,7 +96,13 @@ type ClientError struct {
 // Error implements the error interface.
 func (e *ClientError) Error() string {
 	if len(e.Details) > 0 {
-		return fmt.Sprintf("client %s failed: %v (code: %v, details: %v)", e.Op, e.Err, e.Code, e.Details)
+		return fmt.Sprintf(
+			"client %s failed: %v (code: %v, details: %v)",
+			e.Op,
+			e.Err,
+			e.Code,
+			e.Details,
+		)
 	}
 	return fmt.Sprintf("client %s failed: %v (code: %v)", e.Op, e.Err, e.Code)
 }
@@ -112,7 +118,12 @@ func (e *ClientError) Is(target error) bool {
 }
 
 // NewClientError creates a new ClientError.
-func NewClientError(op string, err error, code pb.ErrorCode, details map[string]string) *ClientError {
+func NewClientError(
+	op string,
+	err error,
+	code pb.ErrorCode,
+	details map[string]string,
+) *ClientError {
 	return &ClientError{
 		Op:      op,
 		Err:     err,

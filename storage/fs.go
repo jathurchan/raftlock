@@ -73,7 +73,12 @@ func (fs defaultFileSystem) TempPath(path string) string {
 	return path + tmpSuffix
 }
 
-func (fs defaultFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error {
+func (fs defaultFileSystem) WriteMaybeAtomic(
+	path string,
+	data []byte,
+	perm os.FileMode,
+	atomic bool,
+) error {
 	if atomic {
 		return fs.AtomicWrite(path, data, perm)
 	}
