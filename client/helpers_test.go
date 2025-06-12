@@ -1,9 +1,11 @@
 package client
 
 import (
+	"context"
 	"sync"
 	"time"
 
+	pb "github.com/jathurchan/raftlock/proto"
 	"github.com/jathurchan/raftlock/raft"
 	"google.golang.org/grpc"
 )
@@ -31,7 +33,6 @@ func (m *mockConnector) GetConnection(endpoint string, opts ...grpc.DialOption) 
 	return m.conn, nil
 }
 
-// Update setupTestClient to use safe nil connections:
 func setupTestClient(config Config) (*baseClientImpl, *mockConnector, *mockClock, *mockRand) {
 	if len(config.Endpoints) == 0 {
 		config.Endpoints = []string{"endpoint1", "endpoint2"}
@@ -57,9 +58,6 @@ func setupTestClient(config Config) (*baseClientImpl, *mockConnector, *mockClock
 	return client, connector, clock, rand
 }
 
-// mockClock provides a controllable, deterministic time source for testing.
-// It fully implements the raft.Clock interface and includes a mechanism
-// to synchronize with goroutines waiting on its timers.
 type mockClock struct {
 	mu          sync.Mutex
 	currentTime time.Time
@@ -132,7 +130,6 @@ func (m *mockClock) NewTicker(d time.Duration) raft.Ticker {
 	return ticker
 }
 
-// Advance moves the mock clock's time forward, firing any expired timers or tickers.
 func (m *mockClock) Advance(d time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -169,7 +166,6 @@ func (m *mockClock) Advance(d time.Duration) {
 	}
 }
 
-// mockTimer implements the raft.Timer interface for testing.
 type mockTimer struct {
 	C       chan time.Time
 	clock   *mockClock
@@ -198,7 +194,6 @@ func (mt *mockTimer) Reset(d time.Duration) bool {
 	return wasActive
 }
 
-// mockTicker implements the raft.Ticker interface for testing.
 type mockTicker struct {
 	C        chan time.Time
 	clock    *mockClock
@@ -223,8 +218,6 @@ func (mt *mockTicker) Reset(d time.Duration) {
 	mt.active = true
 }
 
-// mockRand provides a predictable source of random numbers for testing.
-// It implements the raft.Rand interface.
 type mockRand struct {
 	mu       sync.Mutex
 	float64s []float64
@@ -267,4 +260,67 @@ func (m *mockRand) IntN(n int) int {
 		return val
 	}
 	return n / 2 // Default fallback value
+}
+
+type mockRaftLockClient struct {
+	acquireFunc     func(ctx context.Context, req *pb.AcquireRequest, opts ...grpc.CallOption) (*pb.AcquireResponse, error)
+	releaseFunc     func(ctx context.Context, req *pb.ReleaseRequest, opts ...grpc.CallOption) (*pb.ReleaseResponse, error)
+	renewFunc       func(ctx context.Context, req *pb.RenewRequest, opts ...grpc.CallOption) (*pb.RenewResponse, error)
+	getLockInfoFunc func(ctx context.Context, req *pb.GetLockInfoRequest, opts ...grpc.CallOption) (*pb.GetLockInfoResponse, error)
+	getLocksFunc    func(ctx context.Context, req *pb.GetLocksRequest, opts ...grpc.CallOption) (*pb.GetLocksResponse, error)
+}
+
+func (m *mockRaftLockClient) Acquire(ctx context.Context, req *pb.AcquireRequest, opts ...grpc.CallOption) (*pb.AcquireResponse, error) {
+	if m.acquireFunc != nil {
+		return m.acquireFunc(ctx, req, opts...)
+	}
+	return &pb.AcquireResponse{Acquired: true}, nil
+}
+
+func (m *mockRaftLockClient) Release(ctx context.Context, req *pb.ReleaseRequest, opts ...grpc.CallOption) (*pb.ReleaseResponse, error) {
+	if m.releaseFunc != nil {
+		return m.releaseFunc(ctx, req, opts...)
+	}
+	return &pb.ReleaseResponse{Released: true}, nil
+}
+
+func (m *mockRaftLockClient) Renew(ctx context.Context, req *pb.RenewRequest, opts ...grpc.CallOption) (*pb.RenewResponse, error) {
+	if m.renewFunc != nil {
+		return m.renewFunc(ctx, req, opts...)
+	}
+	return &pb.RenewResponse{Renewed: true}, nil
+}
+
+func (m *mockRaftLockClient) GetLockInfo(ctx context.Context, req *pb.GetLockInfoRequest, opts ...grpc.CallOption) (*pb.GetLockInfoResponse, error) {
+	if m.getLockInfoFunc != nil {
+		return m.getLockInfoFunc(ctx, req, opts...)
+	}
+	return &pb.GetLockInfoResponse{}, nil
+}
+
+func (m *mockRaftLockClient) GetLocks(ctx context.Context, req *pb.GetLocksRequest, opts ...grpc.CallOption) (*pb.GetLocksResponse, error) {
+	if m.getLocksFunc != nil {
+		return m.getLocksFunc(ctx, req, opts...)
+	}
+	return &pb.GetLocksResponse{}, nil
+}
+
+func (m *mockRaftLockClient) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaiterRequest, opts ...grpc.CallOption) (*pb.EnqueueWaiterResponse, error) {
+	return &pb.EnqueueWaiterResponse{}, nil
+}
+
+func (m *mockRaftLockClient) CancelWait(ctx context.Context, req *pb.CancelWaitRequest, opts ...grpc.CallOption) (*pb.CancelWaitResponse, error) {
+	return &pb.CancelWaitResponse{}, nil
+}
+
+func (m *mockRaftLockClient) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error) {
+	return &pb.BackoffAdviceResponse{}, nil
+}
+
+func (m *mockRaftLockClient) GetStatus(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error) {
+	return &pb.GetStatusResponse{}, nil
+}
+
+func (m *mockRaftLockClient) Health(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
+	return &pb.HealthResponse{}, nil
 }
