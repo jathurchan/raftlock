@@ -28,8 +28,10 @@ func setupTestReplicationManager(t *testing.T) (*replicationManager, *mockLogMan
 	metrics := newMockMetrics()
 	clock := newMockClock()
 
+	stateMgr.mu.Lock()
 	stateMgr.currentRole = types.RoleLeader
 	stateMgr.leaderID = "node1"
+	stateMgr.mu.Unlock()
 
 	applyCh := make(chan struct{}, 10)
 
@@ -255,8 +257,10 @@ func TestRaftReplication_Tick(t *testing.T) {
 	t.Run("returns early if node is not leader", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower
 		stateMgr.leaderID = "node2"
+		stateMgr.mu.Unlock()
 
 		rm.Tick(context.Background())
 		rm.Stop()
@@ -274,8 +278,10 @@ func TestRaftReplication_Tick(t *testing.T) {
 	t.Run("invokes MaybeAdvanceCommitIndex on commit notification", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		rm.notifyCommitCh <- struct{}{}
 
@@ -291,8 +297,10 @@ func TestRaftReplication_Tick(t *testing.T) {
 	t.Run("sends heartbeats when interval elapses", func(t *testing.T) {
 		rm, _, stateMgr, network, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -322,8 +330,10 @@ func TestRaftReplication_InitializeLeaderState(t *testing.T) {
 		logMgr.lastIndex = 2
 		logMgr.lastTerm = 1
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		rm.InitializeLeaderState()
 
@@ -349,8 +359,10 @@ func TestRaftReplication_InitializeLeaderState(t *testing.T) {
 	t.Run("returns early with warning if not leader", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower
 		stateMgr.leaderID = "node2"
+		stateMgr.mu.Unlock()
 
 		rm.InitializeLeaderState()
 	})
@@ -360,8 +372,10 @@ func TestRaftReplication_SendHeartbeats(t *testing.T) {
 	t.Run("sends heartbeats to all peers when leader", func(t *testing.T) {
 		rm, _, stateMgr, network, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -379,8 +393,10 @@ func TestRaftReplication_SendHeartbeats(t *testing.T) {
 	t.Run("does nothing if not leader", func(t *testing.T) {
 		rm, _, stateMgr, network, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower
 		stateMgr.leaderID = "node2"
+		stateMgr.mu.Unlock()
 
 		rm.SendHeartbeats(context.Background())
 		appendEntries, _ := network.getAndResetCallCounts()
@@ -391,8 +407,10 @@ func TestRaftReplication_SendHeartbeats(t *testing.T) {
 	t.Run("does nothing if context is canceled", func(t *testing.T) {
 		rm, _, stateMgr, network, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -419,7 +437,7 @@ func TestRaftReplication_ReplicateToPeerInternal_Success(t *testing.T) {
 	ps.MatchIndex = 0
 	rm.mu.Unlock()
 
-	network.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		t.Logf("AppendEntries sent: to=%s term=%d entries=%d", target, args.Term, len(args.Entries))
 
 		reply := &types.AppendEntriesReply{
@@ -435,7 +453,7 @@ func TestRaftReplication_ReplicateToPeerInternal_Success(t *testing.T) {
 		rm.handleAppendReply(target, args.Term, args, reply, false, end.Sub(start))
 
 		return reply, nil
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -444,6 +462,7 @@ func TestRaftReplication_ReplicateToPeerInternal_Success(t *testing.T) {
 	testutil.AssertEqual(t, types.Index(4), ps.NextIndex, "expected updated NextIndex")
 	testutil.AssertEqual(t, types.Index(3), ps.MatchIndex, "expected updated MatchIndex")
 	testutil.AssertTrue(t, ps.IsActive, "expected peer to be active")
+	rm.mu.RUnlock()
 }
 
 func TestRaftReplication_ReplicateToPeerInternal_LogConflict(t *testing.T) {
@@ -461,14 +480,14 @@ func TestRaftReplication_ReplicateToPeerInternal_LogConflict(t *testing.T) {
 	ps.MatchIndex = 2
 	rm.mu.Unlock()
 
-	network.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		return &types.AppendEntriesReply{
 			Term:          args.Term,
 			Success:       false,
 			ConflictTerm:  1,
 			ConflictIndex: 2,
 		}, nil
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 2, 0, false)
 
@@ -487,9 +506,11 @@ func TestRaftReplication_ReplicateToPeerInternal_HigherTerm(t *testing.T) {
 	logMgr.lastIndex = 1
 	logMgr.lastTerm = 1
 
+	stateMgr.mu.Lock()
 	stateMgr.currentTerm = 1
 	stateMgr.currentRole = types.RoleLeader
 	stateMgr.leaderID = "node1"
+	stateMgr.mu.Unlock()
 
 	rm.mu.Lock()
 	ps := rm.peerStates["node2"]
@@ -497,12 +518,12 @@ func TestRaftReplication_ReplicateToPeerInternal_HigherTerm(t *testing.T) {
 	ps.MatchIndex = 0
 	rm.mu.Unlock()
 
-	network.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		return &types.AppendEntriesReply{
 			Term:    2,
 			Success: false,
 		}, nil
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -526,9 +547,9 @@ func TestRaftReplication_ReplicateToPeerInternal_NetworkError(t *testing.T) {
 	rm.mu.Unlock()
 
 	expectedErr := errors.New("network error")
-	network.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		return nil, expectedErr
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -633,8 +654,8 @@ func TestRaftReplication_ReplicateToPeerInternal_TriggersSnapshotWhenLogUnavaila
 
 	rm.mu.Lock()
 	ps := rm.peerStates["node2"]
-	ps.NextIndex = 1              // behind first index
-	ps.SnapshotInProgress = false // snapshot should trigger
+	ps.NextIndex = 1
+	ps.SnapshotInProgress = false
 	ps.MatchIndex = 0
 	rm.mu.Unlock()
 
@@ -647,10 +668,10 @@ func TestRaftReplication_ReplicateToPeerInternal_TriggersSnapshotWhenLogUnavaila
 		snapshotTriggered <- struct{}{}
 	}
 
-	network.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		t.Fatal("AppendEntries should not be called when snapshot is initiated")
 		return nil, nil
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -680,10 +701,10 @@ func TestRaftReplication_ReplicateToPeerInternal_PrevLogInfoUnavailable_ReturnsE
 	rm.mu.Unlock()
 
 	called := false
-	network.sendAppendEntriesFunc = func(ctx context.Context, peerID types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, peerID types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		called = true
 		return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 2, 0, false)
 
@@ -725,10 +746,10 @@ func TestRaftReplication_ReplicateToPeerInternal_PrevLogTermCompacted_StartsSnap
 		},
 	}
 
-	network.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		t.Fatal("AppendEntries should not be called when snapshot is triggered due to compacted prevLogIndex")
 		return nil, nil
-	}
+	})
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 2, 0, false)
 
@@ -770,7 +791,9 @@ func TestRaftReplication_ReplicateToPeerInternal_SnapshotOnCompactedGetEntries(t
 	rm, logMgr, stateMgr, _, snapshotMgr, _ := setupTestReplicationManager(t)
 
 	peerID := types.NodeID("node2")
+	stateMgr.mu.Lock()
 	stateMgr.currentTerm = 1
+	stateMgr.mu.Unlock()
 
 	rm.mu.Lock()
 	rm.peerStates[peerID] = &types.PeerState{NextIndex: 2}
@@ -820,7 +843,9 @@ func TestReplicateToPeerInternal_EmptyEntriesForValidRange(t *testing.T) {
 	metrics.resetPeerReplicationCalls()
 
 	peerID := types.NodeID("node2")
+	stateMgr.mu.Lock()
 	stateMgr.currentTerm = 1
+	stateMgr.mu.Unlock()
 
 	rm.mu.Lock()
 	rm.peerStates[peerID] = &types.PeerState{NextIndex: 2}
@@ -843,11 +868,11 @@ func TestReplicateToPeerInternal_EmptyEntriesForValidRange(t *testing.T) {
 	}
 
 	var appendCalled, snapshotCalled bool
-	networkMgr.sendAppendEntriesFunc = func(_ context.Context, _ types.NodeID, _ *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	networkMgr.setSendAppendEntriesFunc(func(_ context.Context, _ types.NodeID, _ *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		appendCalled = true
 		t.Error("AppendEntries should not be called")
 		return nil, nil
-	}
+	})
 	snapshotMgr.sendSnapshotFunc = func(_ context.Context, _ types.NodeID, _ types.Term) {
 		snapshotCalled = true
 		t.Error("SendSnapshot should not be called")
@@ -1147,9 +1172,11 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 	t.Run("AdvancesWhenQuorumReplicatedCurrentTermEntries", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.commitIndex = 0
+		stateMgr.mu.Unlock()
 
 		logMgr.entries[1] = types.LogEntry{Index: 1, Term: 1}
 		logMgr.entries[2] = types.LogEntry{Index: 2, Term: 1}
@@ -1163,21 +1190,23 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(2), stateMgr.commitIndex, "Commit index should advance to 2")
+		testutil.AssertEqual(t, types.Index(2), stateMgr.GetCommitIndex(), "Commit index should advance to 2")
 
 		rm.mu.Lock()
 		rm.peerStates["node3"].MatchIndex = 3
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(3), stateMgr.commitIndex, "Commit index should advance to 3")
+		testutil.AssertEqual(t, types.Index(3), stateMgr.GetCommitIndex(), "Commit index should advance to 3")
 	})
 
 	t.Run("SkipsOlderTermEntriesEvenWithQuorum", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 2
 		stateMgr.currentRole = types.RoleLeader
+		stateMgr.mu.Unlock()
 
 		logMgr.entries[1] = types.LogEntry{Index: 1, Term: 1}
 		logMgr.entries[2] = types.LogEntry{Index: 2, Term: 1}
@@ -1191,7 +1220,7 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(0), stateMgr.commitIndex, "Should not commit older term entries")
+		testutil.AssertEqual(t, types.Index(0), stateMgr.GetCommitIndex(), "Should not commit older term entries")
 
 		rm.mu.Lock()
 		rm.peerStates["node2"].MatchIndex = 3
@@ -1199,31 +1228,37 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(3), stateMgr.commitIndex, "Should commit index 3 from current term")
+		testutil.AssertEqual(t, types.Index(3), stateMgr.GetCommitIndex(), "Should commit index 3 from current term")
 	})
 
 	t.Run("NoopIfAlreadyShutdown", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 		rm.isShutdown.Store(true)
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
+		stateMgr.mu.Unlock()
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(0), stateMgr.commitIndex)
+		testutil.AssertEqual(t, types.Index(0), stateMgr.GetCommitIndex())
 	})
 
 	t.Run("NoopIfNotLeader", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleFollower
+		stateMgr.mu.Unlock()
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(0), stateMgr.commitIndex)
+		testutil.AssertEqual(t, types.Index(0), stateMgr.GetCommitIndex())
 	})
 
 	t.Run("NoopIfCommitAlreadyUpToDate", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.commitIndex = 2
+		stateMgr.mu.Unlock()
 
 		logMgr.entries[1] = types.LogEntry{Index: 1, Term: 1}
 		logMgr.entries[2] = types.LogEntry{Index: 2, Term: 1}
@@ -1235,13 +1270,15 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(2), stateMgr.commitIndex)
+		testutil.AssertEqual(t, types.Index(2), stateMgr.GetCommitIndex())
 	})
 
 	t.Run("SkipsCommitWhenTermCheckFails", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 2
 		stateMgr.currentRole = types.RoleLeader
+		stateMgr.mu.Unlock()
 
 		logMgr.getTermFunc = func(ctx context.Context, index types.Index) (types.Term, error) {
 			return 0, fmt.Errorf("term lookup failed")
@@ -1256,14 +1293,16 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(0), stateMgr.commitIndex, "Commit should not advance when term check fails")
+		testutil.AssertEqual(t, types.Index(0), stateMgr.GetCommitIndex(), "Commit should not advance when term check fails")
 	})
 
 	t.Run("ReturnWhenPotentialCommitIndexIsNotGreater", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.commitIndex = 2
+		stateMgr.mu.Unlock()
 
 		logMgr.entries[1] = types.LogEntry{Index: 1, Term: 1}
 		logMgr.entries[2] = types.LogEntry{Index: 2, Term: 1}
@@ -1279,16 +1318,18 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 
 		rm.MaybeAdvanceCommitIndex()
 
-		testutil.AssertEqual(t, types.Index(2), stateMgr.commitIndex, "Should early return without advancing commit index")
+		testutil.AssertEqual(t, types.Index(2), stateMgr.GetCommitIndex(), "Should early return without advancing commit index")
 	})
 }
 
 func TestRaftReplication_Propose(t *testing.T) {
 	t.Run("SuccessWhenLeader", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		command := []byte("test command")
 		index, term, isLeader, err := rm.Propose(context.Background(), command)
@@ -1307,8 +1348,10 @@ func TestRaftReplication_Propose(t *testing.T) {
 
 	t.Run("FailsWhenNotLeader", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower
 		stateMgr.leaderID = "node2"
+		stateMgr.mu.Unlock()
 
 		_, _, isLeader, err := rm.Propose(context.Background(), []byte("cmd"))
 		testutil.AssertError(t, err)
@@ -1318,9 +1361,11 @@ func TestRaftReplication_Propose(t *testing.T) {
 
 	t.Run("SucceedsWithEmptyCommand", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
 		stateMgr.currentTerm = 1
+		stateMgr.mu.Unlock()
 
 		_, _, isLeader, err := rm.Propose(context.Background(), []byte{})
 		testutil.AssertNoError(t, err)
@@ -1329,9 +1374,11 @@ func TestRaftReplication_Propose(t *testing.T) {
 
 	t.Run("FailsWhenLogAppendFails", func(t *testing.T) {
 		rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.currentTerm = 1
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		expectedErr := errors.New("append failed")
 		logMgr.appendEntriesFunc = func(ctx context.Context, entries []types.LogEntry) error {
@@ -1365,9 +1412,11 @@ func TestRaftReplication_ReplicateToAllPeers_AbortCases(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
 		originalTerm := types.Term(1) // stale term
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 2
 		stateMgr.currentRole = types.RoleFollower // Not leader anymore
 		stateMgr.leaderID = "node2"
+		stateMgr.mu.Unlock()
 
 		rm.replicateToAllPeers(context.Background(), originalTerm)
 	})
@@ -1377,9 +1426,11 @@ func TestHasValidLease(t *testing.T) {
 	t.Run("ValidLeaseWhenLeaderAndLeaseEnabled", func(t *testing.T) {
 		rm, _, stateMgr, _, _, clock := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = "node1"
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
 		rm.leaderLeaseEnabled = true
@@ -1394,7 +1445,9 @@ func TestHasValidLease(t *testing.T) {
 	t.Run("LeaseExpired", func(t *testing.T) {
 		rm, _, stateMgr, _, _, clock := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
 		rm.leaderLeaseEnabled = true
@@ -1408,10 +1461,12 @@ func TestHasValidLease(t *testing.T) {
 	t.Run("LeaseDisabled", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
-		rm.leaderLeaseEnabled = false                     // explicitly disabled
+		rm.leaderLeaseEnabled = false
 		rm.leaseExpiry = time.Now().Add(10 * time.Second) // even if not expired
 		rm.mu.Unlock()
 
@@ -1422,7 +1477,9 @@ func TestHasValidLease(t *testing.T) {
 	t.Run("NotLeader", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower // not leader
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
 		rm.leaderLeaseEnabled = true
@@ -1438,10 +1495,12 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 	t.Run("LeaderLease_FastPath", func(t *testing.T) {
 		rm, _, stateMgr, _, _, clock := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = rm.id
 		stateMgr.commitIndex = 5
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
 		rm.leaderLeaseEnabled = true
@@ -1455,23 +1514,26 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 	})
 
 	t.Run("LeaderLease_QuorumSuccess", func(t *testing.T) {
-		rm, _, stateMgr, _, _, clock := setupTestReplicationManager(t)
+		rm, _, stateMgr, network, _, clock := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = rm.id
 		stateMgr.commitIndex = 5
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
 		rm.leaderLeaseEnabled = true
 		rm.leaseExpiry = clock.Now().Add(-1 * time.Second) // Expired
 		rm.mu.Unlock()
 
-		original := rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc
-		defer func() { rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc = original }()
-		rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+		// Use the thread-safe setter for the mock network manager
+		mockNet := network
+		mockNet.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 			return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
-		}
+		})
+		defer mockNet.setSendAppendEntriesFunc(nil) // cleanup
 
 		index, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
 		testutil.AssertNoError(t, err)
@@ -1479,23 +1541,25 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 	})
 
 	t.Run("LeaderLease_QuorumFails", func(t *testing.T) {
-		rm, _, stateMgr, _, _, clock := setupTestReplicationManager(t)
+		rm, _, stateMgr, network, _, clock := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = rm.id
 		stateMgr.commitIndex = 5
+		stateMgr.mu.Unlock()
 
 		rm.mu.Lock()
 		rm.leaderLeaseEnabled = true
 		rm.leaseExpiry = clock.Now().Add(-1 * time.Second)
 		rm.mu.Unlock()
 
-		original := rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc
-		defer func() { rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc = original }()
-		rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+		mockNet := network
+		mockNet.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 			return nil, fmt.Errorf("unreachable")
-		}
+		})
+		defer mockNet.setSendAppendEntriesFunc(nil)
 
 		index, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
 		testutil.AssertError(t, err)
@@ -1507,9 +1571,11 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 	t.Run("NotLeader", func(t *testing.T) {
 		rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleFollower
 		stateMgr.leaderID = "node2"
+		stateMgr.mu.Unlock()
 
 		_, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
 		testutil.AssertErrorIs(t, err, ErrNotLeader)
@@ -1527,14 +1593,17 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 		rm, _, stateMgr, networkMgrMock, _, _ := setupTestReplicationManager(t)
 		rm.leaderLeaseEnabled = false
 
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = rm.id
+		stateMgr.mu.Unlock()
 
-		networkMgrMock.sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+		networkMgrMock.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
-		}
+		})
+		defer networkMgrMock.setSendAppendEntriesFunc(nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
@@ -1575,9 +1644,11 @@ func TestRaftReplication_VerifyLeadershipViaQuorum(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
+			stateMgr.mu.Lock()
 			stateMgr.currentTerm = 2
 			stateMgr.currentRole = types.RoleLeader
 			stateMgr.leaderID = rm.id
+			stateMgr.mu.Unlock()
 
 			ctx := context.Background()
 			if tt.cancelContext {
@@ -1587,7 +1658,7 @@ func TestRaftReplication_VerifyLeadershipViaQuorum(t *testing.T) {
 			}
 
 			if tt.mockSendFunc != nil {
-				rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc = tt.mockSendFunc()
+				rm.networkMgr.(*mockNetworkManager).setSendAppendEntriesFunc(tt.mockSendFunc())
 			}
 
 			ok := rm.verifyLeadershipViaQuorum(ctx, 2)
@@ -1599,13 +1670,15 @@ func TestRaftReplication_VerifyLeadershipViaQuorum(t *testing.T) {
 func TestRaftReplication_VerifyLeadershipViaQuorum_HigherTermResponse(t *testing.T) {
 	rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+	stateMgr.mu.Lock()
 	stateMgr.currentTerm = 2
 	stateMgr.currentRole = types.RoleLeader
 	stateMgr.leaderID = rm.id
+	stateMgr.mu.Unlock()
 
-	rm.networkMgr.(*mockNetworkManager).sendAppendEntriesFunc = func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+	rm.networkMgr.(*mockNetworkManager).setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 		return &types.AppendEntriesReply{Term: args.Term + 1, Success: false}, nil
-	}
+	})
 
 	ctx := context.Background()
 	ok := rm.verifyLeadershipViaQuorum(ctx, 2)
@@ -1918,9 +1991,11 @@ func TestRaftReplication_HandleAppendEntries(t *testing.T) {
 func TestRaftReplication_GetPeerReplicationStatusUnsafe(t *testing.T) {
 	rm, logMgr, stateMgr, _, _, _ := setupTestReplicationManager(t)
 
+	stateMgr.mu.Lock()
 	stateMgr.currentTerm = 1
 	stateMgr.currentRole = types.RoleLeader
 	stateMgr.leaderID = "node1"
+	stateMgr.mu.Unlock()
 
 	logMgr.lastIndex = 10
 
@@ -1957,13 +2032,17 @@ func TestRaftReplication_GetPeerReplicationStatusUnsafe(t *testing.T) {
 	})
 
 	t.Run("Follower returns empty status map", func(t *testing.T) {
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower
+		stateMgr.mu.Unlock()
 		status := rm.GetPeerReplicationStatusUnsafe()
 		testutil.AssertEqual(t, 0, len(status), "Follower should return no replication status")
 	})
 
 	t.Run("Shutdown returns empty status map", func(t *testing.T) {
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleLeader // reset role to leader
+		stateMgr.mu.Unlock()
 		rm.isShutdown.Store(true)
 		status := rm.GetPeerReplicationStatusUnsafe()
 		testutil.AssertEqual(t, 0, len(status), "Shutdown should return no replication status")
@@ -1974,13 +2053,16 @@ func TestRaftReplication_SetPeerSnapshotInProgress(t *testing.T) {
 	rm, _, stateMgr, _, _, _ := setupTestReplicationManager(t)
 	rmID := rm.id
 
+	stateMgr.mu.Lock()
 	stateMgr.currentTerm = 1
 	stateMgr.currentRole = types.RoleLeader
 	stateMgr.leaderID = rmID
+	stateMgr.mu.Unlock()
 
 	rm.mu.Lock()
 	peer, ok := rm.peerStates["node2"]
 	if !ok {
+		rm.mu.Unlock()
 		t.Fatalf("peerStates does not contain node2")
 	}
 	peer.SnapshotInProgress = false
@@ -2003,7 +2085,10 @@ func TestRaftReplication_SetPeerSnapshotInProgress(t *testing.T) {
 	})
 
 	t.Run("No-op on shutdown", func(t *testing.T) {
-		rm.SetPeerSnapshotInProgress("node2", true)
+		rm.mu.Lock()
+		rm.peerStates["node2"].SnapshotInProgress = true
+		rm.mu.Unlock()
+
 		rm.isShutdown.Store(true)
 
 		rm.SetPeerSnapshotInProgress("node2", false) // should be ignored
@@ -2025,9 +2110,11 @@ func TestReplicateToPeer(t *testing.T) {
 	rmID := rm.id
 
 	t.Run("Leader should send AppendEntries", func(t *testing.T) {
+		stateMgr.mu.Lock()
 		stateMgr.currentTerm = 1
 		stateMgr.currentRole = types.RoleLeader
 		stateMgr.leaderID = rmID
+		stateMgr.mu.Unlock()
 
 		logMgr.lastIndex = 1
 		logMgr.lastTerm = 1
@@ -2039,10 +2126,7 @@ func TestReplicateToPeer(t *testing.T) {
 			rm.mu.RUnlock()
 			t.Fatalf("peerStates does not contain node2")
 		}
-		if psNode2.NextIndex != 1 {
-			rm.mu.RUnlock()
-			t.Fatalf("Expected peerStates[\"node2\"].NextIndex to be 1, got %d", psNode2.NextIndex)
-		}
+		testutil.AssertEqual(t, types.Index(1), psNode2.NextIndex)
 		rm.mu.RUnlock()
 
 		var wg sync.WaitGroup
@@ -2073,8 +2157,10 @@ func TestReplicateToPeer(t *testing.T) {
 		mockNet := rm.networkMgr.(*mockNetworkManager)
 		mockNet.getAndResetCallCounts()
 
+		stateMgr.mu.Lock()
 		stateMgr.currentRole = types.RoleFollower
 		stateMgr.leaderID = "someOtherLeader"
+		stateMgr.mu.Unlock()
 
 		rm.ReplicateToPeer(context.Background(), "node2", false)
 
@@ -2094,6 +2180,7 @@ func TestUpdatePeerAfterSnapshotSend(t *testing.T) {
 		rm.mu.Lock()
 		ps, ok := rm.peerStates[peerID]
 		if !ok {
+			rm.mu.Unlock()
 			t.Fatalf("Peer %s not found in peerStates after setup", peerID)
 		}
 		ps.MatchIndex = 5

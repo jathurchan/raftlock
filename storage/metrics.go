@@ -129,17 +129,26 @@ func addAverageLatency(metricsMap map[string]uint64, name string, sum, count *at
 	}
 }
 
-// addPercentiles calculates and adds P95/P99 latency percentiles to the metrics map.
-func addPercentiles(metricsMap map[string]uint64, name string, mu *sync.Mutex, samples []uint64) {
-	mu.Lock()
-	defer mu.Unlock()
+func (m *metrics) addPercentileMetrics(metricsMap map[string]uint64) {
+	m.samplerMapLock.Lock()
+	if m.latencySamplers == nil {
+		m.initSamplers()
+	}
+	m.samplerMapLock.Unlock()
 
-	if len(samples) > 0 {
-		metricsMap["p95_"+name+"_latency_us"] = computePercentile(samples, 0.95) / 1000
-		metricsMap["p99_"+name+"_latency_us"] = computePercentile(samples, 0.99) / 1000
-	} else {
-		metricsMap["p95_"+name+"_latency_us"] = 0
-		metricsMap["p99_"+name+"_latency_us"] = 0
+	for op, sampler := range m.latencySamplers {
+		sampler.mu.Lock()
+		samplesCopy := make([]uint64, len(*sampler.b))
+		copy(samplesCopy, *sampler.b)
+		sampler.mu.Unlock()
+
+		if len(samplesCopy) > 0 {
+			metricsMap["p95_"+op+"_latency_us"] = computePercentile(samplesCopy, 0.95) / 1000
+			metricsMap["p99_"+op+"_latency_us"] = computePercentile(samplesCopy, 0.99) / 1000
+		} else {
+			metricsMap["p95_"+op+"_latency_us"] = 0
+			metricsMap["p99_"+op+"_latency_us"] = 0
+		}
 	}
 }
 
@@ -194,19 +203,6 @@ func (m *metrics) addDerivedAverages(metricsMap map[string]uint64) {
 	addAverageLatency(metricsMap, "snapshot", &m.snapshotLatencySum, &m.snapshotLatencyCount)
 	addAverageLatency(metricsMap, "serialization_time", &m.serializationTimeSum, &m.serializationCount)
 	addAverageLatency(metricsMap, "deserialization_time", &m.deserializationTimeSum, &m.deserializationCount)
-}
-
-func (m *metrics) addPercentileMetrics(metricsMap map[string]uint64) {
-	m.samplerMapLock.Lock()
-	if m.latencySamplers == nil {
-		m.initSamplers()
-	}
-	m.samplerMapLock.Unlock()
-
-	addPercentiles(metricsMap, "append", m.latencySamplers["append"].mu, m.appendLatencySamples)
-	addPercentiles(metricsMap, "read", m.latencySamplers["read"].mu, m.readLatencySamples)
-	addPercentiles(metricsMap, "state", m.latencySamplers["state"].mu, m.stateLatencySamples)
-	addPercentiles(metricsMap, "snapshot", m.latencySamplers["snapshot"].mu, m.snapshotLatencySamples)
 }
 
 func (m *metrics) addDerivedStats(metricsMap map[string]uint64) {
