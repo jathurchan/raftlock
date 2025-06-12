@@ -642,10 +642,19 @@ func (m *mockLockClient) GetLastRenewCall() *RenewCall {
 }
 
 type mockLockHandle struct {
-	mu            sync.RWMutex
-	held          bool
-	renewErr      error
+	mu sync.RWMutex
+
+	held bool
+
+	acquireErr error
+	releaseErr error
+	renewErr   error
+	closeErr   error
+
+	acquireCalls  int
+	releaseCalls  int
 	renewCalls    int
+	closeCalls    int
 	renewedTTLs   []time.Duration
 	renewContexts []context.Context
 }
@@ -657,10 +666,24 @@ func newMockLockHandle() *mockLockHandle {
 }
 
 func (m *mockLockHandle) Acquire(ctx context.Context, ttl time.Duration, wait bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.acquireCalls++
+	if m.acquireErr != nil {
+		return m.acquireErr
+	}
+	m.held = true
 	return nil
 }
 
 func (m *mockLockHandle) Release(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.releaseCalls++
+	if m.releaseErr != nil {
+		return m.releaseErr
+	}
+	m.held = false
 	return nil
 }
 
@@ -673,6 +696,13 @@ func (m *mockLockHandle) Renew(ctx context.Context, newTTL time.Duration) error 
 	return m.renewErr
 }
 
+func (m *mockLockHandle) Close(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeCalls++
+	return m.closeErr
+}
+
 func (m *mockLockHandle) IsHeld() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -680,10 +710,6 @@ func (m *mockLockHandle) IsHeld() bool {
 }
 
 func (m *mockLockHandle) Lock() *Lock {
-	return nil
-}
-
-func (m *mockLockHandle) Close(ctx context.Context) error {
 	return nil
 }
 
@@ -708,7 +734,32 @@ func (m *mockLockHandle) getRenewCalls() int {
 func (m *mockLockHandle) getRenewedTTLs() []time.Duration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	result := make([]time.Duration, len(m.renewedTTLs))
+	result := make([]time.Duration, len(m.renewedTTLs)) // To prevent race conditions on the slice
 	copy(result, m.renewedTTLs)
 	return result
+}
+
+type mockAutoRenewer struct {
+	startCalled bool
+	stopCalled  bool
+	stopErr     error
+}
+
+func (m *mockAutoRenewer) Start(ctx context.Context) {
+	m.startCalled = true
+}
+
+func (m *mockAutoRenewer) Stop(ctx context.Context) error {
+	m.stopCalled = true
+	return m.stopErr
+}
+
+func (m *mockAutoRenewer) Done() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+func (m *mockAutoRenewer) Err() error {
+	return nil
 }
