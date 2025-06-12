@@ -324,3 +324,96 @@ func (m *mockRaftLockClient) GetStatus(ctx context.Context, req *pb.GetStatusReq
 func (m *mockRaftLockClient) Health(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
 	return &pb.HealthResponse{}, nil
 }
+
+// Helper type for health mock
+type healthMockClient struct {
+	pb.RaftLockClient
+	healthFunc func(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error)
+}
+
+func (h *healthMockClient) Health(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
+	return h.healthFunc(ctx, req, opts...)
+}
+
+// Enhanced mockRaftLockClient for testing admin functions
+type adminMockClient struct {
+	getStatusFunc        func(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error)
+	healthFunc           func(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error)
+	getBackoffAdviceFunc func(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error)
+}
+
+func (m *adminMockClient) Acquire(ctx context.Context, req *pb.AcquireRequest, opts ...grpc.CallOption) (*pb.AcquireResponse, error) {
+	return &pb.AcquireResponse{}, nil
+}
+
+func (m *adminMockClient) Release(ctx context.Context, req *pb.ReleaseRequest, opts ...grpc.CallOption) (*pb.ReleaseResponse, error) {
+	return &pb.ReleaseResponse{}, nil
+}
+
+func (m *adminMockClient) Renew(ctx context.Context, req *pb.RenewRequest, opts ...grpc.CallOption) (*pb.RenewResponse, error) {
+	return &pb.RenewResponse{}, nil
+}
+
+func (m *adminMockClient) GetLockInfo(ctx context.Context, req *pb.GetLockInfoRequest, opts ...grpc.CallOption) (*pb.GetLockInfoResponse, error) {
+	return &pb.GetLockInfoResponse{}, nil
+}
+
+func (m *adminMockClient) GetLocks(ctx context.Context, req *pb.GetLocksRequest, opts ...grpc.CallOption) (*pb.GetLocksResponse, error) {
+	return &pb.GetLocksResponse{}, nil
+}
+
+func (m *adminMockClient) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaiterRequest, opts ...grpc.CallOption) (*pb.EnqueueWaiterResponse, error) {
+	return &pb.EnqueueWaiterResponse{}, nil
+}
+
+func (m *adminMockClient) CancelWait(ctx context.Context, req *pb.CancelWaitRequest, opts ...grpc.CallOption) (*pb.CancelWaitResponse, error) {
+	return &pb.CancelWaitResponse{}, nil
+}
+
+func (m *adminMockClient) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error) {
+	if m.getBackoffAdviceFunc != nil {
+		return m.getBackoffAdviceFunc(ctx, req, opts...)
+	}
+	return &pb.BackoffAdviceResponse{}, nil
+}
+
+func (m *adminMockClient) GetStatus(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error) {
+	if m.getStatusFunc != nil {
+		return m.getStatusFunc(ctx, req, opts...)
+	}
+	return &pb.GetStatusResponse{}, nil
+}
+
+func (m *adminMockClient) Health(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
+	if m.healthFunc != nil {
+		return m.healthFunc(ctx, req, opts...)
+	}
+	return &pb.HealthResponse{}, nil
+}
+
+type mockBaseClient struct {
+	executeWithRetryFunc func(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error
+	closeFunc            func() error
+}
+
+func (m *mockBaseClient) executeWithRetry(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error {
+	if m.executeWithRetryFunc != nil {
+		return m.executeWithRetryFunc(ctx, operation, fn)
+	}
+	return nil
+}
+
+func (m *mockBaseClient) getCurrentLeader() string          { return "" }
+func (m *mockBaseClient) setCurrentLeader(leader string)    {}
+func (m *mockBaseClient) isConnected() bool                 { return true }
+func (m *mockBaseClient) setRetryPolicy(policy RetryPolicy) {}
+func (m *mockBaseClient) setRand(r raft.Rand)               {}
+func (m *mockBaseClient) getMetrics() Metrics               { return &noOpMetrics{} }
+func (m *mockBaseClient) setConnector(connector connector)  {}
+
+func (m *mockBaseClient) close() error {
+	if m.closeFunc != nil {
+		return m.closeFunc()
+	}
+	return nil
+}
