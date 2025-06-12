@@ -6,31 +6,21 @@ import (
 	"time"
 )
 
-// DoWithLock executes a function while holding a lock, automatically releasing it afterwards.
-// The provided context is passed to the executed function.
+var (
+	// NewLockHandleFunc is a function variable that allows for easy mocking in tests.
+	NewLockHandleFunc = func(client RaftLockClient, lockID, clientID string) (LockHandle, error) {
+		return NewLockHandle(client, lockID, clientID)
+	}
+
+	// NewAutoRenewerFunc is a function variable for mocking the auto-renewer.
+	NewAutoRenewerFunc = func(handle LockHandle, interval, ttl time.Duration, opts ...AutoRenewerOption) (AutoRenewer, error) {
+		return NewAutoRenewer(handle, interval, ttl, opts...)
+	}
+)
+
+// DoWithLock acquires a lock, executes a function, and then releases the lock.
 func DoWithLock(ctx context.Context, client RaftLockClient, lockID, clientID string, ttl time.Duration, fn func(ctx context.Context) error) (err error) {
-	handle, err := NewLockHandle(client, lockID, clientID)
-	if err != nil {
-		return fmt.Errorf("failed to create lock handle: %w", err)
-	}
-	defer func() {
-		releaseErr := handle.Close(context.Background()) // Use background context for cleanup
-		if err == nil {
-			err = releaseErr
-		}
-	}()
-
-	if err = handle.Acquire(ctx, ttl, false); err != nil {
-		return err
-	}
-
-	return fn(ctx)
-}
-
-// RunWithLock executes a function while holding a lock with automatic renewal.
-// The provided context is passed to the executed function and also controls the auto-renewer's lifecycle.
-func RunWithLock(ctx context.Context, client RaftLockClient, lockID, clientID string, ttl, renewInterval time.Duration, fn func(ctx context.Context) error) (err error) {
-	handle, err := NewLockHandle(client, lockID, clientID)
+	handle, err := NewLockHandleFunc(client, lockID, clientID)
 	if err != nil {
 		return fmt.Errorf("failed to create lock handle: %w", err)
 	}
@@ -45,22 +35,43 @@ func RunWithLock(ctx context.Context, client RaftLockClient, lockID, clientID st
 		return err
 	}
 
-	renewer, err := NewAutoRenewer(handle, renewInterval, ttl)
+	return fn(ctx)
+}
+
+// RunWithLock is similar to DoWithLock but also sets up an auto-renewer.
+func RunWithLock(ctx context.Context, client RaftLockClient, lockID, clientID string, ttl, interval time.Duration, fn func(context.Context) error) (err error) {
+	handle, err := NewLockHandleFunc(client, lockID, clientID)
+	if err != nil {
+		return fmt.Errorf("failed to create lock handle: %w", err)
+	}
+
+	defer func() {
+		closeErr := handle.Close(context.Background())
+		if err == nil {
+			err = closeErr
+		}
+	}()
+
+	if err = handle.Acquire(ctx, ttl, true); err != nil {
+		return err
+	}
+
+	renewer, err := NewAutoRenewerFunc(handle, interval, ttl)
 	if err != nil {
 		return fmt.Errorf("failed to create auto-renewer: %w", err)
 	}
 
-	renewCtx, cancelRenew := context.WithCancel(ctx)
-	defer cancelRenew()
+	renewerCtx, cancel := context.WithCancel(ctx)
+	renewer.Start(renewerCtx)
 
-	renewer.Start(renewCtx)
+	defer func() {
+		stopErr := renewer.Stop(context.Background())
 
-	fnErr := fn(ctx)
+		cancel()
+		if err == nil {
+			err = stopErr
+		}
+	}()
 
-	stopErr := renewer.Stop(context.Background())
-
-	if fnErr != nil {
-		return fnErr
-	}
-	return stopErr
+	return fn(renewerCtx)
 }
