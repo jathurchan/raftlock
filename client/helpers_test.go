@@ -640,3 +640,75 @@ func (m *mockLockClient) GetLastRenewCall() *RenewCall {
 	}
 	return &m.RenewCalls[len(m.RenewCalls)-1]
 }
+
+type mockLockHandle struct {
+	mu            sync.RWMutex
+	held          bool
+	renewErr      error
+	renewCalls    int
+	renewedTTLs   []time.Duration
+	renewContexts []context.Context
+}
+
+func newMockLockHandle() *mockLockHandle {
+	return &mockLockHandle{
+		held: true,
+	}
+}
+
+func (m *mockLockHandle) Acquire(ctx context.Context, ttl time.Duration, wait bool) error {
+	return nil
+}
+
+func (m *mockLockHandle) Release(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockLockHandle) Renew(ctx context.Context, newTTL time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.renewCalls++
+	m.renewedTTLs = append(m.renewedTTLs, newTTL)
+	m.renewContexts = append(m.renewContexts, ctx)
+	return m.renewErr
+}
+
+func (m *mockLockHandle) IsHeld() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.held
+}
+
+func (m *mockLockHandle) Lock() *Lock {
+	return nil
+}
+
+func (m *mockLockHandle) Close(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockLockHandle) setHeld(held bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.held = held
+}
+
+func (m *mockLockHandle) setRenewError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.renewErr = err
+}
+
+func (m *mockLockHandle) getRenewCalls() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.renewCalls
+}
+
+func (m *mockLockHandle) getRenewedTTLs() []time.Duration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]time.Duration, len(m.renewedTTLs))
+	copy(result, m.renewedTTLs)
+	return result
+}
