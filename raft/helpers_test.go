@@ -24,6 +24,7 @@ type mockStorage struct {
 	snapshotAttempted bool
 	snapshotSaved     bool
 	hookLoadSnapshot  func(ctx context.Context) (types.SnapshotMetadata, []byte, error)
+	hookSaveSnapshot  func()
 
 	hookGetLogEntry   func(index types.Index)
 	hookGetLogEntries func(start, end types.Index) []types.LogEntry
@@ -36,6 +37,12 @@ func newMockStorage() *mockStorage {
 		log:     make([]types.LogEntry, 0),
 		failOps: make(map[string]error),
 	}
+}
+
+func (ms *mockStorage) getSnapshotAttempted() bool {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	return ms.snapshotAttempted
 }
 
 func (ms *mockStorage) setFailure(op string, err error) {
@@ -260,15 +267,20 @@ func (ms *mockStorage) TruncateLogPrefix(ctx context.Context, index types.Index)
 }
 
 func (ms *mockStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
-	ms.mu.Lock()
-	ms.snapshotAttempted = true
-	ms.mu.Unlock()
+
+	if ms.hookSaveSnapshot != nil {
+		defer ms.hookSaveSnapshot()
+	}
+
 	if err := ms.checkFailure("SaveSnapshot"); err != nil {
 		return err
 	}
+
 	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	ms.snapshotAttempted = true
 	ms.snapshotSaved = true
-	ms.mu.Unlock()
 	return nil
 }
 
@@ -330,6 +342,7 @@ func (ms *mockStorage) GetMetricsSummary() string {
 }
 
 type mockNetworkManager struct {
+	mu                 sync.RWMutex // Protects access to function pointers
 	requestVoteSuccess bool
 	requestVoteReplies map[types.NodeID]*types.RequestVoteReply
 
@@ -339,7 +352,6 @@ type mockNetworkManager struct {
 	sendInstallSnapshotFunc func(context.Context, types.NodeID, *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)
 	appendEntriesCallCount  int
 	heartbeatCallCount      int
-	mu                      sync.Mutex
 
 	wg *sync.WaitGroup
 
@@ -368,6 +380,12 @@ func newMockNetworkManager() *mockNetworkManager {
 	}
 }
 
+func (m *mockNetworkManager) setSendAppendEntriesFunc(f func(context.Context, types.NodeID, *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sendAppendEntriesFunc = f
+}
+
 func (m *mockNetworkManager) Start() error {
 	if m.startFunc != nil {
 		return m.startFunc()
@@ -384,8 +402,12 @@ func (m *mockNetworkManager) Stop() error {
 }
 
 func (m *mockNetworkManager) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
-	if m.sendRequestVoteFunc != nil {
-		return m.sendRequestVoteFunc(ctx, target, args)
+	m.mu.RLock()
+	fn := m.sendRequestVoteFunc
+	m.mu.RUnlock()
+
+	if fn != nil {
+		return fn(ctx, target, args)
 	}
 	if !m.requestVoteSuccess {
 		return nil, fmt.Errorf("mock network error")
@@ -404,24 +426,29 @@ func (m *mockNetworkManager) SendAppendEntries(ctx context.Context, target types
 	if len(args.Entries) == 0 {
 		m.heartbeatCallCount++
 	}
+	fn := m.sendAppendEntriesFunc
 	m.mu.Unlock()
 
 	if m.wg != nil {
 		defer m.wg.Done()
 	}
 
-	if m.sendAppendEntriesFunc == nil {
+	if fn == nil {
 		return nil, fmt.Errorf("sendAppendEntriesFunc not set")
 	}
 
-	return m.sendAppendEntriesFunc(ctx, target, args)
+	return fn(ctx, target, args)
 }
 
 func (m *mockNetworkManager) SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
-	if m.sendInstallSnapshotFunc == nil {
+	m.mu.RLock()
+	fn := m.sendInstallSnapshotFunc
+	m.mu.RUnlock()
+
+	if fn == nil {
 		return &types.InstallSnapshotReply{Term: args.Term}, nil
 	}
-	return m.sendInstallSnapshotFunc(ctx, target, args)
+	return fn(ctx, target, args)
 }
 
 func (m *mockNetworkManager) PeerStatus(peer types.NodeID) (types.PeerConnectionStatus, error) {

@@ -404,7 +404,7 @@ func TestRaftSnapshot_SnapshotThresholdReached(t *testing.T) {
 	sm.Tick(context.Background())
 	time.Sleep(50 * time.Millisecond)
 
-	if !mockStorage.snapshotAttempted {
+	if !mockStorage.getSnapshotAttempted() {
 		t.Errorf("Expected snapshot to be attempted")
 	}
 }
