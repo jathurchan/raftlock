@@ -97,20 +97,26 @@ func NewAutoRenewer(handle LockHandle, interval, ttl time.Duration, opts ...Auto
 
 // Start begins the auto-renewal process in a background goroutine.
 func (r *autoRenewer) Start(ctx context.Context) {
+	r.errMu.Lock()
 	r.ctx, r.cancel = context.WithCancel(ctx)
+	r.errMu.Unlock()
+
 	r.wg.Add(1)
 	go r.run()
 }
 
 // Stop gracefully stops the auto-renewal process.
 func (r *autoRenewer) Stop(ctx context.Context) error {
-	if r.cancel == nil {
+	r.errMu.RLock()
+	cancel := r.cancel
+	r.errMu.RUnlock()
+
+	if cancel == nil {
 		return nil // Not started
 	}
 
-	r.cancel()
+	cancel()
 
-	// Wait for the goroutine to finish, with a timeout
 	done := make(chan struct{})
 	go func() {
 		r.wg.Wait()
@@ -127,7 +133,11 @@ func (r *autoRenewer) Stop(ctx context.Context) error {
 
 // Done returns a channel that is closed when the renewer stops.
 func (r *autoRenewer) Done() <-chan struct{} {
-	if r.ctx == nil {
+	r.errMu.RLock()
+	ctx := r.ctx
+	r.errMu.RUnlock()
+
+	if ctx == nil {
 		// Return a closed channel if Start hasn't been called.
 		closedCh := make(chan struct{})
 		close(closedCh)
