@@ -48,11 +48,20 @@ func TestNewRaftLockClientBuilder(t *testing.T) {
 
 			if len(tt.endpoints) > 0 {
 				if len(builder.config.Endpoints) != len(tt.endpoints) {
-					t.Errorf("config.Endpoints length = %d, want %d", len(builder.config.Endpoints), len(tt.endpoints))
+					t.Errorf(
+						"config.Endpoints length = %d, want %d",
+						len(builder.config.Endpoints),
+						len(tt.endpoints),
+					)
 				}
 				for i, ep := range tt.endpoints {
 					if builder.config.Endpoints[i] != ep {
-						t.Errorf("config.Endpoints[%d] = %s, want %s", i, builder.config.Endpoints[i], ep)
+						t.Errorf(
+							"config.Endpoints[%d] = %s, want %s",
+							i,
+							builder.config.Endpoints[i],
+							ep,
+						)
 					}
 				}
 			}
@@ -101,11 +110,20 @@ func TestRaftLockClientBuilder_WithEndpoints(t *testing.T) {
 			}
 
 			if len(builder.config.Endpoints) != len(tt.new) {
-				t.Errorf("config.Endpoints length = %d, want %d", len(builder.config.Endpoints), len(tt.new))
+				t.Errorf(
+					"config.Endpoints length = %d, want %d",
+					len(builder.config.Endpoints),
+					len(tt.new),
+				)
 			}
 			for i, ep := range tt.new {
 				if builder.config.Endpoints[i] != ep {
-					t.Errorf("config.Endpoints[%d] = %s, want %s", i, builder.config.Endpoints[i], ep)
+					t.Errorf(
+						"config.Endpoints[%d] = %s, want %s",
+						i,
+						builder.config.Endpoints[i],
+						ep,
+					)
 				}
 			}
 		})
@@ -164,7 +182,11 @@ func TestRaftLockClientBuilder_WithTimeouts(t *testing.T) {
 			}
 
 			if builder.config.RequestTimeout != tt.wantRequest {
-				t.Errorf("RequestTimeout = %v, want %v", builder.config.RequestTimeout, tt.wantRequest)
+				t.Errorf(
+					"RequestTimeout = %v, want %v",
+					builder.config.RequestTimeout,
+					tt.wantRequest,
+				)
 			}
 		})
 	}
@@ -205,11 +227,19 @@ func TestRaftLockClientBuilder_WithKeepAlive(t *testing.T) {
 			}
 
 			if builder.config.KeepAlive.Timeout != tt.timeout {
-				t.Errorf("KeepAlive.Timeout = %v, want %v", builder.config.KeepAlive.Timeout, tt.timeout)
+				t.Errorf(
+					"KeepAlive.Timeout = %v, want %v",
+					builder.config.KeepAlive.Timeout,
+					tt.timeout,
+				)
 			}
 
 			if builder.config.KeepAlive.PermitWithoutStream != tt.permitWithoutStream {
-				t.Errorf("KeepAlive.PermitWithoutStream = %v, want %v", builder.config.KeepAlive.PermitWithoutStream, tt.permitWithoutStream)
+				t.Errorf(
+					"KeepAlive.PermitWithoutStream = %v, want %v",
+					builder.config.KeepAlive.PermitWithoutStream,
+					tt.permitWithoutStream,
+				)
 			}
 		})
 	}
@@ -233,27 +263,51 @@ func TestRaftLockClientBuilder_WithRetryPolicy(t *testing.T) {
 	}
 
 	if builder.config.RetryPolicy.MaxRetries != customPolicy.MaxRetries {
-		t.Errorf("RetryPolicy.MaxRetries = %d, want %d", builder.config.RetryPolicy.MaxRetries, customPolicy.MaxRetries)
+		t.Errorf(
+			"RetryPolicy.MaxRetries = %d, want %d",
+			builder.config.RetryPolicy.MaxRetries,
+			customPolicy.MaxRetries,
+		)
 	}
 
 	if builder.config.RetryPolicy.InitialBackoff != customPolicy.InitialBackoff {
-		t.Errorf("RetryPolicy.InitialBackoff = %v, want %v", builder.config.RetryPolicy.InitialBackoff, customPolicy.InitialBackoff)
+		t.Errorf(
+			"RetryPolicy.InitialBackoff = %v, want %v",
+			builder.config.RetryPolicy.InitialBackoff,
+			customPolicy.InitialBackoff,
+		)
 	}
 
 	if builder.config.RetryPolicy.MaxBackoff != customPolicy.MaxBackoff {
-		t.Errorf("RetryPolicy.MaxBackoff = %v, want %v", builder.config.RetryPolicy.MaxBackoff, customPolicy.MaxBackoff)
+		t.Errorf(
+			"RetryPolicy.MaxBackoff = %v, want %v",
+			builder.config.RetryPolicy.MaxBackoff,
+			customPolicy.MaxBackoff,
+		)
 	}
 
 	if builder.config.RetryPolicy.BackoffMultiplier != customPolicy.BackoffMultiplier {
-		t.Errorf("RetryPolicy.BackoffMultiplier = %f, want %f", builder.config.RetryPolicy.BackoffMultiplier, customPolicy.BackoffMultiplier)
+		t.Errorf(
+			"RetryPolicy.BackoffMultiplier = %f, want %f",
+			builder.config.RetryPolicy.BackoffMultiplier,
+			customPolicy.BackoffMultiplier,
+		)
 	}
 
 	if builder.config.RetryPolicy.JitterFactor != customPolicy.JitterFactor {
-		t.Errorf("RetryPolicy.JitterFactor = %f, want %f", builder.config.RetryPolicy.JitterFactor, customPolicy.JitterFactor)
+		t.Errorf(
+			"RetryPolicy.JitterFactor = %f, want %f",
+			builder.config.RetryPolicy.JitterFactor,
+			customPolicy.JitterFactor,
+		)
 	}
 
 	if len(builder.config.RetryPolicy.RetryableErrors) != len(customPolicy.RetryableErrors) {
-		t.Errorf("RetryPolicy.RetryableErrors length = %d, want %d", len(builder.config.RetryPolicy.RetryableErrors), len(customPolicy.RetryableErrors))
+		t.Errorf(
+			"RetryPolicy.RetryableErrors length = %d, want %d",
+			len(builder.config.RetryPolicy.RetryableErrors),
+			len(customPolicy.RetryableErrors),
+		)
 	}
 }
 
@@ -307,26 +361,47 @@ func TestRaftLockClientBuilder_WithRetryOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := NewRaftLockClientBuilder([]string{"localhost:8080"})
-			result := builder.WithRetryOptions(tt.maxRetries, tt.initialBackoff, tt.maxBackoff, tt.multiplier)
+			result := builder.WithRetryOptions(
+				tt.maxRetries,
+				tt.initialBackoff,
+				tt.maxBackoff,
+				tt.multiplier,
+			)
 
 			if result != builder {
 				t.Error("WithRetryOptions should return the same builder instance")
 			}
 
 			if builder.config.RetryPolicy.MaxRetries != tt.wantMaxRetries {
-				t.Errorf("RetryPolicy.MaxRetries = %d, want %d", builder.config.RetryPolicy.MaxRetries, tt.wantMaxRetries)
+				t.Errorf(
+					"RetryPolicy.MaxRetries = %d, want %d",
+					builder.config.RetryPolicy.MaxRetries,
+					tt.wantMaxRetries,
+				)
 			}
 
 			if builder.config.RetryPolicy.InitialBackoff != tt.wantInitialBackoff {
-				t.Errorf("RetryPolicy.InitialBackoff = %v, want %v", builder.config.RetryPolicy.InitialBackoff, tt.wantInitialBackoff)
+				t.Errorf(
+					"RetryPolicy.InitialBackoff = %v, want %v",
+					builder.config.RetryPolicy.InitialBackoff,
+					tt.wantInitialBackoff,
+				)
 			}
 
 			if builder.config.RetryPolicy.MaxBackoff != tt.wantMaxBackoff {
-				t.Errorf("RetryPolicy.MaxBackoff = %v, want %v", builder.config.RetryPolicy.MaxBackoff, tt.wantMaxBackoff)
+				t.Errorf(
+					"RetryPolicy.MaxBackoff = %v, want %v",
+					builder.config.RetryPolicy.MaxBackoff,
+					tt.wantMaxBackoff,
+				)
 			}
 
 			if builder.config.RetryPolicy.BackoffMultiplier != tt.wantMultiplier {
-				t.Errorf("RetryPolicy.BackoffMultiplier = %f, want %f", builder.config.RetryPolicy.BackoffMultiplier, tt.wantMultiplier)
+				t.Errorf(
+					"RetryPolicy.BackoffMultiplier = %f, want %f",
+					builder.config.RetryPolicy.BackoffMultiplier,
+					tt.wantMultiplier,
+				)
 			}
 		})
 	}
@@ -339,8 +414,12 @@ func TestRaftLockClientBuilder_WithRetryableErrors(t *testing.T) {
 		wantLength int
 	}{
 		{
-			name:       "multiple error codes",
-			codes:      []pb.ErrorCode{pb.ErrorCode_TIMEOUT, pb.ErrorCode_UNAVAILABLE, pb.ErrorCode_NOT_LEADER},
+			name: "multiple error codes",
+			codes: []pb.ErrorCode{
+				pb.ErrorCode_TIMEOUT,
+				pb.ErrorCode_UNAVAILABLE,
+				pb.ErrorCode_NOT_LEADER,
+			},
 			wantLength: 3,
 		},
 		{
@@ -368,12 +447,21 @@ func TestRaftLockClientBuilder_WithRetryableErrors(t *testing.T) {
 			}
 
 			if len(builder.config.RetryPolicy.RetryableErrors) != tt.wantLength {
-				t.Errorf("RetryableErrors length = %d, want %d", len(builder.config.RetryPolicy.RetryableErrors), tt.wantLength)
+				t.Errorf(
+					"RetryableErrors length = %d, want %d",
+					len(builder.config.RetryPolicy.RetryableErrors),
+					tt.wantLength,
+				)
 			}
 
 			for i, code := range tt.codes {
 				if builder.config.RetryPolicy.RetryableErrors[i] != code {
-					t.Errorf("RetryableErrors[%d] = %v, want %v", i, builder.config.RetryPolicy.RetryableErrors[i], code)
+					t.Errorf(
+						"RetryableErrors[%d] = %v, want %v",
+						i,
+						builder.config.RetryPolicy.RetryableErrors[i],
+						code,
+					)
 				}
 			}
 		})
@@ -685,7 +773,10 @@ func TestRaftLockClientBuilder_MethodChaining(t *testing.T) {
 	}
 
 	if len(builder.config.RetryPolicy.RetryableErrors) != 2 {
-		t.Errorf("RetryableErrors length = %d, want 2", len(builder.config.RetryPolicy.RetryableErrors))
+		t.Errorf(
+			"RetryableErrors length = %d, want 2",
+			len(builder.config.RetryPolicy.RetryableErrors),
+		)
 	}
 
 	if !builder.config.EnableMetrics {

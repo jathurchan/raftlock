@@ -19,7 +19,11 @@ func createValidPeers() map[types.NodeID]raft.PeerConfig {
 	}
 }
 
-func assertBuilderChaining(t *testing.T, original, returned *RaftLockServerBuilder, methodName string) {
+func assertBuilderChaining(
+	t *testing.T,
+	original, returned *RaftLockServerBuilder,
+	methodName string,
+) {
 	t.Helper()
 	if returned != original {
 		t.Errorf("%s should return the same builder instance for method chaining", methodName)
@@ -122,7 +126,11 @@ func TestRaftLockServerBuilder_WithListenAddress(t *testing.T) {
 			assertBuilderChaining(t, builder, result, "WithListenAddress")
 
 			if builder.config.ListenAddress != tt.address {
-				t.Errorf("expected ListenAddress %q, got %q", tt.address, builder.config.ListenAddress)
+				t.Errorf(
+					"expected ListenAddress %q, got %q",
+					tt.address,
+					builder.config.ListenAddress,
+				)
 			}
 
 			if !builder.hasListenAddr {
@@ -243,17 +251,27 @@ func TestRaftLockServerBuilder_WithRaftConfig(t *testing.T) {
 		assertBuilderChaining(t, builder, result, "WithRaftConfig")
 
 		if builder.config.RaftConfig.ID != customConfig.ID {
-			t.Errorf("expected RaftConfig.ID %q, got %q", customConfig.ID, builder.config.RaftConfig.ID)
+			t.Errorf(
+				"expected RaftConfig.ID %q, got %q",
+				customConfig.ID,
+				builder.config.RaftConfig.ID,
+			)
 		}
 
 		if builder.config.RaftConfig.Options.ElectionTickCount != customConfig.Options.ElectionTickCount {
-			t.Errorf("expected ElectionTickCount %d, got %d",
-				customConfig.Options.ElectionTickCount, builder.config.RaftConfig.Options.ElectionTickCount)
+			t.Errorf(
+				"expected ElectionTickCount %d, got %d",
+				customConfig.Options.ElectionTickCount,
+				builder.config.RaftConfig.Options.ElectionTickCount,
+			)
 		}
 
 		if builder.config.RaftConfig.FeatureFlags.EnableReadIndex != customConfig.FeatureFlags.EnableReadIndex {
-			t.Errorf("expected EnableReadIndex %v, got %v",
-				customConfig.FeatureFlags.EnableReadIndex, builder.config.RaftConfig.FeatureFlags.EnableReadIndex)
+			t.Errorf(
+				"expected EnableReadIndex %v, got %v",
+				customConfig.FeatureFlags.EnableReadIndex,
+				builder.config.RaftConfig.FeatureFlags.EnableReadIndex,
+			)
 		}
 	})
 }
@@ -270,13 +288,25 @@ func TestRaftLockServerBuilder_WithTimeouts(t *testing.T) {
 		assertBuilderChaining(t, builder, result, "WithTimeouts")
 
 		if builder.config.RequestTimeout != requestTimeout {
-			t.Errorf("expected RequestTimeout %v, got %v", requestTimeout, builder.config.RequestTimeout)
+			t.Errorf(
+				"expected RequestTimeout %v, got %v",
+				requestTimeout,
+				builder.config.RequestTimeout,
+			)
 		}
 		if builder.config.ShutdownTimeout != shutdownTimeout {
-			t.Errorf("expected ShutdownTimeout %v, got %v", shutdownTimeout, builder.config.ShutdownTimeout)
+			t.Errorf(
+				"expected ShutdownTimeout %v, got %v",
+				shutdownTimeout,
+				builder.config.ShutdownTimeout,
+			)
 		}
 		if builder.config.RedirectTimeout != redirectTimeout {
-			t.Errorf("expected RedirectTimeout %v, got %v", redirectTimeout, builder.config.RedirectTimeout)
+			t.Errorf(
+				"expected RedirectTimeout %v, got %v",
+				redirectTimeout,
+				builder.config.RedirectTimeout,
+			)
 		}
 	})
 
@@ -326,13 +356,25 @@ func TestRaftLockServerBuilder_WithLimits(t *testing.T) {
 		assertBuilderChaining(t, builder, result, "WithLimits")
 
 		if builder.config.MaxRequestSize != maxRequestSize {
-			t.Errorf("expected MaxRequestSize %d, got %d", maxRequestSize, builder.config.MaxRequestSize)
+			t.Errorf(
+				"expected MaxRequestSize %d, got %d",
+				maxRequestSize,
+				builder.config.MaxRequestSize,
+			)
 		}
 		if builder.config.MaxResponseSize != maxResponseSize {
-			t.Errorf("expected MaxResponseSize %d, got %d", maxResponseSize, builder.config.MaxResponseSize)
+			t.Errorf(
+				"expected MaxResponseSize %d, got %d",
+				maxResponseSize,
+				builder.config.MaxResponseSize,
+			)
 		}
 		if builder.config.MaxConcurrentReqs != maxConcurrentReqs {
-			t.Errorf("expected MaxConcurrentReqs %d, got %d", maxConcurrentReqs, builder.config.MaxConcurrentReqs)
+			t.Errorf(
+				"expected MaxConcurrentReqs %d, got %d",
+				maxConcurrentReqs,
+				builder.config.MaxConcurrentReqs,
+			)
 		}
 	})
 
@@ -429,10 +471,18 @@ func TestRaftLockServerBuilder_WithHealthCheck(t *testing.T) {
 		assertBuilderChaining(t, builder, result, "WithHealthCheck")
 
 		if builder.config.HealthCheckInterval != interval {
-			t.Errorf("expected HealthCheckInterval %v, got %v", interval, builder.config.HealthCheckInterval)
+			t.Errorf(
+				"expected HealthCheckInterval %v, got %v",
+				interval,
+				builder.config.HealthCheckInterval,
+			)
 		}
 		if builder.config.HealthCheckTimeout != timeout {
-			t.Errorf("expected HealthCheckTimeout %v, got %v", timeout, builder.config.HealthCheckTimeout)
+			t.Errorf(
+				"expected HealthCheckTimeout %v, got %v",
+				timeout,
+				builder.config.HealthCheckTimeout,
+			)
 		}
 	})
 
@@ -562,7 +612,11 @@ func TestRaftLockServerBuilder_prepareConfig(t *testing.T) {
 		builder.prepareConfig()
 
 		if builder.config.RaftConfig.ID != nodeID {
-			t.Errorf("expected RaftConfig.ID to be set to %q, got %q", nodeID, builder.config.RaftConfig.ID)
+			t.Errorf(
+				"expected RaftConfig.ID to be set to %q, got %q",
+				nodeID,
+				builder.config.RaftConfig.ID,
+			)
 		}
 	})
 
@@ -576,7 +630,11 @@ func TestRaftLockServerBuilder_prepareConfig(t *testing.T) {
 		builder.prepareConfig()
 
 		if builder.config.RaftConfig.ID != existingID {
-			t.Errorf("expected RaftConfig.ID to remain %q, got %q", existingID, builder.config.RaftConfig.ID)
+			t.Errorf(
+				"expected RaftConfig.ID to remain %q, got %q",
+				existingID,
+				builder.config.RaftConfig.ID,
+			)
 		}
 	})
 
@@ -771,18 +829,22 @@ func TestRaftLockServerQuickBuild(t *testing.T) {
 			expectErr bool
 		}{
 			{
-				name:      "empty node ID",
-				nodeID:    "",
-				addr:      "localhost:8080",
-				peers:     map[types.NodeID]raft.PeerConfig{"test": {ID: "test", Address: "localhost:8080"}},
+				name:   "empty node ID",
+				nodeID: "",
+				addr:   "localhost:8080",
+				peers: map[types.NodeID]raft.PeerConfig{
+					"test": {ID: "test", Address: "localhost:8080"},
+				},
 				dataDir:   "/tmp/test",
 				expectErr: true,
 			},
 			{
-				name:      "empty data dir",
-				nodeID:    "test",
-				addr:      "localhost:8080",
-				peers:     map[types.NodeID]raft.PeerConfig{"test": {ID: "test", Address: "localhost:8080"}},
+				name:   "empty data dir",
+				nodeID: "test",
+				addr:   "localhost:8080",
+				peers: map[types.NodeID]raft.PeerConfig{
+					"test": {ID: "test", Address: "localhost:8080"},
+				},
 				dataDir:   "",
 				expectErr: true,
 			},

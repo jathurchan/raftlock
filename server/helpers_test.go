@@ -257,7 +257,11 @@ func (m *mockServerMetrics) IncrServerError(method string, errorType string)    
 func (m *mockServerMetrics) IncrQueueOverflow(queueType string)                           {}
 func (m *mockServerMetrics) IncrLockExpiration()                                          {}
 func (m *mockServerMetrics) ObserveRequestLatency(method string, latency time.Duration)   {}
-func (m *mockServerMetrics) ObserveRaftProposalLatency(operation types.LockOperation, latency time.Duration) {
+
+func (m *mockServerMetrics) ObserveRaftProposalLatency(
+	operation types.LockOperation,
+	latency time.Duration,
+) {
 }
 func (m *mockServerMetrics) ObserveQueueLength(queueType string, length int)  {}
 func (m *mockServerMetrics) ObserveRequestSize(method string, sizeBytes int)  {}
@@ -290,7 +294,10 @@ func (m *mockRaft) Stop(ctx context.Context) error { return nil }
 
 func (m *mockRaft) Tick(ctx context.Context) {}
 
-func (m *mockRaft) Propose(ctx context.Context, command []byte) (types.Index, types.Term, bool, error) {
+func (m *mockRaft) Propose(
+	ctx context.Context,
+	command []byte,
+) (types.Index, types.Term, bool, error) {
 	if m.proposeFunc != nil {
 		return m.proposeFunc(ctx, command)
 	}
@@ -331,15 +338,24 @@ func (m *mockRaft) LeaderChangeChannel() <-chan types.NodeID {
 	return m.leaderChangeCh
 }
 
-func (m *mockRaft) RequestVote(ctx context.Context, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+func (m *mockRaft) RequestVote(
+	ctx context.Context,
+	args *types.RequestVoteArgs,
+) (*types.RequestVoteReply, error) {
 	return nil, nil
 }
 
-func (m *mockRaft) AppendEntries(ctx context.Context, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+func (m *mockRaft) AppendEntries(
+	ctx context.Context,
+	args *types.AppendEntriesArgs,
+) (*types.AppendEntriesReply, error) {
 	return nil, nil
 }
 
-func (m *mockRaft) InstallSnapshot(ctx context.Context, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+func (m *mockRaft) InstallSnapshot(
+	ctx context.Context,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) {
 	return nil, nil
 }
 
@@ -351,7 +367,11 @@ type mockLockManager struct {
 	tickFunc     func(ctx context.Context) int
 }
 
-func (m *mockLockManager) Apply(ctx context.Context, index types.Index, cmdData []byte) (any, error) {
+func (m *mockLockManager) Apply(
+	ctx context.Context,
+	index types.Index,
+	cmdData []byte,
+) (any, error) {
 	if m.applyFunc != nil {
 		return m.applyFunc(ctx, index, cmdData)
 	}
@@ -362,32 +382,69 @@ func (m *mockLockManager) Snapshot(ctx context.Context) (types.Index, []byte, er
 	return 0, []byte("{}"), nil
 }
 
-func (m *mockLockManager) RestoreSnapshot(ctx context.Context, lastIncludedIndex types.Index, lastIncludedTerm types.Term, snapshotData []byte) error {
+func (m *mockLockManager) RestoreSnapshot(
+	ctx context.Context,
+	lastIncludedIndex types.Index,
+	lastIncludedTerm types.Term,
+	snapshotData []byte,
+) error {
 	m.locks = make(map[types.LockID]*types.LockInfo)
 	return nil
 }
 
-func (m *mockLockManager) ApplyAcquire(ctx context.Context, lockID types.LockID, clientID types.ClientID, ttl time.Duration, version types.Index) (*types.LockInfo, error) {
+func (m *mockLockManager) ApplyAcquire(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	ttl time.Duration,
+	version types.Index,
+) (*types.LockInfo, error) {
 	return nil, nil
 }
 
-func (m *mockLockManager) ApplyRelease(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error) {
+func (m *mockLockManager) ApplyRelease(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (bool, error) {
 	return true, nil
 }
 
-func (m *mockLockManager) ApplyRenew(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index, ttl time.Duration) error {
+func (m *mockLockManager) ApplyRenew(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+	ttl time.Duration,
+) error {
 	return nil
 }
 
-func (m *mockLockManager) ApplyWaitQueue(ctx context.Context, lockID types.LockID, clientID types.ClientID, timeout time.Duration, version types.Index, priority int) (int, error) {
+func (m *mockLockManager) ApplyWaitQueue(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	timeout time.Duration,
+	version types.Index,
+	priority int,
+) (int, error) {
 	return 0, nil
 }
 
-func (m *mockLockManager) ApplyCancelWait(ctx context.Context, lockID types.LockID, clientID types.ClientID, version types.Index) (bool, error) {
+func (m *mockLockManager) ApplyCancelWait(
+	ctx context.Context,
+	lockID types.LockID,
+	clientID types.ClientID,
+	version types.Index,
+) (bool, error) {
 	return true, nil
 }
 
-func (m *mockLockManager) GetLockInfo(ctx context.Context, lockID types.LockID) (*types.LockInfo, error) {
+func (m *mockLockManager) GetLockInfo(
+	ctx context.Context,
+	lockID types.LockID,
+) (*types.LockInfo, error) {
 	if m.getInfoFunc != nil {
 		return m.getInfoFunc(ctx, lockID)
 	}
@@ -397,7 +454,12 @@ func (m *mockLockManager) GetLockInfo(ctx context.Context, lockID types.LockID) 
 	return nil, lock.ErrLockNotFound
 }
 
-func (m *mockLockManager) GetLocks(ctx context.Context, filter lock.LockFilter, limit int, offset int) ([]*types.LockInfo, int, error) {
+func (m *mockLockManager) GetLocks(
+	ctx context.Context,
+	filter lock.LockFilter,
+	limit int,
+	offset int,
+) ([]*types.LockInfo, int, error) {
 	if m.getLocksFunc != nil {
 		return m.getLocksFunc(ctx, filter, limit, offset)
 	}
@@ -437,7 +499,10 @@ func (m *mockStorage) AppendLogEntries(ctx context.Context, entries []types.LogE
 	return nil
 }
 
-func (m *mockStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+func (m *mockStorage) GetLogEntries(
+	ctx context.Context,
+	start, end types.Index,
+) ([]types.LogEntry, error) {
 	return []types.LogEntry{}, nil
 }
 
@@ -453,7 +518,11 @@ func (m *mockStorage) TruncateLogPrefix(ctx context.Context, index types.Index) 
 	return nil
 }
 
-func (m *mockStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+func (m *mockStorage) SaveSnapshot(
+	ctx context.Context,
+	metadata types.SnapshotMetadata,
+	data []byte,
+) error {
 	return nil
 }
 
@@ -493,15 +562,27 @@ func (m *mockNetworkManager) Stop() error {
 	return nil
 }
 
-func (m *mockNetworkManager) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+func (m *mockNetworkManager) SendRequestVote(
+	ctx context.Context,
+	target types.NodeID,
+	args *types.RequestVoteArgs,
+) (*types.RequestVoteReply, error) {
 	return nil, nil
 }
 
-func (m *mockNetworkManager) SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+func (m *mockNetworkManager) SendAppendEntries(
+	ctx context.Context,
+	target types.NodeID,
+	args *types.AppendEntriesArgs,
+) (*types.AppendEntriesReply, error) {
 	return nil, nil
 }
 
-func (m *mockNetworkManager) SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+func (m *mockNetworkManager) SendInstallSnapshot(
+	ctx context.Context,
+	target types.NodeID,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) {
 	return nil, nil
 }
 
@@ -531,7 +612,10 @@ func (m *mockProposalTracker) Track(proposal *types.PendingProposal) error {
 
 func (m *mockProposalTracker) HandleAppliedCommand(applyMsg types.ApplyMsg) {}
 
-func (m *mockProposalTracker) HandleSnapshotApplied(snapshotIndex types.Index, snapshotTerm types.Term) {
+func (m *mockProposalTracker) HandleSnapshotApplied(
+	snapshotIndex types.Index,
+	snapshotTerm types.Term,
+) {
 }
 
 func (m *mockProposalTracker) ClientCancel(proposalID types.ProposalID, reason error) bool {
@@ -546,7 +630,9 @@ func (m *mockProposalTracker) GetStats() types.ProposalStats {
 	return types.ProposalStats{}
 }
 
-func (m *mockProposalTracker) GetPendingProposal(proposalID types.ProposalID) (types.PendingProposal, bool) {
+func (m *mockProposalTracker) GetPendingProposal(
+	proposalID types.ProposalID,
+) (types.PendingProposal, bool) {
 	proposal, exists := m.proposals[proposalID]
 	if !exists {
 		return types.PendingProposal{}, false

@@ -385,16 +385,28 @@ func TestAdvancedClient_SetRetryPolicy(t *testing.T) {
 		t.Errorf("expected MaxRetries %d, got %d", newPolicy.MaxRetries, currentPolicy.MaxRetries)
 	}
 	if currentPolicy.InitialBackoff != newPolicy.InitialBackoff {
-		t.Errorf("expected InitialBackoff %v, got %v", newPolicy.InitialBackoff, currentPolicy.InitialBackoff)
+		t.Errorf(
+			"expected InitialBackoff %v, got %v",
+			newPolicy.InitialBackoff,
+			currentPolicy.InitialBackoff,
+		)
 	}
 	if currentPolicy.MaxBackoff != newPolicy.MaxBackoff {
 		t.Errorf("expected MaxBackoff %v, got %v", newPolicy.MaxBackoff, currentPolicy.MaxBackoff)
 	}
 	if currentPolicy.BackoffMultiplier != newPolicy.BackoffMultiplier {
-		t.Errorf("expected BackoffMultiplier %f, got %f", newPolicy.BackoffMultiplier, currentPolicy.BackoffMultiplier)
+		t.Errorf(
+			"expected BackoffMultiplier %f, got %f",
+			newPolicy.BackoffMultiplier,
+			currentPolicy.BackoffMultiplier,
+		)
 	}
 	if currentPolicy.JitterFactor != newPolicy.JitterFactor {
-		t.Errorf("expected JitterFactor %f, got %f", newPolicy.JitterFactor, currentPolicy.JitterFactor)
+		t.Errorf(
+			"expected JitterFactor %f, got %f",
+			newPolicy.JitterFactor,
+			currentPolicy.JitterFactor,
+		)
 	}
 }
 

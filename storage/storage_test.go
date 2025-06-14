@@ -30,8 +30,18 @@ func TestNewFileStorage(t *testing.T) {
 		fileStorage, ok := fs.(*FileStorage)
 		testutil.AssertTrue(t, ok, "Expected *FileStorage type")
 
-		testutil.AssertEqual(t, types.Index(0), fileStorage.FirstLogIndex(), "FirstLogIndex for empty log")
-		testutil.AssertEqual(t, types.Index(0), fileStorage.LastLogIndex(), "LastLogIndex for empty log")
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			fileStorage.FirstLogIndex(),
+			"FirstLogIndex for empty log",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			fileStorage.LastLogIndex(),
+			"LastLogIndex for empty log",
+		)
 
 		status := fileStorage.status.Load().(storageStatus)
 		testutil.AssertEqual(t, storageStatusReady, status)
@@ -45,7 +55,11 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 	t.Run("Success with default options", func(t *testing.T) {
 		tempDir := t.TempDir()
 
-		fs, err := NewFileStorageWithOptions(StorageConfig{Dir: tempDir}, DefaultFileStorageOptions(), logger.NewNoOpLogger())
+		fs, err := NewFileStorageWithOptions(
+			StorageConfig{Dir: tempDir},
+			DefaultFileStorageOptions(),
+			logger.NewNoOpLogger(),
+		)
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertNotNil(t, fs)
@@ -53,8 +67,18 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 		fileStorage, ok := fs.(*FileStorage)
 		testutil.AssertTrue(t, ok, "Expected *FileStorage type")
 
-		testutil.AssertEqual(t, types.Index(0), fileStorage.FirstLogIndex(), "FirstLogIndex for empty log")
-		testutil.AssertEqual(t, types.Index(0), fileStorage.LastLogIndex(), "LastLogIndex for empty log")
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			fileStorage.FirstLogIndex(),
+			"FirstLogIndex for empty log",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			fileStorage.LastLogIndex(),
+			"LastLogIndex for empty log",
+		)
 
 		status := fileStorage.status.Load().(storageStatus)
 		testutil.AssertEqual(t, storageStatusReady, status)
@@ -64,7 +88,11 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 	})
 
 	t.Run("Failure with empty directory", func(t *testing.T) {
-		fs, err := NewFileStorageWithOptions(StorageConfig{Dir: ""}, DefaultFileStorageOptions(), logger.NewNoOpLogger())
+		fs, err := NewFileStorageWithOptions(
+			StorageConfig{Dir: ""},
+			DefaultFileStorageOptions(),
+			logger.NewNoOpLogger(),
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertTrue(t, fs == nil)
@@ -79,7 +107,11 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 		customOpts.Features.EnableBinaryFormat = false
 		customOpts.Features.EnableMetrics = false
 
-		fs, err := NewFileStorageWithOptions(StorageConfig{Dir: tempDir}, customOpts, logger.NewNoOpLogger())
+		fs, err := NewFileStorageWithOptions(
+			StorageConfig{Dir: tempDir},
+			customOpts,
+			logger.NewNoOpLogger(),
+		)
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertNotNil(t, fs)
@@ -91,8 +123,18 @@ func TestNewFileStorageWithOptions(t *testing.T) {
 		testutil.AssertFalse(t, fileStorage.options.Features.EnableBinaryFormat)
 		testutil.AssertFalse(t, fileStorage.options.Features.EnableMetrics)
 
-		testutil.AssertEqual(t, types.Index(0), fileStorage.FirstLogIndex(), "FirstLogIndex for empty log (custom opts)")
-		testutil.AssertEqual(t, types.Index(0), fileStorage.LastLogIndex(), "LastLogIndex for empty log (custom opts)")
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			fileStorage.FirstLogIndex(),
+			"FirstLogIndex for empty log (custom opts)",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			fileStorage.LastLogIndex(),
+			"LastLogIndex for empty log (custom opts)",
+		)
 		status := fileStorage.status.Load().(storageStatus)
 		testutil.AssertEqual(t, storageStatusReady, status)
 
@@ -135,7 +177,11 @@ func TestDefaultFileStorageDeps(t *testing.T) {
 
 		testutil.AssertError(t, err)
 		testutil.AssertEqual(t, "storage directory must be specified", err.Error())
-		testutil.AssertTrue(t, reflect.DeepEqual(deps, fileStorageDeps{}), "Expected empty deps on error")
+		testutil.AssertTrue(
+			t,
+			reflect.DeepEqual(deps, fileStorageDeps{}),
+			"Expected empty deps on error",
+		)
 	})
 
 	t.Run("Serializer selection", func(t *testing.T) {
@@ -168,11 +214,15 @@ func TestNewFileStorage_MkdirError(t *testing.T) {
 	deps := newMockStorageDependencies()
 	deps.fs.mkdirAllErr = errors.New("cannot create dir")
 
-	_, err := newFileStorageWithDeps(StorageConfig{Dir: "/test"}, DefaultFileStorageOptions(), fileStorageDeps{
-		FileSystem: deps.fs,
-		Serializer: deps.serializer,
-		Logger:     deps.logger,
-	})
+	_, err := newFileStorageWithDeps(
+		StorageConfig{Dir: "/test"},
+		DefaultFileStorageOptions(),
+		fileStorageDeps{
+			FileSystem: deps.fs,
+			Serializer: deps.serializer,
+			Logger:     deps.logger,
+		},
+	)
 
 	testutil.AssertError(t, err)
 	testutil.AssertContains(t, err.Error(), "failed to create storage directory")
@@ -310,18 +360,22 @@ func TestNewFileStorageWithDeps(t *testing.T) {
 		deps := newMockStorageDependencies()
 		deps.fs.mkdirAllErr = errors.New("failed to create directory")
 
-		fs, err := newFileStorageWithDeps(StorageConfig{Dir: "/test"}, DefaultFileStorageOptions(), fileStorageDeps{
-			FileSystem:      deps.fs,
-			Serializer:      deps.serializer,
-			LogAppender:     deps.logAppender,
-			LogReader:       deps.logReader,
-			LogRewriter:     deps.logRewriter,
-			IndexService:    deps.indexSvc,
-			MetadataService: deps.metadataSvc,
-			RecoveryService: deps.recoverySvc,
-			SystemInfo:      deps.systemInfo,
-			Logger:          deps.logger,
-		})
+		fs, err := newFileStorageWithDeps(
+			StorageConfig{Dir: "/test"},
+			DefaultFileStorageOptions(),
+			fileStorageDeps{
+				FileSystem:      deps.fs,
+				Serializer:      deps.serializer,
+				LogAppender:     deps.logAppender,
+				LogReader:       deps.logReader,
+				LogRewriter:     deps.logRewriter,
+				IndexService:    deps.indexSvc,
+				MetadataService: deps.metadataSvc,
+				RecoveryService: deps.recoverySvc,
+				SystemInfo:      deps.systemInfo,
+				Logger:          deps.logger,
+			},
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertTrue(t, fs == nil)
@@ -333,18 +387,22 @@ func TestNewFileStorageWithDeps(t *testing.T) {
 		deps := newMockStorageDependencies()
 		deps.recoverySvc.checkForMarkersErr = errors.New("recovery check failed")
 
-		fs, err := newFileStorageWithDeps(StorageConfig{Dir: tempDir}, DefaultFileStorageOptions(), fileStorageDeps{
-			FileSystem:      deps.fs,
-			Serializer:      deps.serializer,
-			LogAppender:     deps.logAppender,
-			LogReader:       deps.logReader,
-			LogRewriter:     deps.logRewriter,
-			IndexService:    deps.indexSvc,
-			MetadataService: deps.metadataSvc,
-			RecoveryService: deps.recoverySvc,
-			SystemInfo:      deps.systemInfo,
-			Logger:          deps.logger,
-		})
+		fs, err := newFileStorageWithDeps(
+			StorageConfig{Dir: tempDir},
+			DefaultFileStorageOptions(),
+			fileStorageDeps{
+				FileSystem:      deps.fs,
+				Serializer:      deps.serializer,
+				LogAppender:     deps.logAppender,
+				LogReader:       deps.logReader,
+				LogRewriter:     deps.logRewriter,
+				IndexService:    deps.indexSvc,
+				MetadataService: deps.metadataSvc,
+				RecoveryService: deps.recoverySvc,
+				SystemInfo:      deps.systemInfo,
+				Logger:          deps.logger,
+			},
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertTrue(t, fs == nil)
@@ -681,8 +739,14 @@ func TestGetLogEntry(t *testing.T) {
 
 		s, _ := newTestStorageBuilder(t).
 			WithDeps(func(deps *mockStorageDependencies) {
-				deps.logReader.AddEntry(types.LogEntry{Index: 5, Term: 2, Command: []byte("cmd5")}, 50)
-				deps.logReader.AddEntry(types.LogEntry{Index: 6, Term: 2, Command: []byte("cmd6")}, 50)
+				deps.logReader.AddEntry(
+					types.LogEntry{Index: 5, Term: 2, Command: []byte("cmd5")},
+					50,
+				)
+				deps.logReader.AddEntry(
+					types.LogEntry{Index: 6, Term: 2, Command: []byte("cmd6")},
+					50,
+				)
 				deps.logReader.AddEntry(targetEntry, 50)
 
 			}).
@@ -999,7 +1063,11 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := s.SaveSnapshot(ctx, types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1}, []byte("data"))
+		err := s.SaveSnapshot(
+			ctx,
+			types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1},
+			[]byte("data"),
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertErrorIs(t, err, context.Canceled)
@@ -1244,7 +1312,8 @@ func TestInitialize_EnsureMetadataError_NonNotExist(t *testing.T) {
 func TestInitialize_RebuildIndexMapError(t *testing.T) {
 	buildIndexErr := errors.New("index build failed")
 	s, _ := newTestStorageBuilder(t).
-		WithOptions(FileStorageOptions{Features: StorageFeatureFlags{EnableIndexMap: true}}). // Enable Index Map
+		WithOptions(FileStorageOptions{Features: StorageFeatureFlags{EnableIndexMap: true}}).
+		// Enable Index Map
 		WithDeps(func(deps *mockStorageDependencies) {
 			deps.indexSvc.BuildFunc = func(logPath string) (buildResult, error) {
 				return buildResult{}, buildIndexErr
@@ -1264,7 +1333,8 @@ func TestInitialize_RebuildIndexMapError(t *testing.T) {
 func TestInitialize_SyncLogStateFromIndexMapError(t *testing.T) {
 	syncErr := errors.New("metadata sync failed")
 	s, _ := newTestStorageBuilder(t).
-		WithOptions(FileStorageOptions{Features: StorageFeatureFlags{EnableIndexMap: true}}). // Enable Index Map
+		WithOptions(FileStorageOptions{Features: StorageFeatureFlags{EnableIndexMap: true}}).
+		// Enable Index Map
 		WithDeps(func(deps *mockStorageDependencies) {
 			deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
 				return 0, 0, syncErr
@@ -1283,11 +1353,16 @@ func TestInitialize_SyncLogStateFromIndexMapError(t *testing.T) {
 
 func TestInitialize_VerifyInMemoryStateError(t *testing.T) {
 	s, _ := newTestStorageBuilder(t).
-		WithOptions(FileStorageOptions{Features: StorageFeatureFlags{EnableIndexMap: true}}). // Enable Index Map
+		WithOptions(FileStorageOptions{Features: StorageFeatureFlags{EnableIndexMap: true}}).
+		// Enable Index Map
 		WithDeps(func(deps *mockStorageDependencies) {
 			// Make GetBounds return different values than the initial state (1, 1)
 			deps.indexSvc.GetBoundsFunc = func(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
-				return boundsResult{NewFirst: 5, NewLast: 10, Changed: true} // Mismatch with initial (1, 1)
+				return boundsResult{
+					NewFirst: 5,
+					NewLast:  10,
+					Changed:  true,
+				} // Mismatch with initial (1, 1)
 			}
 		}).
 		Build()
@@ -1297,7 +1372,11 @@ func TestInitialize_VerifyInMemoryStateError(t *testing.T) {
 	err := s.initialize()
 
 	testutil.AssertError(t, err)
-	testutil.AssertContains(t, err.Error(), "in-memory state inconsistent: expected (5-10), got (1-1)")
+	testutil.AssertContains(
+		t,
+		err.Error(),
+		"in-memory state inconsistent: expected (5-10), got (1-1)",
+	)
 }
 
 func TestMetricsDisabled(t *testing.T) {
@@ -1309,10 +1388,17 @@ func TestMetricsDisabled(t *testing.T) {
 		Build()
 
 	_ = s.SaveState(context.Background(), types.PersistentState{CurrentTerm: 1, VotedFor: "node1"})
-	_ = s.AppendLogEntries(context.Background(), []types.LogEntry{{Index: 2, Term: 1, Command: []byte("cmd2")}})
+	_ = s.AppendLogEntries(
+		context.Background(),
+		[]types.LogEntry{{Index: 2, Term: 1, Command: []byte("cmd2")}},
+	)
 	_, _ = s.GetLogEntry(context.Background(), 1) // first=1, last=2 after append
 	_ = s.TruncateLogSuffix(context.Background(), 2)
-	_ = s.SaveSnapshot(context.Background(), types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1}, []byte("snap"))
+	_ = s.SaveSnapshot(
+		context.Background(),
+		types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1},
+		[]byte("snap"),
+	)
 	_, _, _ = s.LoadSnapshot(context.Background())
 	_ = s.Close()
 
@@ -1322,7 +1408,12 @@ func TestMetricsDisabled(t *testing.T) {
 	summary := s.GetMetricsSummary()
 	testutil.AssertEqual(t, "Storage metrics disabled", summary)
 
-	testutil.AssertEqual(t, uint64(0), s.metrics.appendOps.Load(), "FileStorage appendOps metric should be 0 when metrics are disabled")
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		s.metrics.appendOps.Load(),
+		"FileStorage appendOps metric should be 0 when metrics are disabled",
+	)
 	testutil.AssertEqual(t, uint64(0), s.metrics.stateOps.Load())
 	testutil.AssertEqual(t, uint64(0), s.metrics.readOps.Load())
 	testutil.AssertEqual(t, uint64(0), s.metrics.snapshotSaveOps.Load())
@@ -1359,7 +1450,9 @@ func TestMetricsEnabled(t *testing.T) {
 					return []types.LogEntry{{Index: 2, Term: 1, Command: []byte("cmd2")}}, 10, nil
 				}
 				if start == 1 && end == 2 { // Simulate reading for truncation
-					return []types.LogEntry{{Index: 1, Term: 1, Command: []byte("cmd1-original")}}, 15, nil
+					return []types.LogEntry{
+						{Index: 1, Term: 1, Command: []byte("cmd1-original")},
+					}, 15, nil
 				}
 				return []types.LogEntry{}, 0, ErrIndexOutOfRange // Default mock response
 			}
@@ -1369,13 +1462,21 @@ func TestMetricsEnabled(t *testing.T) {
 			}
 
 			deps.snapshotReader.readFunc = func(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
-				return types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1}, []byte("snap-data"), nil
+				return types.SnapshotMetadata{
+						LastIncludedIndex: 1,
+						LastIncludedTerm:  1,
+					}, []byte(
+						"snap-data",
+					), nil
 			}
 
 			deps.logRewriter.rewriteFunc = func(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error) {
 				result := make([]types.IndexOffsetPair, len(entries))
 				for i, entry := range entries {
-					result[i] = types.IndexOffsetPair{Index: entry.Index, Offset: int64(i * 100)} // Mock offset
+					result[i] = types.IndexOffsetPair{
+						Index:  entry.Index,
+						Offset: int64(i * 100),
+					} // Mock offset
 				}
 				return result, nil
 			}
@@ -1400,10 +1501,16 @@ func TestMetricsEnabled(t *testing.T) {
 		}).
 		Build()
 
-	err := s.SaveState(context.Background(), types.PersistentState{CurrentTerm: 1, VotedFor: "node1"})
+	err := s.SaveState(
+		context.Background(),
+		types.PersistentState{CurrentTerm: 1, VotedFor: "node1"},
+	)
 	testutil.AssertNoError(t, err, "SaveState failed")
 
-	err = s.AppendLogEntries(context.Background(), []types.LogEntry{{Index: 2, Term: 1, Command: []byte("cmd2")}})
+	err = s.AppendLogEntries(
+		context.Background(),
+		[]types.LogEntry{{Index: 2, Term: 1, Command: []byte("cmd2")}},
+	)
 	testutil.AssertNoError(t, err, "AppendLogEntries failed")
 
 	_, err = s.GetLogEntry(context.Background(), 2) // Should succeed as lastLogIndex is now 2
@@ -1412,7 +1519,11 @@ func TestMetricsEnabled(t *testing.T) {
 	err = s.TruncateLogSuffix(context.Background(), 2) // Truncate back to index 1 (keep entry 1)
 	testutil.AssertNoError(t, err, "TruncateLogSuffix failed")
 
-	err = s.SaveSnapshot(context.Background(), types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1}, []byte("snap"))
+	err = s.SaveSnapshot(
+		context.Background(),
+		types.SnapshotMetadata{LastIncludedIndex: 1, LastIncludedTerm: 1},
+		[]byte("snap"),
+	)
 	testutil.AssertNoError(t, err, "SaveSnapshot failed")
 
 	_, _, err = s.LoadSnapshot(context.Background())
@@ -1427,25 +1538,63 @@ func TestMetricsEnabled(t *testing.T) {
 	testutil.AssertTrue(t, metricsMap["read_ops"] > 0, "read_ops should be > 0")
 	testutil.AssertTrue(t, metricsMap["read_entries"] > 0, "read_entries should be > 0")
 	testutil.AssertTrue(t, metricsMap["read_bytes"] > 0, "read_bytes should be > 0")
-	testutil.AssertTrue(t, metricsMap["truncate_suffix_ops"] > 0, "truncate_suffix_ops should be > 0")
+	testutil.AssertTrue(
+		t,
+		metricsMap["truncate_suffix_ops"] > 0,
+		"truncate_suffix_ops should be > 0",
+	)
 	testutil.AssertTrue(t, metricsMap["snapshot_save_ops"] > 0, "snapshot_save_ops should be > 0")
 	testutil.AssertTrue(t, metricsMap["snapshot_load_ops"] > 0, "snapshot_load_ops should be > 0")
 	testutil.AssertTrue(t, metricsMap["snapshot_size"] > 0, "snapshot_size should be > 0")
 
 	summary := s.GetMetricsSummary()
-	testutil.AssertFalse(t, summary == "Storage metrics disabled", "Summary should contain metrics data")
+	testutil.AssertFalse(
+		t,
+		summary == "Storage metrics disabled",
+		"Summary should contain metrics data",
+	)
 
 	s.ResetMetrics()
 	resetMetrics := s.GetMetrics()
-	testutil.AssertEqual(t, uint64(0), resetMetrics["append_ops"], "append_ops should be reset to 0")
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		resetMetrics["append_ops"],
+		"append_ops should be reset to 0",
+	)
 	testutil.AssertEqual(t, uint64(0), resetMetrics["state_ops"], "state_ops should be reset to 0")
 	testutil.AssertEqual(t, uint64(0), resetMetrics["read_ops"], "read_ops should be reset to 0")
-	testutil.AssertEqual(t, uint64(0), resetMetrics["snapshot_save_ops"], "snapshot_save_ops should be reset to 0")
-	testutil.AssertEqual(t, uint64(0), resetMetrics["snapshot_load_ops"], "snapshot_load_ops should be reset to 0")
-	testutil.AssertEqual(t, uint64(0), resetMetrics["truncate_suffix_ops"], "truncate_suffix_ops should be reset to 0")
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		resetMetrics["snapshot_save_ops"],
+		"snapshot_save_ops should be reset to 0",
+	)
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		resetMetrics["snapshot_load_ops"],
+		"snapshot_load_ops should be reset to 0",
+	)
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		resetMetrics["truncate_suffix_ops"],
+		"truncate_suffix_ops should be reset to 0",
+	)
 
-	testutil.AssertEqual(t, uint64(0), resetMetrics["avg_append_latency_us"], "avg_append_latency_us should be reset to 0")
-	testutil.AssertEqual(t, uint64(0), resetMetrics["p95_append_latency_us"], "p95_append_latency_us should be reset to 0")
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		resetMetrics["avg_append_latency_us"],
+		"avg_append_latency_us should be reset to 0",
+	)
+	testutil.AssertEqual(
+		t,
+		uint64(0),
+		resetMetrics["p95_append_latency_us"],
+		"p95_append_latency_us should be reset to 0",
+	)
 }
 
 // TestFileStorage_IndexMapOption verifies that GetLogEntry uses the index map
@@ -1461,7 +1610,11 @@ func TestFileStorage_IndexMapOption(t *testing.T) {
 			WithIndexBounds(0, 0). // Start empty
 			Build()
 
-		deps.logAppender.appendResult = appendResult{FirstIndex: 1, LastIndex: 1, Offsets: []types.IndexOffsetPair{{Index: 1, Offset: 0}}}
+		deps.logAppender.appendResult = appendResult{
+			FirstIndex: 1,
+			LastIndex:  1,
+			Offsets:    []types.IndexOffsetPair{{Index: 1, Offset: 0}},
+		}
 		deps.metadataSvc.SyncMetadataFromIndexMapFunc = func(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, opContext string, useAtomicWrite bool) (types.Index, types.Index, error) {
 			return 1, 1, nil // Update bounds after append
 		}
@@ -1485,7 +1638,11 @@ func TestFileStorage_IndexMapOption(t *testing.T) {
 		_, err = s.GetLogEntry(context.Background(), 1)
 
 		testutil.AssertNoError(t, err, "GetLogEntry failed")
-		testutil.AssertTrue(t, readInRangeCalled, "ReadInRangeFunc should have been called when index map is enabled")
+		testutil.AssertTrue(
+			t,
+			readInRangeCalled,
+			"ReadInRangeFunc should have been called when index map is enabled",
+		)
 	})
 
 	t.Run("IndexMapDisabled", func(t *testing.T) {
@@ -1496,7 +1653,11 @@ func TestFileStorage_IndexMapOption(t *testing.T) {
 			WithIndexBounds(0, 0).
 			Build()
 
-		deps.logAppender.appendResult = appendResult{FirstIndex: 1, LastIndex: 1, Offsets: []types.IndexOffsetPair{{Index: 1, Offset: 0}}}
+		deps.logAppender.appendResult = appendResult{
+			FirstIndex: 1,
+			LastIndex:  1,
+			Offsets:    []types.IndexOffsetPair{{Index: 1, Offset: 0}},
+		}
 		deps.indexSvc.GetBoundsFunc = func(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
 			if currentFirst == 0 && currentLast == 0 { // Before append
 				return boundsResult{NewFirst: 0, NewLast: 0}
@@ -1520,7 +1681,9 @@ func TestFileStorage_IndexMapOption(t *testing.T) {
 		readInRangeCalled := false
 		deps.indexSvc.ReadInRangeFunc = func(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
 			readInRangeCalled = true // This flag should remain false
-			return nil, 0, errors.New("ReadInRangeFunc should NOT be called when index map is disabled")
+			return nil, 0, errors.New(
+				"ReadInRangeFunc should NOT be called when index map is disabled",
+			)
 		}
 
 		deps.logReader.AddEntry(entry1, 50)
@@ -1529,7 +1692,11 @@ func TestFileStorage_IndexMapOption(t *testing.T) {
 
 		testutil.AssertNoError(t, err, "GetLogEntry failed")
 		testutil.AssertEqual(t, entry1, retrievedEntry, "Retrieved entry mismatch")
-		testutil.AssertFalse(t, readInRangeCalled, "ReadInRangeFunc should NOT have been called when index map is disabled")
+		testutil.AssertFalse(
+			t,
+			readInRangeCalled,
+			"ReadInRangeFunc should NOT have been called when index map is disabled",
+		)
 	})
 }
 
@@ -1562,7 +1729,12 @@ func TestAsyncTruncateAfterSnapshot(t *testing.T) {
 			}
 
 			deps.logRewriter.rewriteFunc = func(ctx context.Context, entriesToRewrite []types.LogEntry) ([]types.IndexOffsetPair, error) {
-				testutil.AssertEqual(t, expectedRemainingEntries, entriesToRewrite, "Incorrect entries passed to rewrite")
+				testutil.AssertEqual(
+					t,
+					expectedRemainingEntries,
+					entriesToRewrite,
+					"Incorrect entries passed to rewrite",
+				)
 
 				close(truncationCompleted) // Signal asynchronous rewrite (truncation) has occurred
 
@@ -1652,7 +1824,11 @@ func TestSyncTruncateAfterSnapshot(t *testing.T) {
 	mu.Lock()
 	finalTruncationCalled := truncationCalled
 	mu.Unlock()
-	testutil.AssertTrue(t, finalTruncationCalled, "Synchronous truncation's rewriteFunc should have been called")
+	testutil.AssertTrue(
+		t,
+		finalTruncationCalled,
+		"Synchronous truncation's rewriteFunc should have been called",
+	)
 }
 
 // Test for chunked I/O support
@@ -1688,7 +1864,8 @@ func TestChunkedIO(t *testing.T) {
 			}
 
 			deps.snapshotReader.readFunc = func(ctx context.Context) (types.SnapshotMetadata, []byte, error) {
-				if len(deps.snapshotReader.readResult.data) > opts.ChunkSize && opts.Features.EnableChunkedIO {
+				if len(deps.snapshotReader.readResult.data) > opts.ChunkSize &&
+					opts.Features.EnableChunkedIO {
 					chunkedReadUsed.Store(true)
 				}
 
@@ -1704,11 +1881,19 @@ func TestChunkedIO(t *testing.T) {
 
 	err := s.SaveSnapshot(context.Background(), metadata, largeData)
 	testutil.AssertNoError(t, err, "SaveSnapshot failed")
-	testutil.AssertTrue(t, chunkedWriteUsed.Load(), "Mock writeFunc should have detected conditions for chunked write")
+	testutil.AssertTrue(
+		t,
+		chunkedWriteUsed.Load(),
+		"Mock writeFunc should have detected conditions for chunked write",
+	)
 
 	_, _, err = s.LoadSnapshot(context.Background())
 	testutil.AssertNoError(t, err, "LoadSnapshot failed")
-	testutil.AssertTrue(t, chunkedReadUsed.Load(), "Mock readFunc should have detected conditions for chunked read")
+	testutil.AssertTrue(
+		t,
+		chunkedReadUsed.Load(),
+		"Mock readFunc should have detected conditions for chunked read",
+	)
 }
 
 // Test for empty log handling
@@ -1733,7 +1918,11 @@ func TestEmptyLogOperations(t *testing.T) {
 	testutil.AssertNoError(t, err, "TruncateLogPrefix on empty log should be no-op")
 
 	err = s.TruncateLogSuffix(context.Background(), 1)
-	testutil.AssertNoError(t, err, "TruncateLogSuffix on empty log should either empty the log or be a no-op")
+	testutil.AssertNoError(
+		t,
+		err,
+		"TruncateLogSuffix on empty log should either empty the log or be a no-op",
+	)
 }
 
 // Test for lock timeout behavior
@@ -1772,7 +1961,10 @@ func TestLockTimeout(t *testing.T) {
 		defer cancel()
 
 		// This will block waiting for the lock
-		err := s.AppendLogEntries(ctx, []types.LogEntry{{Index: 1, Term: 1, Command: []byte("cmd")}})
+		err := s.AppendLogEntries(
+			ctx,
+			[]types.LogEntry{{Index: 1, Term: 1, Command: []byte("cmd")}},
+		)
 		errCh <- err
 	}()
 
@@ -1807,7 +1999,12 @@ func TestConcurrentOperations(t *testing.T) {
 				expectedNext := types.Index(mockCurrentLastIndex.Load() + 1)
 
 				if firstAppendIdx != expectedNext {
-					return appendResult{}, fmt.Errorf("%w: test mock expected %d, got %d", ErrNonContiguousEntries, expectedNext, firstAppendIdx)
+					return appendResult{}, fmt.Errorf(
+						"%w: test mock expected %d, got %d",
+						ErrNonContiguousEntries,
+						expectedNext,
+						firstAppendIdx,
+					)
 				}
 
 				// Simulate successful append result for the single entry
@@ -1817,7 +2014,9 @@ func TestConcurrentOperations(t *testing.T) {
 				return appendResult{
 					FirstIndex: firstAppendIdx,
 					LastIndex:  newLastIdx,
-					Offsets:    []types.IndexOffsetPair{{Index: firstAppendIdx, Offset: int64(firstAppendIdx * 10)}}, // Mock offset
+					Offsets: []types.IndexOffsetPair{
+						{Index: firstAppendIdx, Offset: int64(firstAppendIdx * 10)},
+					}, // Mock offset
 				}, nil
 			}
 
@@ -1894,7 +2093,8 @@ func TestConcurrentOperations(t *testing.T) {
 				err := s.AppendLogEntries(ctx, entries)
 				if err != nil {
 					// Only collect unexpected errors
-					if !errors.Is(err, ErrNonContiguousEntries) && !errors.Is(err, context.DeadlineExceeded) {
+					if !errors.Is(err, ErrNonContiguousEntries) &&
+						!errors.Is(err, context.DeadlineExceeded) {
 						errorCh <- fmt.Errorf("writer %d, op %d failed unexpectedly: %w", writerID, j, err)
 					}
 				} else {
@@ -1910,7 +2110,10 @@ func TestConcurrentOperations(t *testing.T) {
 		go func(readerID int) {
 			defer wg.Done()
 			for j := range operationsPerGoroutine {
-				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond) // Adjusted timeout
+				ctx, cancel := context.WithTimeout(
+					context.Background(),
+					200*time.Millisecond,
+				) // Adjusted timeout
 
 				// Read a random valid range based on storage's current view
 				currentLast := s.LastLogIndex()
@@ -1924,7 +2127,8 @@ func TestConcurrentOperations(t *testing.T) {
 					_, err := s.GetLogEntries(ctx, start, end)
 					// We expect IndexOutOfRange sometimes if reads race ahead of writes slightly
 					// or context deadlines. Unexpected errors are problems.
-					if err != nil && !errors.Is(err, ErrIndexOutOfRange) && !errors.Is(err, context.DeadlineExceeded) {
+					if err != nil && !errors.Is(err, ErrIndexOutOfRange) &&
+						!errors.Is(err, context.DeadlineExceeded) {
 						errorCh <- fmt.Errorf("reader %d, op %d failed (last=%d, start=%d, end=%d): %w", readerID, j, currentLast, start, end, err)
 					}
 				}
@@ -1955,7 +2159,12 @@ func TestConcurrentOperations(t *testing.T) {
 	t.Logf("Successful Appends: %d", finalSuccessfulAppends)
 	t.Logf("Final Storage Last Index: %d", finalStorageLastIndex)
 
-	testutil.AssertEqual(t, finalSuccessfulAppends, finalStorageLastIndex, "Storage last index should match the count of successful appends")
+	testutil.AssertEqual(
+		t,
+		finalSuccessfulAppends,
+		finalStorageLastIndex,
+		"Storage last index should match the count of successful appends",
+	)
 }
 
 // TestLargeLogEntries verifies handling of entries near and exceeding the size limit.
@@ -1979,7 +2188,10 @@ func TestLargeLogEntries(t *testing.T) {
 						firstIdx = entries[0].Index
 						lastIdx = entries[len(entries)-1].Index
 						for i, e := range entries {
-							offsets = append(offsets, types.IndexOffsetPair{Index: e.Index, Offset: int64(i * 1000)}) // Mock offsets
+							offsets = append(
+								offsets,
+								types.IndexOffsetPair{Index: e.Index, Offset: int64(i * 1000)},
+							) // Mock offsets
 						}
 					}
 
@@ -2023,11 +2235,18 @@ func TestLargeLogEntries(t *testing.T) {
 				deps.logAppender.appendFunc = func(ctx context.Context, entries []types.LogEntry, currentLast types.Index) (appendResult, error) {
 					for _, entry := range entries {
 						if len(entry.Command) >= maxEntrySizeBytes {
-							return appendResult{}, fmt.Errorf("entry too large: command size %d bytes", len(entry.Command))
+							return appendResult{}, fmt.Errorf(
+								"entry too large: command size %d bytes",
+								len(entry.Command),
+							)
 						}
 					}
 					// Should not be reached in this test case if entry is too large
-					return appendResult{FirstIndex: 1, LastIndex: 1, Offsets: []types.IndexOffsetPair{{Index: 1, Offset: 0}}}, nil
+					return appendResult{
+						FirstIndex: 1,
+						LastIndex:  1,
+						Offsets:    []types.IndexOffsetPair{{Index: 1, Offset: 0}},
+					}, nil
 				}
 				// No metadata sync needed as append should fail
 			}).
@@ -2051,8 +2270,18 @@ func TestRollbackInMemoryState(t *testing.T) {
 
 		s.rollbackInMemoryState(previousLast, isFirstInit)
 
-		testutil.AssertEqual(t, types.Index(5), s.FirstLogIndex(), "FirstLogIndex should remain unchanged")
-		testutil.AssertEqual(t, types.Index(8), s.LastLogIndex(), "LastLogIndex should be rolled back")
+		testutil.AssertEqual(
+			t,
+			types.Index(5),
+			s.FirstLogIndex(),
+			"FirstLogIndex should remain unchanged",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(8),
+			s.LastLogIndex(),
+			"LastLogIndex should be rolled back",
+		)
 	})
 
 	t.Run("First index initialization rollback", func(t *testing.T) {
@@ -2065,8 +2294,18 @@ func TestRollbackInMemoryState(t *testing.T) {
 
 		s.rollbackInMemoryState(previousLast, isFirstInit)
 
-		testutil.AssertEqual(t, types.Index(0), s.FirstLogIndex(), "FirstLogIndex should be reset to 0")
-		testutil.AssertEqual(t, types.Index(8), s.LastLogIndex(), "LastLogIndex should be rolled back")
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			s.FirstLogIndex(),
+			"FirstLogIndex should be reset to 0",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(8),
+			s.LastLogIndex(),
+			"LastLogIndex should be rolled back",
+		)
 	})
 }
 
@@ -2091,12 +2330,31 @@ func TestRollbackIndexMapState(t *testing.T) {
 
 		testutil.AssertEqual(t, 3, len(s.indexToOffsetMap), "Should have 3 entries after rollback")
 		if mapLen == 3 {
-			testutil.AssertEqual(t, types.Index(1), s.indexToOffsetMap[0].Index, "First entry should be index 1")
-			testutil.AssertEqual(t, types.Index(3), s.indexToOffsetMap[2].Index, "Last entry should be index 3")
+			testutil.AssertEqual(
+				t,
+				types.Index(1),
+				s.indexToOffsetMap[0].Index,
+				"First entry should be index 1",
+			)
+			testutil.AssertEqual(
+				t,
+				types.Index(3),
+				s.indexToOffsetMap[2].Index,
+				"Last entry should be index 3",
+			)
 		}
 
-		testutil.AssertTrue(t, deps.indexSvc.truncateLastCalled, "TruncateLast should have been called")
-		testutil.AssertEqual(t, 2, deps.indexSvc.truncateLastCount, "TruncateLast should be called with count=2")
+		testutil.AssertTrue(
+			t,
+			deps.indexSvc.truncateLastCalled,
+			"TruncateLast should have been called",
+		)
+		testutil.AssertEqual(
+			t,
+			2,
+			deps.indexSvc.truncateLastCount,
+			"TruncateLast should be called with count=2",
+		)
 	})
 
 	t.Run("Full rollback", func(t *testing.T) {
@@ -2113,8 +2371,17 @@ func TestRollbackIndexMapState(t *testing.T) {
 
 		testutil.AssertEqual(t, 0, mapLen, "Should have empty index map after full rollback")
 
-		testutil.AssertTrue(t, deps.indexSvc.truncateLastCalled, "TruncateLast should have been called")
-		testutil.AssertEqual(t, 5, deps.indexSvc.truncateLastCount, "TruncateLast should be called with count=5")
+		testutil.AssertTrue(
+			t,
+			deps.indexSvc.truncateLastCalled,
+			"TruncateLast should have been called",
+		)
+		testutil.AssertEqual(
+			t,
+			5,
+			deps.indexSvc.truncateLastCount,
+			"TruncateLast should be called with count=5",
+		)
 	})
 
 	t.Run("No rollback needed", func(t *testing.T) {
@@ -2139,8 +2406,17 @@ func TestRollbackIndexMapState(t *testing.T) {
 		testutil.AssertEqual(t, 3, mapLen, "Index map should be unchanged")
 		testutil.AssertEqual(t, originalMap, currentMap, "Index map content should be unchanged")
 
-		testutil.AssertTrue(t, deps.indexSvc.truncateLastCalled, "TruncateLast should have been called even with count 0")
-		testutil.AssertEqual(t, 0, deps.indexSvc.truncateLastCount, "TruncateLast should be called with count=0")
+		testutil.AssertTrue(
+			t,
+			deps.indexSvc.truncateLastCalled,
+			"TruncateLast should have been called even with count 0",
+		)
+		testutil.AssertEqual(
+			t,
+			0,
+			deps.indexSvc.truncateLastCount,
+			"TruncateLast should be called with count=0",
+		)
 	})
 }
 
@@ -2395,7 +2671,11 @@ func TestMetricsUpdates(t *testing.T) {
 			return nil, errors.New("stat error")
 		}
 		s.updateMetadataSizeMetricUnlocked()
-		testutil.AssertEqual(t, uint64(100), s.metrics.metadataSize.Load()) // Should keep previous value
+		testutil.AssertEqual(
+			t,
+			uint64(100),
+			s.metrics.metadataSize.Load(),
+		) // Should keep previous value
 	})
 
 	t.Run("Update index", func(t *testing.T) {

@@ -20,7 +20,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func setupNetworkManagerWithOpts(t *testing.T, id types.NodeID, selfAddr string, peers map[types.NodeID]PeerConfig, opts GRPCNetworkManagerOptions, customClock Clock, customMetrics Metrics) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, Clock) {
+func setupNetworkManagerWithOpts(
+	t *testing.T,
+	id types.NodeID,
+	selfAddr string,
+	peers map[types.NodeID]PeerConfig,
+	opts GRPCNetworkManagerOptions,
+	customClock Clock,
+	customMetrics Metrics,
+) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, Clock) {
 	t.Helper()
 	isShutdown := &atomic.Bool{}
 	handler := &mockRPCHandler{}
@@ -40,7 +48,10 @@ func setupNetworkManagerWithOpts(t *testing.T, id types.NodeID, selfAddr string,
 	if selfAddr == "" || selfAddr == "localhost:0" {
 		tempListener, err = net.Listen("tcp", "localhost:0")
 		if err != nil {
-			t.Fatalf("setupNetworkManagerWithOpts: Failed to find an available port for self: %v", err)
+			t.Fatalf(
+				"setupNetworkManagerWithOpts: Failed to find an available port for self: %v",
+				err,
+			)
 		}
 		finalAddr = tempListener.Addr().String()
 		tempListener.Close()
@@ -179,14 +190,27 @@ func (ct *controlledTimer) Reset(d time.Duration) bool {
 	return true
 }
 
-func setupDefaultNetworkManager(t *testing.T, id types.NodeID, addr string, peers map[types.NodeID]PeerConfig) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, *controlledMockClock) {
+func setupDefaultNetworkManager(
+	t *testing.T,
+	id types.NodeID,
+	addr string,
+	peers map[types.NodeID]PeerConfig,
+) (*gRPCNetworkManager, *mockRPCHandler, *atomic.Bool, *controlledMockClock) {
 	opts := GRPCNetworkManagerOptions{
 		DialTimeout:        100 * time.Millisecond,
 		ServerStartTimeout: 1 * time.Second,
 		KeepaliveTime:      1 * time.Second,
 		KeepaliveTimeout:   500 * time.Millisecond,
 	}
-	nm, handler, shutdownFlag, clock := setupNetworkManagerWithOpts(t, id, addr, peers, opts, newControlledMockClock(), newMockMetrics())
+	nm, handler, shutdownFlag, clock := setupNetworkManagerWithOpts(
+		t,
+		id,
+		addr,
+		peers,
+		opts,
+		newControlledMockClock(),
+		newMockMetrics(),
+	)
 	return nm, handler, shutdownFlag, clock.(*controlledMockClock)
 }
 
@@ -239,7 +263,11 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 
 				defaults := DefaultGRPCNetworkManagerOptions()
 				if nm.opts.MaxRecvMsgSize != defaults.MaxRecvMsgSize {
-					t.Errorf("Expected default MaxRecvMsgSize %d, got %d", defaults.MaxRecvMsgSize, nm.opts.MaxRecvMsgSize)
+					t.Errorf(
+						"Expected default MaxRecvMsgSize %d, got %d",
+						defaults.MaxRecvMsgSize,
+						nm.opts.MaxRecvMsgSize,
+					)
 				}
 			},
 		},
@@ -377,7 +405,10 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
 				if _, ok := nm.metrics.(*noOpMetrics); !ok {
-					t.Errorf("Expected nm.metrics to be *noOpMetrics when nil is provided, got %T", nm.metrics)
+					t.Errorf(
+						"Expected nm.metrics to be *noOpMetrics when nil is provided, got %T",
+						nm.metrics,
+					)
 				}
 			},
 		},
@@ -397,7 +428,12 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			opts:        GRPCNetworkManagerOptions{},
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
-				testutil.AssertEqual(t, tc.addr, nm.localAddr, "Local address should be the one passed to constructor, not from peers map")
+				testutil.AssertEqual(
+					t,
+					tc.addr,
+					nm.localAddr,
+					"Local address should be the one passed to constructor, not from peers map",
+				)
 			},
 		},
 		{
@@ -419,10 +455,25 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			expectError: false,
 			checkFields: func(t *testing.T, nm *gRPCNetworkManager, tc testCase) {
 				defaults := DefaultGRPCNetworkManagerOptions()
-				testutil.AssertEqual(t, 2048*1024, nm.opts.MaxRecvMsgSize, "MaxRecvMsgSize mismatch")
+				testutil.AssertEqual(
+					t,
+					2048*1024,
+					nm.opts.MaxRecvMsgSize,
+					"MaxRecvMsgSize mismatch",
+				)
 				testutil.AssertEqual(t, 3*time.Second, nm.opts.DialTimeout, "DialTimeout mismatch")
-				testutil.AssertEqual(t, defaults.KeepaliveTime, nm.opts.KeepaliveTime, "KeepaliveTime should be default")
-				testutil.AssertEqual(t, defaults.MaxSendMsgSize, nm.opts.MaxSendMsgSize, "MaxSendMsgSize should be default")
+				testutil.AssertEqual(
+					t,
+					defaults.KeepaliveTime,
+					nm.opts.KeepaliveTime,
+					"KeepaliveTime should be default",
+				)
+				testutil.AssertEqual(
+					t,
+					defaults.MaxSendMsgSize,
+					nm.opts.MaxSendMsgSize,
+					"MaxSendMsgSize should be default",
+				)
 			},
 		},
 	}
@@ -465,7 +516,12 @@ func TestNewGRPCNetworkManager(t *testing.T) {
 			if tc.expectError {
 				testutil.AssertError(t, err, "Expected error but got nil")
 				if tc.errorMsgContains != "" {
-					testutil.AssertContains(t, err.Error(), tc.errorMsgContains, "Error message mismatch")
+					testutil.AssertContains(
+						t,
+						err.Error(),
+						tc.errorMsgContains,
+						"Error message mismatch",
+					)
 				}
 				testutil.AssertTrue(t, nm == nil, "Expected nil NetworkManager on error")
 			} else {
@@ -487,7 +543,11 @@ func TestNetworkManager_Successful_Start_Stop_Lifecycle(t *testing.T) {
 
 	err := nm.Start()
 	testutil.AssertNoError(t, err, "NetworkManager.Start() failed on initial start")
-	testutil.AssertTrue(t, nm.serverStarted.Load(), "Server should be marked as started after successful Start()")
+	testutil.AssertTrue(
+		t,
+		nm.serverStarted.Load(),
+		"Server should be marked as started after successful Start()",
+	)
 	testutil.AssertNotNil(t, nm.listener, "Listener should be non-nil after successful Start()")
 
 	select {
@@ -530,7 +590,11 @@ func mockNMForHandler(t *testing.T) *gRPCNetworkManager {
 	}
 }
 
-func setupPeerServer(t *testing.T, addr string, actualRPCHandler RPCHandler) (actualAddr string, cleanupFunc func()) {
+func setupPeerServer(
+	t *testing.T,
+	addr string,
+	actualRPCHandler RPCHandler,
+) (actualAddr string, cleanupFunc func()) {
 	t.Helper()
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -598,7 +662,12 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 	nm1.peers[peerNodeID] = PeerConfig{ID: peerNodeID, Address: peerActualAddr}
 	nm1.mu.Unlock()
 
-	defaultArgs := &types.RequestVoteArgs{Term: 1, CandidateID: "node1", LastLogIndex: 0, LastLogTerm: 0}
+	defaultArgs := &types.RequestVoteArgs{
+		Term:         1,
+		CandidateID:  "node1",
+		LastLogIndex: 0,
+		LastLogTerm:  0,
+	}
 
 	tests := []struct {
 		name        string
@@ -625,7 +694,9 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 			name: "RPC Error - Unavailable",
 			setupPeer: func() {
 				peerRPCHandler.ResetErrors()
-				peerRPCHandler.SetRequestVoteError(status.Error(codes.Unavailable, "peer shut down"))
+				peerRPCHandler.SetRequestVoteError(
+					status.Error(codes.Unavailable, "peer shut down"),
+				)
 			},
 			args:        defaultArgs,
 			expectReply: nil,
@@ -705,7 +776,14 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 					if ok {
 						sActual, okActual := status.FromError(err)
 						if !okActual || s.Code() != sActual.Code() {
-							t.Errorf("[%s] Expected error %v (or code %s), got %v (or code %s)", tc.name, tc.expectErr, s.Code(), err, sActual.Code())
+							t.Errorf(
+								"[%s] Expected error %v (or code %s), got %v (or code %s)",
+								tc.name,
+								tc.expectErr,
+								s.Code(),
+								err,
+								sActual.Code(),
+							)
 						}
 					} else {
 						t.Errorf("[%s] Expected error type %T, got %T (%v)", tc.name, tc.expectErr, err, err)
@@ -716,8 +794,20 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 			}
 
 			if tc.expectReply != nil {
-				testutil.AssertEqual(t, tc.expectReply.Term, reply.Term, "[%s] Reply Term mismatch", tc.name)
-				testutil.AssertEqual(t, tc.expectReply.VoteGranted, reply.VoteGranted, "[%s] Reply VoteGranted mismatch", tc.name)
+				testutil.AssertEqual(
+					t,
+					tc.expectReply.Term,
+					reply.Term,
+					"[%s] Reply Term mismatch",
+					tc.name,
+				)
+				testutil.AssertEqual(
+					t,
+					tc.expectReply.VoteGranted,
+					reply.VoteGranted,
+					"[%s] Reply VoteGranted mismatch",
+					tc.name,
+				)
 			} else if err == nil && reply != nil {
 			}
 		})
@@ -760,7 +850,11 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 			setupPeer: func() {
 				peerRPCHandler.ResetErrors()
 				peerRPCHandler.appendEntriesFunc = func(ctx context.Context, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-					return &types.AppendEntriesReply{Term: args.Term, Success: true, MatchIndex: args.PrevLogIndex}, nil
+					return &types.AppendEntriesReply{
+						Term:       args.Term,
+						Success:    true,
+						MatchIndex: args.PrevLogIndex,
+					}, nil
 				}
 			},
 			args:        func() *types.AppendEntriesArgs { a := *baseArgs; a.Entries = []types.LogEntry{}; return &a }(),
@@ -774,7 +868,11 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 				peerRPCHandler.ResetErrors()
 				peerRPCHandler.appendEntriesFunc = func(ctx context.Context, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
 					matchIdx := args.PrevLogIndex + types.Index(len(args.Entries))
-					return &types.AppendEntriesReply{Term: args.Term, Success: true, MatchIndex: matchIdx}, nil
+					return &types.AppendEntriesReply{
+						Term:       args.Term,
+						Success:    true,
+						MatchIndex: matchIdx,
+					}, nil
 				}
 			},
 			args: func() *types.AppendEntriesArgs {
@@ -790,7 +888,9 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 			name: "RPC Error - Unavailable",
 			setupPeer: func() {
 				peerRPCHandler.ResetErrors()
-				peerRPCHandler.SetAppendEntriesError(status.Error(codes.Unavailable, "peer is unavailable"))
+				peerRPCHandler.SetAppendEntriesError(
+					status.Error(codes.Unavailable, "peer is unavailable"),
+				)
 			},
 			args:        func() *types.AppendEntriesArgs { a := *baseArgs; return &a }(),
 			expectReply: nil,
@@ -859,7 +959,14 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 					sExpected, okExpected := status.FromError(tc.expectErr)
 					sActual, okActual := status.FromError(err)
 					if !(okExpected && okActual && sExpected.Code() == sActual.Code()) {
-						t.Errorf("[%s] Expected error %v (or code %v), got %v (or code %v)", tc.name, tc.expectErr, sExpected.Code(), err, sActual.Code())
+						t.Errorf(
+							"[%s] Expected error %v (or code %v), got %v (or code %v)",
+							tc.name,
+							tc.expectErr,
+							sExpected.Code(),
+							err,
+							sActual.Code(),
+						)
 					}
 				}
 			} else {
@@ -869,10 +976,28 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 			if tc.expectReply != nil {
 				testutil.AssertNotNil(t, reply, "[%s] Expected a reply", tc.name)
 				if reply != nil { // Guard against nil panic if AssertNotNil fails
-					testutil.AssertEqual(t, tc.expectReply.Term, reply.Term, "[%s] Reply Term mismatch", tc.name)
-					testutil.AssertEqual(t, tc.expectReply.Success, reply.Success, "[%s] Reply Success mismatch", tc.name)
+					testutil.AssertEqual(
+						t,
+						tc.expectReply.Term,
+						reply.Term,
+						"[%s] Reply Term mismatch",
+						tc.name,
+					)
+					testutil.AssertEqual(
+						t,
+						tc.expectReply.Success,
+						reply.Success,
+						"[%s] Reply Success mismatch",
+						tc.name,
+					)
 					if tc.expectReply.Success {
-						testutil.AssertEqual(t, tc.expectReply.MatchIndex, reply.MatchIndex, "[%s] Reply MatchIndex mismatch", tc.name)
+						testutil.AssertEqual(
+							t,
+							tc.expectReply.MatchIndex,
+							reply.MatchIndex,
+							"[%s] Reply MatchIndex mismatch",
+							tc.name,
+						)
 					}
 				}
 			}
@@ -928,7 +1053,9 @@ func TestNetworkManager_SendInstallSnapshot(t *testing.T) {
 			name: "RPC Error - Unavailable",
 			setupPeer: func() {
 				peerRPCHandler.ResetErrors()
-				peerRPCHandler.SetInstallSnapshotError(status.Error(codes.Unavailable, "peer unavailable for snapshot"))
+				peerRPCHandler.SetInstallSnapshotError(
+					status.Error(codes.Unavailable, "peer unavailable for snapshot"),
+				)
 			},
 			args:        defaultSnapshotArgs,
 			expectReply: nil,
@@ -996,7 +1123,14 @@ func TestNetworkManager_SendInstallSnapshot(t *testing.T) {
 					sExpected, okExpected := status.FromError(tc.expectErr)
 					sActual, okActual := status.FromError(err)
 					if !(okExpected && okActual && sExpected.Code() == sActual.Code()) {
-						t.Errorf("[%s] Expected error %v (or code %v), got %v (or code %v)", tc.name, tc.expectErr, sExpected.Code(), err, sActual.Code())
+						t.Errorf(
+							"[%s] Expected error %v (or code %v), got %v (or code %v)",
+							tc.name,
+							tc.expectErr,
+							sExpected.Code(),
+							err,
+							sActual.Code(),
+						)
 					}
 				}
 			} else {
@@ -1006,7 +1140,13 @@ func TestNetworkManager_SendInstallSnapshot(t *testing.T) {
 			if tc.expectReply != nil {
 				testutil.AssertNotNil(t, reply, "[%s] Expected a reply", tc.name)
 				if reply != nil {
-					testutil.AssertEqual(t, tc.expectReply.Term, reply.Term, "[%s] Reply Term mismatch", tc.name)
+					testutil.AssertEqual(
+						t,
+						tc.expectReply.Term,
+						reply.Term,
+						"[%s] Reply Term mismatch",
+						tc.name,
+					)
 				}
 			}
 		})
@@ -1032,7 +1172,11 @@ func TestNetworkManager_PeerStatus(t *testing.T) {
 	nm1.peers[peerNodeID] = PeerConfig{ID: peerNodeID, Address: peerActualAddr}
 	nm1.mu.Unlock()
 
-	_, _ = nm1.SendRequestVote(context.Background(), peerNodeID, &types.RequestVoteArgs{Term: 1}) // Make a call to establish connection state
+	_, _ = nm1.SendRequestVote(
+		context.Background(),
+		peerNodeID,
+		&types.RequestVoteArgs{Term: 1},
+	) // Make a call to establish connection state
 
 	status, err := nm1.PeerStatus(peerNodeID)
 	testutil.AssertNoError(t, err)
@@ -1051,7 +1195,11 @@ func TestNetworkManager_PeerStatus(t *testing.T) {
 
 	status, err = nm1.PeerStatus(peerNodeID)
 	testutil.AssertNoError(t, err)
-	testutil.AssertFalse(t, status.Connected, "Expected peer to be not connected after simulated failure")
+	testutil.AssertFalse(
+		t,
+		status.Connected,
+		"Expected peer to be not connected after simulated failure",
+	)
 	testutil.AssertError(t, status.LastError, "Expected lastError to be set")
 	testutil.AssertContains(t, status.LastError.Error(), "simulated connection failure")
 
@@ -1070,21 +1218,43 @@ func TestNetworkManager_LocalAddr(t *testing.T) {
 
 	addr := nm.LocalAddr()
 	isLocalhostAddr := (strings.HasPrefix(addr, "127.0.0.1:") || strings.HasPrefix(addr, "[::1]:") || strings.HasPrefix(addr, "localhost:"))
-	testutil.AssertTrue(t, addr != "" && isLocalhostAddr, "Expected a localhost-like address (e.g., 127.0.0.1:port, [::1]:port, or localhost:port) before start, got: %s", addr)
+	testutil.AssertTrue(
+		t,
+		addr != "" && isLocalhostAddr,
+		"Expected a localhost-like address (e.g., 127.0.0.1:port, [::1]:port, or localhost:port) before start, got: %s",
+		addr,
+	)
 
 	err := nm.Start()
 	testutil.AssertNoError(t, err)
 
 	addrAfterStart := nm.LocalAddr()
 	testutil.AssertTrue(t, addrAfterStart != "", "Expected non-empty local address after start")
-	testutil.AssertTrue(t, strings.HasPrefix(addrAfterStart, "127.0.0.1:") || strings.HasPrefix(addrAfterStart, "[::1]:") || strings.Contains(addrAfterStart, "localhost:"), "Expected localhost address, got %s", addrAfterStart)
+	testutil.AssertTrue(
+		t,
+		strings.HasPrefix(addrAfterStart, "127.0.0.1:") || strings.HasPrefix(addrAfterStart, "[::1]:") ||
+			strings.Contains(addrAfterStart, "localhost:"),
+		"Expected localhost address, got %s",
+		addrAfterStart,
+	)
 
 	originalListenerAddr := nm.listener.Addr().String()
-	testutil.AssertEqual(t, originalListenerAddr, addrAfterStart, "LocalAddr should return listener's address after start")
+	testutil.AssertEqual(
+		t,
+		originalListenerAddr,
+		addrAfterStart,
+		"LocalAddr should return listener's address after start",
+	)
 
 	nm.Stop()
 
 	addrAfterStop := nm.LocalAddr()
 
-	testutil.AssertEqual(t, originalListenerAddr, addrAfterStop, "LocalAddr should still return originally resolved address after stop, got %s", addrAfterStop)
+	testutil.AssertEqual(
+		t,
+		originalListenerAddr,
+		addrAfterStop,
+		"LocalAddr should still return originally resolved address after stop, got %s",
+		addrAfterStop,
+	)
 }

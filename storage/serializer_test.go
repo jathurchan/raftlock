@@ -71,7 +71,12 @@ func testSerializer(t *testing.T, s serializer) {
 	testutil.AssertNoError(t, err, "MarshalSnapshotMetadata should not error")
 	snapshot, err := s.UnmarshalSnapshotMetadata(snapshotData)
 	testutil.AssertNoError(t, err, "UnmarshalSnapshotMetadata should not error")
-	testutil.AssertEqual(t, sampleSnapshotMetadata, snapshot, "SnapshotMetadata should be equal after round trip")
+	testutil.AssertEqual(
+		t,
+		sampleSnapshotMetadata,
+		snapshot,
+		"SnapshotMetadata should be equal after round trip",
+	)
 }
 
 // Test invalid JSON for each type in the jsonSerializer
@@ -103,7 +108,12 @@ func testBinaryLogEntryRoundTrip(t *testing.T, s binarySerializer) {
 	testutil.AssertNoError(t, err, "MarshalLogEntry should not error with empty command")
 	entry, err := s.UnmarshalLogEntry(data)
 	testutil.AssertNoError(t, err, "UnmarshalLogEntry should not error with empty command")
-	testutil.AssertEqual(t, emptyCommandEntry, entry, "Empty command entry should be equal after round trip")
+	testutil.AssertEqual(
+		t,
+		emptyCommandEntry,
+		entry,
+		"Empty command entry should be equal after round trip",
+	)
 
 	largeCommandEntry := types.LogEntry{
 		Index:   99,
@@ -114,14 +124,24 @@ func testBinaryLogEntryRoundTrip(t *testing.T, s binarySerializer) {
 	testutil.AssertNoError(t, err, "MarshalLogEntry should not error with large command")
 	entry, err = s.UnmarshalLogEntry(data)
 	testutil.AssertNoError(t, err, "UnmarshalLogEntry should not error with large command")
-	testutil.AssertEqual(t, largeCommandEntry, entry, "Large command entry should be equal after round trip")
+	testutil.AssertEqual(
+		t,
+		largeCommandEntry,
+		entry,
+		"Large command entry should be equal after round trip",
+	)
 }
 
 func testBinaryLogEntryInvalidData(t *testing.T, s binarySerializer) {
 	tooShortData := make([]byte, headerSize-1)
 	_, err := s.UnmarshalLogEntry(tooShortData)
 	testutil.AssertError(t, err, "UnmarshalLogEntry should error with too short data")
-	testutil.AssertContains(t, err.Error(), "data too short", "Error message should indicate data is too short")
+	testutil.AssertContains(
+		t,
+		err.Error(),
+		"data too short",
+		"Error message should indicate data is too short",
+	)
 
 	// Test with inconsistent command length
 	inconsistentData := make([]byte, headerSize+10) // Enough space for header + some data
@@ -130,5 +150,10 @@ func testBinaryLogEntryInvalidData(t *testing.T, s binarySerializer) {
 
 	_, err = s.UnmarshalLogEntry(inconsistentData)
 	testutil.AssertError(t, err, "UnmarshalLogEntry should error with inconsistent command length")
-	testutil.AssertContains(t, err.Error(), "command length mismatch", "Error message should indicate length mismatch")
+	testutil.AssertContains(
+		t,
+		err.Error(),
+		"command length mismatch",
+		"Error message should indicate length mismatch",
+	)
 }

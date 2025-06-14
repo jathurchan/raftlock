@@ -112,21 +112,45 @@ func TestLockSerializer_Json_DecodeCommand(t *testing.T) {
 		expectErr bool
 	}{
 		{
-			name:      "valid acquire command",
-			input:     []byte(`{"op":"acquire","lock_id":"lock1","client_id":"client1","ttl":30000,"version":42}`),
-			expected:  types.Command{Op: types.OperationAcquire, LockID: "lock1", ClientID: "client1", TTL: 30000, Version: 42},
+			name: "valid acquire command",
+			input: []byte(
+				`{"op":"acquire","lock_id":"lock1","client_id":"client1","ttl":30000,"version":42}`,
+			),
+			expected: types.Command{
+				Op:       types.OperationAcquire,
+				LockID:   "lock1",
+				ClientID: "client1",
+				TTL:      30000,
+				Version:  42,
+			},
 			expectErr: false,
 		},
 		{
-			name:      "valid release command",
-			input:     []byte(`{"op":"release","lock_id":"lock1","client_id":"client1","version":42}`),
-			expected:  types.Command{Op: types.OperationRelease, LockID: "lock1", ClientID: "client1", Version: 42},
+			name: "valid release command",
+			input: []byte(
+				`{"op":"release","lock_id":"lock1","client_id":"client1","version":42}`,
+			),
+			expected: types.Command{
+				Op:       types.OperationRelease,
+				LockID:   "lock1",
+				ClientID: "client1",
+				Version:  42,
+			},
 			expectErr: false,
 		},
 		{
-			name:      "valid renew command with priority",
-			input:     []byte(`{"op":"renew","lock_id":"lock1","client_id":"client1","ttl":60000,"version":42,"priority":10}`),
-			expected:  types.Command{Op: types.OperationRenew, LockID: "lock1", ClientID: "client1", TTL: 60000, Version: 42, Priority: 10},
+			name: "valid renew command with priority",
+			input: []byte(
+				`{"op":"renew","lock_id":"lock1","client_id":"client1","ttl":60000,"version":42,"priority":10}`,
+			),
+			expected: types.Command{
+				Op:       types.OperationRenew,
+				LockID:   "lock1",
+				ClientID: "client1",
+				TTL:      60000,
+				Version:  42,
+				Priority: 10,
+			},
 			expectErr: false,
 		},
 		{
@@ -196,7 +220,12 @@ func TestLockSerializer_Json_EncodeSnapshot(t *testing.T) {
 	decoded, err := s.DecodeSnapshot(data)
 	testutil.AssertNoError(t, err, "Failed to decode the encoded snapshot")
 
-	testutil.AssertEqual(t, snapshot.LastAppliedIndex, decoded.LastAppliedIndex, "LastAppliedIndex mismatch")
+	testutil.AssertEqual(
+		t,
+		snapshot.LastAppliedIndex,
+		decoded.LastAppliedIndex,
+		"LastAppliedIndex mismatch",
+	)
 	testutil.AssertEqual(t, snapshot.Version, decoded.Version, "Version mismatch")
 
 	testutil.AssertEqual(t, len(snapshot.Locks), len(decoded.Locks), "Number of locks mismatch")
@@ -206,7 +235,12 @@ func TestLockSerializer_Json_EncodeSnapshot(t *testing.T) {
 		testutil.AssertEqual(t, lock.LockID, decodedLock.LockID, "Lock ID mismatch")
 		testutil.AssertEqual(t, lock.Owner, decodedLock.Owner, "Lock owner mismatch")
 		testutil.AssertEqual(t, lock.Version, decodedLock.Version, "Lock version mismatch")
-		testutil.AssertEqual(t, lock.Metadata["key"], decodedLock.Metadata["key"], "Lock metadata mismatch")
+		testutil.AssertEqual(
+			t,
+			lock.Metadata["key"],
+			decodedLock.Metadata["key"],
+			"Lock metadata mismatch",
+		)
 	}
 }
 
@@ -217,8 +251,10 @@ func TestJsonSerializer_DecodeSnapshot(t *testing.T) {
 		expectErr bool
 	}{
 		{
-			name:      "valid snapshot",
-			input:     []byte(`{"last_applied_index":42,"locks":{"lock1":{"lockID":"lock1","owner":"client1","version":42,"metadata":{}}},"waiters":{},"version":1}`),
+			name: "valid snapshot",
+			input: []byte(
+				`{"last_applied_index":42,"locks":{"lock1":{"lockID":"lock1","owner":"client1","version":42,"metadata":{}}},"waiters":{},"version":1}`,
+			),
 			expectErr: false,
 		},
 		{

@@ -15,7 +15,9 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-func setupSnapshotManager(t *testing.T) (*snapshotManager, *mockStorage, *mockStateManager, *mockApplier, *mockReplicationStateUpdater) {
+func setupSnapshotManager(
+	t *testing.T,
+) (*snapshotManager, *mockStorage, *mockStateManager, *mockApplier, *mockReplicationStateUpdater) {
 	mockStorage := newMockStorage()
 	stateMgr := newMockStateManager()
 	applier := &mockApplier{}
@@ -25,9 +27,11 @@ func setupSnapshotManager(t *testing.T) (*snapshotManager, *mockStorage, *mockSt
 	replicationUpdater := &mockReplicationStateUpdater{}
 
 	deps := SnapshotManagerDeps{
-		Mu:                &sync.RWMutex{},
-		ID:                "node1",
-		Config:            Config{Options: Options{SnapshotThreshold: 5, LogCompactionMinEntries: 3}},
+		Mu: &sync.RWMutex{},
+		ID: "node1",
+		Config: Config{
+			Options: Options{SnapshotThreshold: 5, LogCompactionMinEntries: 3},
+		},
 		Storage:           mockStorage,
 		Applier:           applier,
 		PeerStateUpdater:  replicationUpdater,
@@ -240,7 +244,11 @@ func TestRaftSnapshot_Initialize_NoSnapshot(t *testing.T) {
 
 	meta := sm.GetSnapshotMetadata()
 	if meta.LastIncludedIndex != 0 || meta.LastIncludedTerm != 0 {
-		t.Errorf("Expected metadata (0,0), got (%d,%d)", meta.LastIncludedIndex, meta.LastIncludedTerm)
+		t.Errorf(
+			"Expected metadata (0,0), got (%d,%d)",
+			meta.LastIncludedIndex,
+			meta.LastIncludedTerm,
+		)
 	}
 
 	if stateMgr.commitIndexUpdated {
@@ -360,7 +368,8 @@ func TestRaftSnapshot_Initialize_FailedRestoreTriggersInitializeError(t *testing
 	applier.restoreErr = fmt.Errorf("restore error")
 
 	err := sm.Initialize(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "failed to restore state during initialization") {
+	if err == nil ||
+		!strings.Contains(err.Error(), "failed to restore state during initialization") {
 		t.Fatalf("Expected wrapped restore error, got: %v", err)
 	}
 }
@@ -613,7 +622,8 @@ func TestRaftSnapshot_HandleInstall_ValidSnapshot(t *testing.T) {
 	}
 
 	meta := sm.GetSnapshotMetadata()
-	if meta.LastIncludedIndex != args.LastIncludedIndex || meta.LastIncludedTerm != args.LastIncludedTerm {
+	if meta.LastIncludedIndex != args.LastIncludedIndex ||
+		meta.LastIncludedTerm != args.LastIncludedTerm {
 		t.Errorf("Snapshot metadata mismatch: got (%d,%d), expected (%d,%d)",
 			meta.LastIncludedIndex, meta.LastIncludedTerm,
 			args.LastIncludedIndex, args.LastIncludedTerm)
@@ -802,7 +812,10 @@ func TestSendSnapshot_HigherTermInReply(t *testing.T) {
 	}
 }
 
-func setupSnapshotManagerForCompactionTest(t *testing.T, logCompactionMinEntries int) (*snapshotManager, *mockLogManager) {
+func setupSnapshotManagerForCompactionTest(
+	t *testing.T,
+	logCompactionMinEntries int,
+) (*snapshotManager, *mockLogManager) {
 	t.Helper()
 
 	mockStorage := newMockStorage()
@@ -814,9 +827,14 @@ func setupSnapshotManagerForCompactionTest(t *testing.T, logCompactionMinEntries
 	replicationUpdater := &mockReplicationStateUpdater{}
 
 	deps := SnapshotManagerDeps{
-		Mu:                &sync.RWMutex{},
-		ID:                "node1",
-		Config:            Config{Options: Options{SnapshotThreshold: 5, LogCompactionMinEntries: logCompactionMinEntries}},
+		Mu: &sync.RWMutex{},
+		ID: "node1",
+		Config: Config{
+			Options: Options{
+				SnapshotThreshold:       5,
+				LogCompactionMinEntries: logCompactionMinEntries,
+			},
+		},
 		Storage:           mockStorage,
 		Applier:           applier,
 		StateMgr:          stateMgr,
@@ -893,9 +911,12 @@ func TestRaftSnapshot_SnapshotManager_MaybeTriggerLogCompaction(t *testing.T) {
 			expectTruncate:   false,
 		},
 		{
-			name:                  "CompactionTriggered_SnapshotAtZeroIndex",
-			logCompactionMin:      3,
-			snapshotMeta:          types.SnapshotMetadata{LastIncludedIndex: 0, LastIncludedTerm: 0},
+			name:             "CompactionTriggered_SnapshotAtZeroIndex",
+			logCompactionMin: 3,
+			snapshotMeta: types.SnapshotMetadata{
+				LastIncludedIndex: 0,
+				LastIncludedTerm:  0,
+			},
 			logLastIndex:          5, // entriesAfterSnapshot = 5 - 0 = 5. 5 >= 3.
 			expectTruncate:        true,
 			expectedTruncateIndex: 1, // 0 + 1
@@ -944,8 +965,13 @@ func TestRaftSnapshot_SnapshotManager_MaybeTriggerLogCompaction(t *testing.T) {
 				if !truncateCalled.Load() {
 					t.Errorf("Expected log compaction to be triggered, but it was not.")
 				}
-				if truncateCalled.Load() && types.Index(actualTruncateIndex.Load()) != tc.expectedTruncateIndex {
-					t.Errorf("Expected truncation at index %d, got %d.", tc.expectedTruncateIndex, actualTruncateIndex.Load())
+				if truncateCalled.Load() &&
+					types.Index(actualTruncateIndex.Load()) != tc.expectedTruncateIndex {
+					t.Errorf(
+						"Expected truncation at index %d, got %d.",
+						tc.expectedTruncateIndex,
+						actualTruncateIndex.Load(),
+					)
 				}
 			} else {
 				if truncateCalled.Load() {

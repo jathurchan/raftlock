@@ -301,7 +301,11 @@ func TestLockManager_ApplyRenew(t *testing.T) {
 		lock := lm.locks[lockID]
 		testutil.AssertEqual(t, newVersion, lock.Version)
 		expectedExpiry := clock.Now().Add(newTTL)
-		testutil.AssertTrue(t, lock.ExpiresAt.Equal(expectedExpiry) || lock.ExpiresAt.After(expectedExpiry.Add(-time.Second)))
+		testutil.AssertTrue(
+			t,
+			lock.ExpiresAt.Equal(expectedExpiry) ||
+				lock.ExpiresAt.After(expectedExpiry.Add(-time.Second)),
+		)
 		lm.mu.RUnlock()
 	})
 
@@ -365,7 +369,14 @@ func TestLockManager_ApplyWaitQueue(t *testing.T) {
 		newTimeout := 120 * time.Second
 		newPriority := 5
 
-		position, err := lm.ApplyWaitQueue(ctx, lockID, waiterClient, newTimeout, version, newPriority)
+		position, err := lm.ApplyWaitQueue(
+			ctx,
+			lockID,
+			waiterClient,
+			newTimeout,
+			version,
+			newPriority,
+		)
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertEqual(t, 0, position) // Still at same position
@@ -380,7 +391,14 @@ func TestLockManager_ApplyWaitQueue(t *testing.T) {
 		invalidTimeout := -1 * time.Second
 		newClient := types.ClientID("new-waiter")
 
-		position, err := lm.ApplyWaitQueue(ctx, lockID, newClient, invalidTimeout, version, priority)
+		position, err := lm.ApplyWaitQueue(
+			ctx,
+			lockID,
+			newClient,
+			invalidTimeout,
+			version,
+			priority,
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertErrorIs(t, err, ErrInvalidTimeout)

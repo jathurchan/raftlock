@@ -356,11 +356,21 @@ func TestAtomicWrite(t *testing.T) {
 		mockFS.atomicWriteErr = errors.New("simulated atomic write error")
 
 		// Direct write should succeed
-		err = mockFS.WriteMaybeAtomic(filepath.Join(tempDir, "direct.txt"), testContent, 0644, false)
+		err = mockFS.WriteMaybeAtomic(
+			filepath.Join(tempDir, "direct.txt"),
+			testContent,
+			0644,
+			false,
+		)
 		testutil.AssertNoError(t, err)
 
 		// Atomic write should fail with the mocked error
-		err = mockFS.WriteMaybeAtomic(filepath.Join(tempDir, "should-fail.txt"), testContent, 0644, true)
+		err = mockFS.WriteMaybeAtomic(
+			filepath.Join(tempDir, "should-fail.txt"),
+			testContent,
+			0644,
+			true,
+		)
 		testutil.AssertError(t, err)
 	})
 }

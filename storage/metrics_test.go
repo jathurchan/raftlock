@@ -113,7 +113,11 @@ func TestMetricsLatencySampleLimit(t *testing.T) {
 	// Check that the first sample is the 11th one (index 10) after overflow
 	testutil.AssertEqual(t, uint64(10*1000000), (*sampler.b)[0])
 	// Check that the last sample is the one with the highest value
-	testutil.AssertEqual(t, uint64((latencySampleLimit+9)*1000000), (*sampler.b)[latencySampleLimit-1])
+	testutil.AssertEqual(
+		t,
+		uint64((latencySampleLimit+9)*1000000),
+		(*sampler.b)[latencySampleLimit-1],
+	)
 }
 
 func TestPercentileCalculation(t *testing.T) {
@@ -130,8 +134,29 @@ func TestPercentileCalculation(t *testing.T) {
 			expected:   5,
 		},
 		{
-			name:       "P95 of sorted data",
-			samples:    []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+			name: "P95 of sorted data",
+			samples: []uint64{
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+			},
 			percentile: 0.95,
 			expected:   19,
 		},
@@ -195,7 +220,11 @@ func TestMetricsSummary(t *testing.T) {
 	testutil.AssertTrue(t, strings.Contains(summary, "Storage:"))
 
 	// Check for log file size in MiB format (1024*1024 bytes) - match the actual implementation
-	testutil.AssertTrue(t, strings.Contains(summary, "1.00 MiB"), "Expected summary to contain '1.00 MiB'")
+	testutil.AssertTrue(
+		t,
+		strings.Contains(summary, "1.00 MiB"),
+		"Expected summary to contain '1.00 MiB'",
+	)
 
 	testutil.AssertTrue(t, strings.Contains(summary, "Errors:"))
 	testutil.AssertTrue(t, strings.Contains(summary, "Append Errors: 2"))

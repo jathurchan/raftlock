@@ -26,7 +26,11 @@ func TestPredefinedErrors(t *testing.T) {
 		{"ErrShutdownTimeout", ErrShutdownTimeout, "server: shutdown timed out"},
 		{"ErrInvalidRequest", ErrInvalidRequest, "server: invalid request"},
 		{"ErrRaftUnavailable", ErrRaftUnavailable, "server: raft consensus system unavailable"},
-		{"ErrLockManagerUnavailable", ErrLockManagerUnavailable, "server: lock manager unavailable"},
+		{
+			"ErrLockManagerUnavailable",
+			ErrLockManagerUnavailable,
+			"server: lock manager unavailable",
+		},
 	}
 
 	for _, tt := range tests {

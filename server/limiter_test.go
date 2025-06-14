@@ -112,7 +112,10 @@ func TestNewTokenBucketRateLimiter(t *testing.T) {
 				// With infinite rate, all requests should be allowed
 				for i := range 1000 {
 					if !rl.Allow() {
-						t.Errorf("Expected infinite rate limiter to allow all requests, but request %d was denied", i)
+						t.Errorf(
+							"Expected infinite rate limiter to allow all requests, but request %d was denied",
+							i,
+						)
 						break
 					}
 				}
@@ -178,7 +181,12 @@ func TestTokenBucketRateLimiter_Allow(t *testing.T) {
 			}
 
 			if denied != tt.expectDenied {
-				t.Errorf("Expected denied=%v, got denied=%v after %d requests", tt.expectDenied, denied, tt.requests)
+				t.Errorf(
+					"Expected denied=%v, got denied=%v after %d requests",
+					tt.expectDenied,
+					denied,
+					tt.requests,
+				)
 			}
 		})
 	}

@@ -60,14 +60,22 @@ func TestNewAutoRenewer(t *testing.T) {
 		renewer, err := NewAutoRenewer(handle, 2*time.Second, 2*time.Second)
 		testutil.AssertError(t, err)
 		testutil.AssertNil(t, renewer)
-		testutil.AssertContains(t, err.Error(), "lock TTL (2s) must be greater than renewal interval (2s)")
+		testutil.AssertContains(
+			t,
+			err.Error(),
+			"lock TTL (2s) must be greater than renewal interval (2s)",
+		)
 	})
 
 	t.Run("TTLLessThanInterval", func(t *testing.T) {
 		renewer, err := NewAutoRenewer(handle, 2*time.Second, time.Second)
 		testutil.AssertError(t, err)
 		testutil.AssertNil(t, renewer)
-		testutil.AssertContains(t, err.Error(), "lock TTL (1s) must be greater than renewal interval (2s)")
+		testutil.AssertContains(
+			t,
+			err.Error(),
+			"lock TTL (1s) must be greater than renewal interval (2s)",
+		)
 	})
 }
 
@@ -75,7 +83,12 @@ func TestAutoRenewer_StartAndStop(t *testing.T) {
 	handle := newMockLockHandle()
 	clock := newMockClock()
 
-	renewer, err := NewAutoRenewer(handle, 100*time.Millisecond, 200*time.Millisecond, WithClock(clock))
+	renewer, err := NewAutoRenewer(
+		handle,
+		100*time.Millisecond,
+		200*time.Millisecond,
+		WithClock(clock),
+	)
 	testutil.RequireNoError(t, err)
 
 	t.Run("StartSetsContext", func(t *testing.T) {
@@ -124,7 +137,12 @@ func TestAutoRenewer_RenewalLoop(t *testing.T) {
 		handle := newMockLockHandle()
 		clock := newMockClock()
 
-		renewer, err := NewAutoRenewer(handle, 100*time.Millisecond, 200*time.Millisecond, WithClock(clock))
+		renewer, err := NewAutoRenewer(
+			handle,
+			100*time.Millisecond,
+			200*time.Millisecond,
+			WithClock(clock),
+		)
 		testutil.RequireNoError(t, err)
 
 		ctx := context.Background()
@@ -146,7 +164,12 @@ func TestAutoRenewer_RenewalLoop(t *testing.T) {
 		_ = renewer.Stop(stopCtx)
 
 		renewCalls := handle.getRenewCalls()
-		testutil.AssertTrue(t, renewCalls >= 2, "Expected at least 2 renewal calls, got %d", renewCalls)
+		testutil.AssertTrue(
+			t,
+			renewCalls >= 2,
+			"Expected at least 2 renewal calls, got %d",
+			renewCalls,
+		)
 
 		ttls := handle.getRenewedTTLs()
 		for _, ttl := range ttls {
@@ -159,7 +182,12 @@ func TestAutoRenewer_RenewalLoop(t *testing.T) {
 		handle.setHeld(false) // Lock is not held
 		clock := newMockClock()
 
-		renewer, err := NewAutoRenewer(handle, 100*time.Millisecond, 200*time.Millisecond, WithClock(clock))
+		renewer, err := NewAutoRenewer(
+			handle,
+			100*time.Millisecond,
+			200*time.Millisecond,
+			WithClock(clock),
+		)
 		testutil.RequireNoError(t, err)
 
 		ctx := context.Background()
@@ -188,7 +216,12 @@ func TestAutoRenewer_RenewalLoop(t *testing.T) {
 		handle.setRenewError(renewErr)
 		clock := newMockClock()
 
-		renewer, err := NewAutoRenewer(handle, 100*time.Millisecond, 200*time.Millisecond, WithClock(clock))
+		renewer, err := NewAutoRenewer(
+			handle,
+			100*time.Millisecond,
+			200*time.Millisecond,
+			WithClock(clock),
+		)
 		testutil.RequireNoError(t, err)
 
 		ctx := context.Background()
@@ -323,7 +356,12 @@ func TestAutoRenewer_ContextCancellation(t *testing.T) {
 	handle := newMockLockHandle()
 	clock := newMockClock()
 
-	renewer, err := NewAutoRenewer(handle, 100*time.Millisecond, 200*time.Millisecond, WithClock(clock))
+	renewer, err := NewAutoRenewer(
+		handle,
+		100*time.Millisecond,
+		200*time.Millisecond,
+		WithClock(clock),
+	)
 	testutil.RequireNoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -342,7 +380,12 @@ func TestAutoRenewer_ContextCancellation(t *testing.T) {
 
 	err = ar.Err()
 	if err != nil {
-		testutil.AssertTrue(t, errors.Is(err, context.Canceled), "Expected context.Canceled error, got: %v", err)
+		testutil.AssertTrue(
+			t,
+			errors.Is(err, context.Canceled),
+			"Expected context.Canceled error, got: %v",
+			err,
+		)
 	}
 }
 
@@ -362,7 +405,12 @@ func TestAutoRenewer_MultipleTickers(t *testing.T) {
 	handle := newMockLockHandle()
 	clock := newMockClock()
 
-	renewer, err := NewAutoRenewer(handle, 50*time.Millisecond, 100*time.Millisecond, WithClock(clock))
+	renewer, err := NewAutoRenewer(
+		handle,
+		50*time.Millisecond,
+		100*time.Millisecond,
+		WithClock(clock),
+	)
 	testutil.RequireNoError(t, err)
 
 	ctx := context.Background()

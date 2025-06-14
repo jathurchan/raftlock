@@ -77,7 +77,12 @@ func (b *testProposalBuilder) build() *types.PendingProposal {
 	}
 }
 
-func createApplyMsg(index types.Index, term types.Term, data interface{}, err error) types.ApplyMsg {
+func createApplyMsg(
+	index types.Index,
+	term types.Term,
+	data interface{},
+	err error,
+) types.ApplyMsg {
 	return types.ApplyMsg{
 		CommandValid:       true,
 		Command:            []byte(fmt.Sprintf("cmd-%d-%d", term, index)),
@@ -88,7 +93,12 @@ func createApplyMsg(index types.Index, term types.Term, data interface{}, err er
 	}
 }
 
-func waitForResult(t *testing.T, ch <-chan types.ProposalResult, timeout time.Duration, expectResult bool) (*types.ProposalResult, bool) {
+func waitForResult(
+	t *testing.T,
+	ch <-chan types.ProposalResult,
+	timeout time.Duration,
+	expectResult bool,
+) (*types.ProposalResult, bool) {
 	t.Helper()
 
 	select {
@@ -401,8 +411,16 @@ func TestProposalTracker_SnapshotInvalidation(t *testing.T) {
 
 	// Snapshot will be at index 12, so proposals with index <= 12 should be invalidated
 	proposals := []*types.PendingProposal{
-		newTestProposal("1-5").withIndex(5).withTerm(1).build(),   // Should be invalidated (5 <= 12)
-		newTestProposal("1-10").withIndex(10).withTerm(1).build(), // Should be invalidated (10 <= 12)
+		newTestProposal(
+			"1-5",
+		).withIndex(5).
+			withTerm(1).
+			build(), // Should be invalidated (5 <= 12)
+		newTestProposal(
+			"1-10",
+		).withIndex(10).
+			withTerm(1).
+			build(), // Should be invalidated (10 <= 12)
 		newTestProposal("1-15").withIndex(15).withTerm(1).build(), // Should remain (15 > 12)
 		newTestProposal("1-20").withIndex(20).withTerm(1).build(), // Should remain (20 > 12)
 	}
@@ -846,7 +864,11 @@ func TestProposalTracker_GetPendingProposal(t *testing.T) {
 					t.Errorf("Expected Term=%d, got %d", original.Term, proposal.Term)
 				}
 				if proposal.Operation != original.Operation {
-					t.Errorf("Expected Operation=%s, got %s", original.Operation, proposal.Operation)
+					t.Errorf(
+						"Expected Operation=%s, got %s",
+						original.Operation,
+						proposal.Operation,
+					)
 				}
 			}
 		})
@@ -944,7 +966,11 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 		select {
 		case result := <-proposal.ResultCh:
 			if !result.Success || result.Data != "success" {
-				t.Errorf("Expected success with data 'success', got success=%v, data=%v", result.Success, result.Data)
+				t.Errorf(
+					"Expected success with data 'success', got success=%v, data=%v",
+					result.Success,
+					result.Data,
+				)
 			}
 		case <-time.After(100 * time.Millisecond):
 			t.Fatal("Expected immediate result from buffered channel")
@@ -965,7 +991,11 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 		select {
 		case result := <-done:
 			if !result.Success || result.Data != "blocking" {
-				t.Errorf("Expected success with data 'blocking', got success=%v, data=%v", result.Success, result.Data)
+				t.Errorf(
+					"Expected success with data 'blocking', got success=%v, data=%v",
+					result.Success,
+					result.Data,
+				)
 			}
 		case <-time.After(100 * time.Millisecond):
 			t.Fatal("Blocking send should have succeeded")

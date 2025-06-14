@@ -50,20 +50,28 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 			fs: &mockFileSystem{
 				openErr: errors.New("read error"),
 			},
-			serializer:    newJsonSerializer(),
-			index:         &mockIndexService{},
-			expected:      logMetadata{},
-			expectedError: fmt.Errorf("%w: failed to read metadata file: %v", ErrStorageIO, errors.New("read error")),
+			serializer: newJsonSerializer(),
+			index:      &mockIndexService{},
+			expected:   logMetadata{},
+			expectedError: fmt.Errorf(
+				"%w: failed to read metadata file: %v",
+				ErrStorageIO,
+				errors.New("read error"),
+			),
 		},
 		{
 			name: "unmarshal error",
 			fs: &mockFileSystem{
 				files: map[string][]byte{path: []byte("invalid json")},
 			},
-			serializer:    newJsonSerializer(),
-			index:         &mockIndexService{},
-			expected:      logMetadata{},
-			expectedError: fmt.Errorf("%w: failed to unmarshal metadata: %v", ErrCorruptedState, errors.New("invalid character 'i' looking for beginning of value")),
+			serializer: newJsonSerializer(),
+			index:      &mockIndexService{},
+			expected:   logMetadata{},
+			expectedError: fmt.Errorf(
+				"%w: failed to unmarshal metadata: %v",
+				ErrCorruptedState,
+				errors.New("invalid character 'i' looking for beginning of value"),
+			),
 		},
 	}
 

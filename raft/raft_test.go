@@ -14,7 +14,9 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-func createTestRaftNode(t *testing.T) (*raftNode, *mockStateManager, *mockLogManager, *mockElectionManager, *mockSnapshotManager, *mockReplicationManager, *mockNetworkManager, *mockApplier) {
+func createTestRaftNode(
+	t *testing.T,
+) (*raftNode, *mockStateManager, *mockLogManager, *mockElectionManager, *mockSnapshotManager, *mockReplicationManager, *mockNetworkManager, *mockApplier) {
 	t.Helper()
 
 	nodeID := types.NodeID("node1")
@@ -294,7 +296,10 @@ func TestRaft_RaftNode_Tick(t *testing.T) {
 			t.Errorf("Expected election manager Tick not to be called, got %d", electionTickCalled)
 		}
 		if replicationTickCalled != 1 {
-			t.Errorf("Expected replication manager Tick to be called once, got %d", replicationTickCalled)
+			t.Errorf(
+				"Expected replication manager Tick to be called once, got %d",
+				replicationTickCalled,
+			)
 		}
 		if snapshotTickCalled != 1 {
 			t.Errorf("Expected snapshot manager Tick to be called once, got %d", snapshotTickCalled)
@@ -324,13 +329,22 @@ func TestRaft_RaftNode_Tick(t *testing.T) {
 		r.Tick(ctx)
 
 		if electionTickCalled != 0 {
-			t.Errorf("Expected election manager Tick not to be called during shutdown, got %d", electionTickCalled)
+			t.Errorf(
+				"Expected election manager Tick not to be called during shutdown, got %d",
+				electionTickCalled,
+			)
 		}
 		if replicationTickCalled != 0 {
-			t.Errorf("Expected replication manager Tick not to be called during shutdown, got %d", replicationTickCalled)
+			t.Errorf(
+				"Expected replication manager Tick not to be called during shutdown, got %d",
+				replicationTickCalled,
+			)
 		}
 		if snapshotTickCalled != 0 {
-			t.Errorf("Expected snapshot manager Tick not to be called during shutdown, got %d", snapshotTickCalled)
+			t.Errorf(
+				"Expected snapshot manager Tick not to be called during shutdown, got %d",
+				snapshotTickCalled,
+			)
 		}
 	})
 
@@ -360,7 +374,10 @@ func TestRaft_RaftNode_Tick(t *testing.T) {
 			t.Errorf("Expected election manager Tick to be called once, got %d", electionTickCalled)
 		}
 		if replicationTickCalled != 0 {
-			t.Errorf("Expected replication manager Tick not to be called, got %d", replicationTickCalled)
+			t.Errorf(
+				"Expected replication manager Tick not to be called, got %d",
+				replicationTickCalled,
+			)
 		}
 		if snapshotTickCalled != 1 {
 			t.Errorf("Expected snapshot manager Tick to be called once, got %d", snapshotTickCalled)
@@ -563,10 +580,18 @@ func TestRaft_RaftNode_Status(t *testing.T) {
 			t.Errorf("Expected LastApplied %d, got %d", stateMgr.lastApplied, status.LastApplied)
 		}
 		if status.SnapshotIndex != snapshotMgr.meta.LastIncludedIndex {
-			t.Errorf("Expected SnapshotIndex %d, got %d", snapshotMgr.meta.LastIncludedIndex, status.SnapshotIndex)
+			t.Errorf(
+				"Expected SnapshotIndex %d, got %d",
+				snapshotMgr.meta.LastIncludedIndex,
+				status.SnapshotIndex,
+			)
 		}
 		if status.SnapshotTerm != snapshotMgr.meta.LastIncludedTerm {
-			t.Errorf("Expected SnapshotTerm %d, got %d", snapshotMgr.meta.LastIncludedTerm, status.SnapshotTerm)
+			t.Errorf(
+				"Expected SnapshotTerm %d, got %d",
+				snapshotMgr.meta.LastIncludedTerm,
+				status.SnapshotTerm,
+			)
 		}
 
 		if _, exists := status.Replication["node2"]; !exists {
@@ -593,7 +618,10 @@ func TestRaft_RaftNode_Status(t *testing.T) {
 		status := r.Status()
 
 		if len(status.Replication) != 0 {
-			t.Errorf("Expected empty Replication map for follower, got %d entries", len(status.Replication))
+			t.Errorf(
+				"Expected empty Replication map for follower, got %d entries",
+				len(status.Replication),
+			)
 		}
 	})
 }
@@ -683,7 +711,11 @@ func TestRaft_RaftNode_Getters(t *testing.T) {
 		want := r.leaderChangeCh
 
 		if got != want {
-			t.Errorf("LeaderChangeChannel() returned unexpected channel: got %v, want %v", got, want)
+			t.Errorf(
+				"LeaderChangeChannel() returned unexpected channel: got %v, want %v",
+				got,
+				want,
+			)
 		}
 	})
 }
@@ -712,7 +744,11 @@ func TestRaft_RaftNode_RPCHandlers(t *testing.T) {
 			t.Errorf("Expected term %d, got %d", expectedReply.Term, reply.Term)
 		}
 		if reply.VoteGranted != expectedReply.VoteGranted {
-			t.Errorf("Expected VoteGranted %v, got %v", expectedReply.VoteGranted, reply.VoteGranted)
+			t.Errorf(
+				"Expected VoteGranted %v, got %v",
+				expectedReply.VoteGranted,
+				reply.VoteGranted,
+			)
 		}
 	})
 

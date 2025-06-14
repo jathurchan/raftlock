@@ -58,16 +58,56 @@ func TestDefaultRaftLockServerConfig(t *testing.T) {
 		actual   any
 		expected any
 	}{
-		{"ElectionTickCount", config.RaftConfig.Options.ElectionTickCount, raft.DefaultElectionTickCount},
-		{"HeartbeatTickCount", config.RaftConfig.Options.HeartbeatTickCount, raft.DefaultHeartbeatTickCount},
-		{"ElectionRandomizationFactor", config.RaftConfig.Options.ElectionRandomizationFactor, raft.DefaultElectionRandomizationFactor},
-		{"MaxLogEntriesPerRequest", config.RaftConfig.Options.MaxLogEntriesPerRequest, raft.DefaultMaxLogEntriesPerRequest},
-		{"SnapshotThreshold", config.RaftConfig.Options.SnapshotThreshold, raft.DefaultSnapshotThreshold},
-		{"EnableReadIndex", config.RaftConfig.FeatureFlags.EnableReadIndex, raft.DefaultEnableReadIndex},
-		{"EnableLeaderLease", config.RaftConfig.FeatureFlags.EnableLeaderLease, raft.DefaultEnableLeaderLease},
-		{"PreVoteEnabled", config.RaftConfig.FeatureFlags.PreVoteEnabled, raft.DefaultPreVoteEnabled},
-		{"MaxApplyBatchSize", config.RaftConfig.TuningParams.MaxApplyBatchSize, raft.DefaultMaxApplyBatchSize},
-		{"MaxSnapshotChunkSize", config.RaftConfig.TuningParams.MaxSnapshotChunkSize, raft.DefaultMaxSnapshotChunkSize},
+		{
+			"ElectionTickCount",
+			config.RaftConfig.Options.ElectionTickCount,
+			raft.DefaultElectionTickCount,
+		},
+		{
+			"HeartbeatTickCount",
+			config.RaftConfig.Options.HeartbeatTickCount,
+			raft.DefaultHeartbeatTickCount,
+		},
+		{
+			"ElectionRandomizationFactor",
+			config.RaftConfig.Options.ElectionRandomizationFactor,
+			raft.DefaultElectionRandomizationFactor,
+		},
+		{
+			"MaxLogEntriesPerRequest",
+			config.RaftConfig.Options.MaxLogEntriesPerRequest,
+			raft.DefaultMaxLogEntriesPerRequest,
+		},
+		{
+			"SnapshotThreshold",
+			config.RaftConfig.Options.SnapshotThreshold,
+			raft.DefaultSnapshotThreshold,
+		},
+		{
+			"EnableReadIndex",
+			config.RaftConfig.FeatureFlags.EnableReadIndex,
+			raft.DefaultEnableReadIndex,
+		},
+		{
+			"EnableLeaderLease",
+			config.RaftConfig.FeatureFlags.EnableLeaderLease,
+			raft.DefaultEnableLeaderLease,
+		},
+		{
+			"PreVoteEnabled",
+			config.RaftConfig.FeatureFlags.PreVoteEnabled,
+			raft.DefaultPreVoteEnabled,
+		},
+		{
+			"MaxApplyBatchSize",
+			config.RaftConfig.TuningParams.MaxApplyBatchSize,
+			raft.DefaultMaxApplyBatchSize,
+		},
+		{
+			"MaxSnapshotChunkSize",
+			config.RaftConfig.TuningParams.MaxSnapshotChunkSize,
+			raft.DefaultMaxSnapshotChunkSize,
+		},
 	}
 
 	for _, tt := range raftTests {
@@ -364,7 +404,10 @@ func TestRaftLockServerConfig_Validate_LeaderRedirect(t *testing.T) {
 		config.RedirectTimeout = 0
 
 		if err := config.Validate(); err != nil {
-			t.Errorf("Expected disabled leader redirect to ignore invalid timeout, got error: %v", err)
+			t.Errorf(
+				"Expected disabled leader redirect to ignore invalid timeout, got error: %v",
+				err,
+			)
 		}
 	})
 

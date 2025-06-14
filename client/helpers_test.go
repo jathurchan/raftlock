@@ -19,7 +19,10 @@ type mockConnector struct {
 	GetConnectionFunc func(endpoint string, opts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
-func (m *mockConnector) GetConnection(endpoint string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+func (m *mockConnector) GetConnection(
+	endpoint string,
+	opts ...grpc.DialOption,
+) (*grpc.ClientConn, error) {
 	if m.GetConnectionFunc != nil {
 		return m.GetConnectionFunc(endpoint, opts...)
 	}
@@ -274,70 +277,110 @@ type mockRaftLockClient struct {
 	healthFunc           func(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error)
 }
 
-func (m *mockRaftLockClient) Acquire(ctx context.Context, req *pb.AcquireRequest, opts ...grpc.CallOption) (*pb.AcquireResponse, error) {
+func (m *mockRaftLockClient) Acquire(
+	ctx context.Context,
+	req *pb.AcquireRequest,
+	opts ...grpc.CallOption,
+) (*pb.AcquireResponse, error) {
 	if m.acquireFunc != nil {
 		return m.acquireFunc(ctx, req)
 	}
 	return &pb.AcquireResponse{Acquired: true}, nil
 }
 
-func (m *mockRaftLockClient) Release(ctx context.Context, req *pb.ReleaseRequest, opts ...grpc.CallOption) (*pb.ReleaseResponse, error) {
+func (m *mockRaftLockClient) Release(
+	ctx context.Context,
+	req *pb.ReleaseRequest,
+	opts ...grpc.CallOption,
+) (*pb.ReleaseResponse, error) {
 	if m.releaseFunc != nil {
 		return m.releaseFunc(ctx, req, opts...)
 	}
 	return &pb.ReleaseResponse{Released: true}, nil
 }
 
-func (m *mockRaftLockClient) Renew(ctx context.Context, req *pb.RenewRequest, opts ...grpc.CallOption) (*pb.RenewResponse, error) {
+func (m *mockRaftLockClient) Renew(
+	ctx context.Context,
+	req *pb.RenewRequest,
+	opts ...grpc.CallOption,
+) (*pb.RenewResponse, error) {
 	if m.renewFunc != nil {
 		return m.renewFunc(ctx, req, opts...)
 	}
 	return &pb.RenewResponse{Renewed: true}, nil
 }
 
-func (m *mockRaftLockClient) GetLockInfo(ctx context.Context, req *pb.GetLockInfoRequest, opts ...grpc.CallOption) (*pb.GetLockInfoResponse, error) {
+func (m *mockRaftLockClient) GetLockInfo(
+	ctx context.Context,
+	req *pb.GetLockInfoRequest,
+	opts ...grpc.CallOption,
+) (*pb.GetLockInfoResponse, error) {
 	if m.getLockInfoFunc != nil {
 		return m.getLockInfoFunc(ctx, req, opts...)
 	}
 	return &pb.GetLockInfoResponse{}, nil
 }
 
-func (m *mockRaftLockClient) GetLocks(ctx context.Context, req *pb.GetLocksRequest, opts ...grpc.CallOption) (*pb.GetLocksResponse, error) {
+func (m *mockRaftLockClient) GetLocks(
+	ctx context.Context,
+	req *pb.GetLocksRequest,
+	opts ...grpc.CallOption,
+) (*pb.GetLocksResponse, error) {
 	if m.getLocksFunc != nil {
 		return m.getLocksFunc(ctx, req, opts...)
 	}
 	return &pb.GetLocksResponse{}, nil
 }
 
-func (m *mockRaftLockClient) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaiterRequest, opts ...grpc.CallOption) (*pb.EnqueueWaiterResponse, error) {
+func (m *mockRaftLockClient) EnqueueWaiter(
+	ctx context.Context,
+	req *pb.EnqueueWaiterRequest,
+	opts ...grpc.CallOption,
+) (*pb.EnqueueWaiterResponse, error) {
 	if m.enqueueWaiterFunc != nil {
 		return m.enqueueWaiterFunc(ctx, req, opts...)
 	}
 	return &pb.EnqueueWaiterResponse{Enqueued: true}, nil
 }
 
-func (m *mockRaftLockClient) CancelWait(ctx context.Context, req *pb.CancelWaitRequest, opts ...grpc.CallOption) (*pb.CancelWaitResponse, error) {
+func (m *mockRaftLockClient) CancelWait(
+	ctx context.Context,
+	req *pb.CancelWaitRequest,
+	opts ...grpc.CallOption,
+) (*pb.CancelWaitResponse, error) {
 	if m.cancelWaitFunc != nil {
 		return m.cancelWaitFunc(ctx, req, opts...)
 	}
 	return &pb.CancelWaitResponse{Cancelled: true}, nil
 }
 
-func (m *mockRaftLockClient) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error) {
+func (m *mockRaftLockClient) GetBackoffAdvice(
+	ctx context.Context,
+	req *pb.BackoffAdviceRequest,
+	opts ...grpc.CallOption,
+) (*pb.BackoffAdviceResponse, error) {
 	if m.getBackoffAdviceFunc != nil {
 		return m.getBackoffAdviceFunc(ctx, req, opts...)
 	}
 	return &pb.BackoffAdviceResponse{}, nil
 }
 
-func (m *mockRaftLockClient) GetStatus(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error) {
+func (m *mockRaftLockClient) GetStatus(
+	ctx context.Context,
+	req *pb.GetStatusRequest,
+	opts ...grpc.CallOption,
+) (*pb.GetStatusResponse, error) {
 	if m.getStatusFunc != nil {
 		return m.getStatusFunc(ctx, req, opts...)
 	}
 	return &pb.GetStatusResponse{}, nil
 }
 
-func (m *mockRaftLockClient) Health(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
+func (m *mockRaftLockClient) Health(
+	ctx context.Context,
+	req *pb.HealthRequest,
+	opts ...grpc.CallOption,
+) (*pb.HealthResponse, error) {
 	if m.healthFunc != nil {
 		return m.healthFunc(ctx, req, opts...)
 	}
@@ -351,49 +394,89 @@ type adminMockClient struct {
 	getBackoffAdviceFunc func(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error)
 }
 
-func (m *adminMockClient) Acquire(ctx context.Context, req *pb.AcquireRequest, opts ...grpc.CallOption) (*pb.AcquireResponse, error) {
+func (m *adminMockClient) Acquire(
+	ctx context.Context,
+	req *pb.AcquireRequest,
+	opts ...grpc.CallOption,
+) (*pb.AcquireResponse, error) {
 	return &pb.AcquireResponse{}, nil
 }
 
-func (m *adminMockClient) Release(ctx context.Context, req *pb.ReleaseRequest, opts ...grpc.CallOption) (*pb.ReleaseResponse, error) {
+func (m *adminMockClient) Release(
+	ctx context.Context,
+	req *pb.ReleaseRequest,
+	opts ...grpc.CallOption,
+) (*pb.ReleaseResponse, error) {
 	return &pb.ReleaseResponse{}, nil
 }
 
-func (m *adminMockClient) Renew(ctx context.Context, req *pb.RenewRequest, opts ...grpc.CallOption) (*pb.RenewResponse, error) {
+func (m *adminMockClient) Renew(
+	ctx context.Context,
+	req *pb.RenewRequest,
+	opts ...grpc.CallOption,
+) (*pb.RenewResponse, error) {
 	return &pb.RenewResponse{}, nil
 }
 
-func (m *adminMockClient) GetLockInfo(ctx context.Context, req *pb.GetLockInfoRequest, opts ...grpc.CallOption) (*pb.GetLockInfoResponse, error) {
+func (m *adminMockClient) GetLockInfo(
+	ctx context.Context,
+	req *pb.GetLockInfoRequest,
+	opts ...grpc.CallOption,
+) (*pb.GetLockInfoResponse, error) {
 	return &pb.GetLockInfoResponse{}, nil
 }
 
-func (m *adminMockClient) GetLocks(ctx context.Context, req *pb.GetLocksRequest, opts ...grpc.CallOption) (*pb.GetLocksResponse, error) {
+func (m *adminMockClient) GetLocks(
+	ctx context.Context,
+	req *pb.GetLocksRequest,
+	opts ...grpc.CallOption,
+) (*pb.GetLocksResponse, error) {
 	return &pb.GetLocksResponse{}, nil
 }
 
-func (m *adminMockClient) EnqueueWaiter(ctx context.Context, req *pb.EnqueueWaiterRequest, opts ...grpc.CallOption) (*pb.EnqueueWaiterResponse, error) {
+func (m *adminMockClient) EnqueueWaiter(
+	ctx context.Context,
+	req *pb.EnqueueWaiterRequest,
+	opts ...grpc.CallOption,
+) (*pb.EnqueueWaiterResponse, error) {
 	return &pb.EnqueueWaiterResponse{}, nil
 }
 
-func (m *adminMockClient) CancelWait(ctx context.Context, req *pb.CancelWaitRequest, opts ...grpc.CallOption) (*pb.CancelWaitResponse, error) {
+func (m *adminMockClient) CancelWait(
+	ctx context.Context,
+	req *pb.CancelWaitRequest,
+	opts ...grpc.CallOption,
+) (*pb.CancelWaitResponse, error) {
 	return &pb.CancelWaitResponse{}, nil
 }
 
-func (m *adminMockClient) GetBackoffAdvice(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error) {
+func (m *adminMockClient) GetBackoffAdvice(
+	ctx context.Context,
+	req *pb.BackoffAdviceRequest,
+	opts ...grpc.CallOption,
+) (*pb.BackoffAdviceResponse, error) {
 	if m.getBackoffAdviceFunc != nil {
 		return m.getBackoffAdviceFunc(ctx, req, opts...)
 	}
 	return &pb.BackoffAdviceResponse{}, nil
 }
 
-func (m *adminMockClient) GetStatus(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error) {
+func (m *adminMockClient) GetStatus(
+	ctx context.Context,
+	req *pb.GetStatusRequest,
+	opts ...grpc.CallOption,
+) (*pb.GetStatusResponse, error) {
 	if m.getStatusFunc != nil {
 		return m.getStatusFunc(ctx, req, opts...)
 	}
 	return &pb.GetStatusResponse{}, nil
 }
 
-func (m *adminMockClient) Health(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
+func (m *adminMockClient) Health(
+	ctx context.Context,
+	req *pb.HealthRequest,
+	opts ...grpc.CallOption,
+) (*pb.HealthResponse, error) {
 	if m.healthFunc != nil {
 		return m.healthFunc(ctx, req, opts...)
 	}
@@ -419,7 +502,11 @@ type mockBaseClient struct {
 	closed        bool
 }
 
-func (m *mockBaseClient) executeWithRetry(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error {
+func (m *mockBaseClient) executeWithRetry(
+	ctx context.Context,
+	operation string,
+	fn func(ctx context.Context, client pb.RaftLockClient) error,
+) error {
 	if m.executeWithRetryFunc != nil {
 		return m.executeWithRetryFunc(ctx, operation, fn)
 	}
@@ -563,7 +650,10 @@ func (m *mockLockClient) Renew(ctx context.Context, req *RenewRequest) (*RenewRe
 	return &RenewResult{Renewed: true}, nil
 }
 
-func (m *mockLockClient) GetLockInfo(ctx context.Context, req *GetLockInfoRequest) (*LockInfo, error) {
+func (m *mockLockClient) GetLockInfo(
+	ctx context.Context,
+	req *GetLockInfoRequest,
+) (*LockInfo, error) {
 	m.mu.Lock()
 	m.GetLockInfoCalls = append(m.GetLockInfoCalls, GetLockInfoCall{Ctx: ctx, Req: req})
 	m.mu.Unlock()
@@ -574,7 +664,10 @@ func (m *mockLockClient) GetLockInfo(ctx context.Context, req *GetLockInfoReques
 	return &LockInfo{}, nil
 }
 
-func (m *mockLockClient) GetLocks(ctx context.Context, req *GetLocksRequest) (*GetLocksResult, error) {
+func (m *mockLockClient) GetLocks(
+	ctx context.Context,
+	req *GetLocksRequest,
+) (*GetLocksResult, error) {
 	m.mu.Lock()
 	m.GetLocksCalls = append(m.GetLocksCalls, GetLocksCall{Ctx: ctx, Req: req})
 	m.mu.Unlock()

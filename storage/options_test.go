@@ -35,5 +35,10 @@ func TestDefaultFileStorageOptions(t *testing.T) {
 		LockTimeout:            defaultLockTimeoutSeconds,
 	}
 
-	testutil.AssertEqual(t, expected, options, "DefaultFileStorageOptions() returned unexpected values")
+	testutil.AssertEqual(
+		t,
+		expected,
+		options,
+		"DefaultFileStorageOptions() returned unexpected values",
+	)
 }

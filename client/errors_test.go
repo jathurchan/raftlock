@@ -240,12 +240,21 @@ func TestNewClientError(t *testing.T) {
 	}
 
 	if len(clientErr.Details) != len(details) {
-		t.Errorf("NewClientError().Details length = %v, want %v", len(clientErr.Details), len(details))
+		t.Errorf(
+			"NewClientError().Details length = %v, want %v",
+			len(clientErr.Details),
+			len(details),
+		)
 	}
 
 	for key, value := range details {
 		if clientErr.Details[key] != value {
-			t.Errorf("NewClientError().Details[%q] = %v, want %v", key, clientErr.Details[key], value)
+			t.Errorf(
+				"NewClientError().Details[%q] = %v, want %v",
+				key,
+				clientErr.Details[key],
+				value,
+			)
 		}
 	}
 }

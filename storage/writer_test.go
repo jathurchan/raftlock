@@ -35,7 +35,12 @@ func TestWriteEntriesToFile(t *testing.T) {
 		}
 
 		startOffset := int64(10)
-		offsets, finalOffset, err := writer.WriteEntriesToFile(context.Background(), mockFile, startOffset, testEntries)
+		offsets, finalOffset, err := writer.WriteEntriesToFile(
+			context.Background(),
+			mockFile,
+			startOffset,
+			testEntries,
+		)
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertEqual(t, 3, len(offsets))
@@ -599,7 +604,12 @@ func TestLogWriterWithJSONSerializer(t *testing.T) {
 		}
 
 		// Write entry
-		_, finalOffset, err := writer.WriteEntriesToFile(context.Background(), mockFile, 0, testEntries)
+		_, finalOffset, err := writer.WriteEntriesToFile(
+			context.Background(),
+			mockFile,
+			0,
+			testEntries,
+		)
 		testutil.AssertNoError(t, err)
 		testutil.AssertEqual(t, int64(buffer.Len()), finalOffset)
 
@@ -649,7 +659,12 @@ func TestLogWriterWithBinarySerializer(t *testing.T) {
 		}
 
 		// Write entry
-		_, finalOffset, err := writer.WriteEntriesToFile(context.Background(), mockFile, 0, testEntries)
+		_, finalOffset, err := writer.WriteEntriesToFile(
+			context.Background(),
+			mockFile,
+			0,
+			testEntries,
+		)
 		testutil.AssertNoError(t, err)
 		testutil.AssertEqual(t, int64(buffer.Len()), finalOffset)
 
@@ -678,17 +693,19 @@ func TestLogWriterWithBinarySerializer(t *testing.T) {
 }
 
 // TestLogAppenderCloseErrorDuringRollback tests the code path where file.Close() fails during rollback
-func TestLogAppenderCloseErrorDuringRollback(t *testing.T) {
-	errorwCalled := false
-	warnwCalled := false
+func TestLogAppender_RollbackFailsOnClose(t *testing.T) {
+	var closeErrorLogged, rollbackWarningLogged bool
+
 	mockLog := &logger.NoOpLogger{
 		ErrorwFunc: func(msg string, keysAndValues ...any) {
-			if msg == "failed to close file during rollback" {
-				errorwCalled = true
+			if msg == "rollback failed: unable to close file" {
+				closeErrorLogged = true
 			}
 		},
 		WarnwFunc: func(msg string, keysAndValues ...any) {
-			warnwCalled = true
+			if msg == "rolling back write operation" {
+				rollbackWarningLogged = true
+			}
 		},
 	}
 
@@ -716,11 +733,15 @@ func TestLogAppenderCloseErrorDuringRollback(t *testing.T) {
 
 	_, err := appender.Append(context.Background(), testEntries, 0)
 
-	testutil.AssertError(t, err)
-	testutil.AssertErrorIs(t, err, ErrStorageIO)
+	testutil.AssertError(t, err, "Expected an error from Append")
+	testutil.AssertErrorIs(t, err, ErrStorageIO, "Expected the error to be of type ErrStorageIO")
 
-	testutil.AssertTrue(t, errorwCalled, "Expected ErrorwFunc to be called for close error")
-	testutil.AssertTrue(t, warnwCalled, "Expected WarnwFunc to be called")
+	testutil.AssertTrue(t, rollbackWarningLogged, "Expected rollback warning to be logged")
+	testutil.AssertTrue(
+		t,
+		closeErrorLogged,
+		"Expected the file close error during rollback to be logged",
+	)
 }
 
 // TestLogRewriterRemoveErrorDuringCleanup tests the code path where fs.Remove() fails during cleanup
@@ -748,7 +769,7 @@ func TestLogRewriterRemoveErrorDuringCleanup(t *testing.T) {
 	fs.AppendFileFunc = func(name string) (file, error) {
 		return mockFile, nil
 	}
-	// Set remove to fail (but not with NotExist error)
+
 	fs.RemoveFunc = func(name string) error {
 		return errors.New("remove error")
 	}
@@ -769,7 +790,7 @@ func TestLogAppenderRollbackPerformed(t *testing.T) {
 	rollbackPerformed := false
 	mockLog := &logger.NoOpLogger{
 		WarnwFunc: func(msg string, keysAndValues ...any) {
-			if msg == "rollback performed" {
+			if msg == "rolling back write operation" {
 				rollbackPerformed = true
 			}
 		},
@@ -789,7 +810,6 @@ func TestLogAppenderRollbackPerformed(t *testing.T) {
 	fs.AppendFileFunc = func(name string) (file, error) {
 		return mockFile, nil
 	}
-	// Make sure truncate doesn't return an error, to ensure the "rollback performed" message is logged
 	fs.TruncateFunc = func(name string, size int64) error {
 		return nil
 	}
@@ -803,5 +823,9 @@ func TestLogAppenderRollbackPerformed(t *testing.T) {
 	testutil.AssertError(t, err)
 	testutil.AssertErrorIs(t, err, ErrStorageIO)
 
-	testutil.AssertTrue(t, rollbackPerformed, "Expected 'rollback performed' message to be logged")
+	testutil.AssertTrue(
+		t,
+		rollbackPerformed,
+		"Expected 'rolling back write operation' message to be logged",
+	)
 }

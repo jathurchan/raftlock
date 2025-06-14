@@ -17,7 +17,10 @@ const (
 	testWaitMargin      = 20 * time.Millisecond
 )
 
-func newTestLocker(options FileStorageOptions, logger logger.Logger) (*defaultRWOperationLocker, *atomic.Uint64) {
+func newTestLocker(
+	options FileStorageOptions,
+	logger logger.Logger,
+) (*defaultRWOperationLocker, *atomic.Uint64) {
 	slowOpsCounter := &atomic.Uint64{}
 	lock := &sync.RWMutex{}
 	locker := newRWOperationLocker(lock, logger, options, slowOpsCounter).(*defaultRWOperationLocker)
@@ -232,5 +235,9 @@ func TestRWOperationLocker_CoversCtxErrAfterLock(t *testing.T) {
 	})
 
 	testutil.AssertErrorIs(t, err, context.Canceled)
-	testutil.AssertFalse(t, called, "Function should NOT be called if ctx.Err() is set after lock acquired")
+	testutil.AssertFalse(
+		t,
+		called,
+		"Function should NOT be called if ctx.Err() is set after lock acquired",
+	)
 }

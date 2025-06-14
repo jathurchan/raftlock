@@ -535,8 +535,29 @@ func TestComputePercentile(t *testing.T) {
 			expected:   3, // index 1.5 rounded down to 1
 		},
 		{
-			name:       "95th percentile",
-			samples:    []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+			name: "95th percentile",
+			samples: []uint64{
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+			},
 			percentile: 0.95,
 			expected:   19, // index 18.05 rounded down to 18
 		},
@@ -569,8 +590,15 @@ func TestComputePercentile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := computePercentile(tc.samples, tc.percentile)
-			testutil.AssertEqual(t, tc.expected, result, "Expected %d for percentile %.2f but got %d",
-				tc.expected, tc.percentile, result)
+			testutil.AssertEqual(
+				t,
+				tc.expected,
+				result,
+				"Expected %d for percentile %.2f but got %d",
+				tc.expected,
+				tc.percentile,
+				result,
+			)
 
 			// Verify the original slice is not modified
 			if len(tc.samples) > 0 {
