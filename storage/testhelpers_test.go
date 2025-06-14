@@ -182,7 +182,11 @@ func (mfs *mockFileSystem) defaultStat(name string) (os.FileInfo, error) {
 
 	data, ok := mfs.files[name]
 	if ok {
-		return &mockFileInfo{nameVal: filepath.Base(name), sizeVal: int64(len(data)), isDir: false}, nil
+		return &mockFileInfo{
+			nameVal: filepath.Base(name),
+			sizeVal: int64(len(data)),
+			isDir:   false,
+		}, nil
 	}
 
 	dirPrefix := name
@@ -205,7 +209,12 @@ func (mfs *mockFileSystem) Stat(name string) (os.FileInfo, error) {
 	return mfs.defaultStat(name)
 }
 
-func (mfs *mockFileSystem) WriteMaybeAtomic(path string, data []byte, perm os.FileMode, atomic bool) error {
+func (mfs *mockFileSystem) WriteMaybeAtomic(
+	path string,
+	data []byte,
+	perm os.FileMode,
+	atomic bool,
+) error {
 	if mfs.WriteMaybeAtomicFunc != nil {
 		return mfs.WriteMaybeAtomicFunc(path, data, perm, atomic)
 	}
@@ -610,7 +619,9 @@ func (m *mockSerializer) UnmarshalSnapshotMetadata(data []byte) (types.SnapshotM
 	if m.unmarshalSnapshotMetadataFunc != nil {
 		return m.unmarshalSnapshotMetadataFunc(data)
 	}
-	return types.SnapshotMetadata{}, errors.New("mockSerializer: unmarshalSnapshotMetadataFunc not set")
+	return types.SnapshotMetadata{}, errors.New(
+		"mockSerializer: unmarshalSnapshotMetadataFunc not set",
+	)
 }
 
 // mockLogEntryReader implements logEntryReader for testing
@@ -696,7 +707,11 @@ func (m *mockLogEntryReader) ReadNext(f file) (types.LogEntry, int64, error) {
 	return entry, bytes, err
 }
 
-func (m *mockLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex types.Index) (types.LogEntry, int64, error) {
+func (m *mockLogEntryReader) ReadAtOffset(
+	file file,
+	offset int64,
+	expectedIndex types.Index,
+) (types.LogEntry, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -704,7 +719,12 @@ func (m *mockLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex
 		if off == offset {
 			entry := m.entries[i]
 			if expectedIndex != 0 && entry.Index != expectedIndex {
-				return types.LogEntry{}, m.bytesRead[i], fmt.Errorf("%w: index mismatch (expected %d, got %d)", ErrCorruptedLog, expectedIndex, entry.Index)
+				return types.LogEntry{}, m.bytesRead[i], fmt.Errorf(
+					"%w: index mismatch (expected %d, got %d)",
+					ErrCorruptedLog,
+					expectedIndex,
+					entry.Index,
+				)
 			}
 			return entry, m.bytesRead[i], m.readErrors[i]
 		}
@@ -713,7 +733,11 @@ func (m *mockLogEntryReader) ReadAtOffset(file file, offset int64, expectedIndex
 	return types.LogEntry{}, 0, io.EOF // simulate missing offset
 }
 
-func (m *mockLogEntryReader) ScanRange(ctx context.Context, file file, start, end types.Index) ([]types.LogEntry, error) {
+func (m *mockLogEntryReader) ScanRange(
+	ctx context.Context,
+	file file,
+	start, end types.Index,
+) ([]types.LogEntry, error) {
 	if m.ScanRangeFunc != nil {
 		return m.ScanRangeFunc(ctx, file, start, end)
 	}
@@ -765,7 +789,12 @@ func (m *mockIndexService) Build(logPath string) (buildResult, error) {
 	panic("mockIndexService.Build not implemented")
 }
 
-func (m *mockIndexService) ReadInRange(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
+func (m *mockIndexService) ReadInRange(
+	ctx context.Context,
+	logPath string,
+	indexMap []types.IndexOffsetPair,
+	start, end types.Index,
+) ([]types.LogEntry, int64, error) {
 	if m.ReadInRangeFunc != nil {
 		return m.ReadInRangeFunc(ctx, logPath, indexMap, start, end)
 	}
@@ -779,7 +808,10 @@ func (m *mockIndexService) VerifyConsistency(indexMap []types.IndexOffsetPair) e
 	return nil
 }
 
-func (m *mockIndexService) GetBounds(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
+func (m *mockIndexService) GetBounds(
+	indexMap []types.IndexOffsetPair,
+	currentFirst, currentLast types.Index,
+) boundsResult {
 	if m.GetBoundsFunc != nil {
 		return m.GetBoundsFunc(indexMap, currentFirst, currentLast)
 	}
@@ -793,7 +825,10 @@ func (m *mockIndexService) Append(base, additions []types.IndexOffsetPair) []typ
 	return append(base, additions...)
 }
 
-func (m *mockIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count int) []types.IndexOffsetPair {
+func (m *mockIndexService) TruncateLast(
+	indexMap []types.IndexOffsetPair,
+	count int,
+) []types.IndexOffsetPair {
 	m.truncateLastCalled = true
 	m.truncateLastCount = count
 
@@ -809,21 +844,30 @@ func (m *mockIndexService) TruncateLast(indexMap []types.IndexOffsetPair, count 
 	return indexMap[:len(indexMap)-count]
 }
 
-func (m *mockIndexService) FindFirstIndexAtOrAfter(indexMap []types.IndexOffsetPair, target types.Index) int {
+func (m *mockIndexService) FindFirstIndexAtOrAfter(
+	indexMap []types.IndexOffsetPair,
+	target types.Index,
+) int {
 	if m.FindFirstIndexFunc != nil {
 		return m.FindFirstIndexFunc(indexMap, target)
 	}
 	panic("mockIndexService.FindFirstIndexAtOrAfter not implemented")
 }
 
-func (m *mockIndexService) TruncateAfter(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+func (m *mockIndexService) TruncateAfter(
+	indexMap []types.IndexOffsetPair,
+	target types.Index,
+) []types.IndexOffsetPair {
 	if m.TruncateAfterFunc != nil {
 		return m.TruncateAfterFunc(indexMap, target)
 	}
 	panic("mockIndexService.TruncateAfter not implemented")
 }
 
-func (m *mockIndexService) TruncateBefore(indexMap []types.IndexOffsetPair, target types.Index) []types.IndexOffsetPair {
+func (m *mockIndexService) TruncateBefore(
+	indexMap []types.IndexOffsetPair,
+	target types.Index,
+) []types.IndexOffsetPair {
 	if m.TruncateBeforeFunc != nil {
 		return m.TruncateBeforeFunc(indexMap, target)
 	}
@@ -853,7 +897,12 @@ func (mms *mockMetadataService) LoadMetadata(path string) (logMetadata, error) {
 	}
 	return logMetadata{}, mms.loadError
 }
-func (mms *mockMetadataService) SaveMetadata(path string, metadata logMetadata, useAtomicWrite bool) error {
+
+func (mms *mockMetadataService) SaveMetadata(
+	path string,
+	metadata logMetadata,
+	useAtomicWrite bool,
+) error {
 	mms.saveCalled = true
 	mms.savedPath = path
 	mms.savedMetadata = metadata
@@ -863,9 +912,23 @@ func (mms *mockMetadataService) SaveMetadata(path string, metadata logMetadata, 
 	}
 	return mms.saveError
 }
-func (mms *mockMetadataService) SyncMetadataFromIndexMap(path string, indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index, context string, useAtomicWrite bool) (types.Index, types.Index, error) {
+
+func (mms *mockMetadataService) SyncMetadataFromIndexMap(
+	path string,
+	indexMap []types.IndexOffsetPair,
+	currentFirst, currentLast types.Index,
+	context string,
+	useAtomicWrite bool,
+) (types.Index, types.Index, error) {
 	if mms.SyncMetadataFromIndexMapFunc != nil {
-		return mms.SyncMetadataFromIndexMapFunc(path, indexMap, currentFirst, currentLast, context, useAtomicWrite)
+		return mms.SyncMetadataFromIndexMapFunc(
+			path,
+			indexMap,
+			currentFirst,
+			currentLast,
+			context,
+			useAtomicWrite,
+		)
 	}
 	return 0, 0, mms.syncError
 }
@@ -1001,7 +1064,11 @@ type mockLogAppender struct {
 	appendFunc func(context.Context, []types.LogEntry, types.Index) (appendResult, error)
 }
 
-func (m *mockLogAppender) Append(ctx context.Context, entries []types.LogEntry, currentLast types.Index) (appendResult, error) {
+func (m *mockLogAppender) Append(
+	ctx context.Context,
+	entries []types.LogEntry,
+	currentLast types.Index,
+) (appendResult, error) {
 	if m.appendFunc != nil {
 		return m.appendFunc(ctx, entries, currentLast)
 	}
@@ -1024,7 +1091,10 @@ type mockLogRewriter struct {
 	}
 }
 
-func (m *mockLogRewriter) Rewrite(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error) {
+func (m *mockLogRewriter) Rewrite(
+	ctx context.Context,
+	entries []types.LogEntry,
+) ([]types.IndexOffsetPair, error) {
 	m.rewriteCall.ctx = ctx
 	m.rewriteCall.entries = entries
 	m.rewriteCall.callCount++
@@ -1057,7 +1127,11 @@ type mockSnapshotWriter struct {
 	writeFunc func(context.Context, types.SnapshotMetadata, []byte) error
 }
 
-func (m *mockSnapshotWriter) Write(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+func (m *mockSnapshotWriter) Write(
+	ctx context.Context,
+	metadata types.SnapshotMetadata,
+	data []byte,
+) error {
 	if m.writeFunc != nil {
 		return m.writeFunc(ctx, metadata, data)
 	}
@@ -1129,7 +1203,11 @@ func newMockStorageDependencies() *mockStorageDependencies {
 }
 
 // createFileStorageWithMocks creates a new FileStorage with the provided mock dependencies
-func createFileStorageWithMocks(cfg StorageConfig, options FileStorageOptions, deps *mockStorageDependencies) (*FileStorage, error) {
+func createFileStorageWithMocks(
+	cfg StorageConfig,
+	options FileStorageOptions,
+	deps *mockStorageDependencies,
+) (*FileStorage, error) {
 	s := &FileStorage{
 		dir:            cfg.Dir,
 		options:        options,
@@ -1168,7 +1246,12 @@ func createFileStorageWithMocks(cfg StorageConfig, options FileStorageOptions, d
 }
 
 // checkStorage validates FileStorage behavior in tests
-func checkStorage(t *testing.T, s *FileStorage, expectedFirst, expectedLast types.Index, expectedStatus storageStatus) {
+func checkStorage(
+	t *testing.T,
+	s *FileStorage,
+	expectedFirst, expectedLast types.Index,
+	expectedStatus storageStatus,
+) {
 	t.Helper()
 
 	actualFirst := s.FirstLogIndex()
@@ -1181,14 +1264,29 @@ func checkStorage(t *testing.T, s *FileStorage, expectedFirst, expectedLast type
 }
 
 // verifyAppendCall checks if Append was called correctly
-func verifyAppendCall(t *testing.T, mock *mockLogAppender, expectedEntries []types.LogEntry, expectedLastIndex types.Index) {
+func verifyAppendCall(
+	t *testing.T,
+	mock *mockLogAppender,
+	expectedEntries []types.LogEntry,
+	expectedLastIndex types.Index,
+) {
 	t.Helper()
 
 	testutil.AssertTrue(t, mock.appendArgs.callCount > 0, "Append should have been called")
-	testutil.AssertEqual(t, expectedLastIndex, mock.appendArgs.lastCurrent, "Last index mismatch in Append call")
+	testutil.AssertEqual(
+		t,
+		expectedLastIndex,
+		mock.appendArgs.lastCurrent,
+		"Last index mismatch in Append call",
+	)
 
 	if expectedEntries != nil {
-		testutil.AssertEqual(t, len(expectedEntries), len(mock.appendArgs.lastEntries), "Entry count mismatch in Append call")
+		testutil.AssertEqual(
+			t,
+			len(expectedEntries),
+			len(mock.appendArgs.lastEntries),
+			"Entry count mismatch in Append call",
+		)
 
 		for i := range expectedEntries {
 			testutil.AssertEqual(t, expectedEntries[i].Index, mock.appendArgs.lastEntries[i].Index,
@@ -1250,7 +1348,12 @@ func newTestStorageBuilder(t *testing.T) *testStorageBuilder {
 		LastIndex:  1,
 		Offsets:    []types.IndexOffsetPair{{Index: 1, Offset: 0}},
 	}
-	deps.indexSvc.getBoundsResult = boundsResult{NewFirst: 1, NewLast: 1, Changed: false, WasReset: false}
+	deps.indexSvc.getBoundsResult = boundsResult{
+		NewFirst: 1,
+		NewLast:  1,
+		Changed:  false,
+		WasReset: false,
+	}
 	deps.snapshotReader.readResult = struct {
 		metadata types.SnapshotMetadata
 		data     []byte
@@ -1279,7 +1382,9 @@ func (b *testStorageBuilder) WithOptions(opts FileStorageOptions) *testStorageBu
 	return b
 }
 
-func (b *testStorageBuilder) WithDeps(configure func(*mockStorageDependencies)) *testStorageBuilder {
+func (b *testStorageBuilder) WithDeps(
+	configure func(*mockStorageDependencies),
+) *testStorageBuilder {
 	configure(b.deps)
 	return b
 }

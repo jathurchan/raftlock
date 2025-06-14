@@ -53,7 +53,11 @@ func TestNewBaseClient(t *testing.T) {
 		config.EnableMetrics = false
 		client, err := newBaseClient(config)
 		testutil.RequireNoError(t, err)
-		testutil.AssertEqual(t, reflect.TypeOf(&noOpMetrics{}), reflect.TypeOf(client.(*baseClientImpl).getMetrics()))
+		testutil.AssertEqual(
+			t,
+			reflect.TypeOf(&noOpMetrics{}),
+			reflect.TypeOf(client.(*baseClientImpl).getMetrics()),
+		)
 	})
 }
 
@@ -69,9 +73,13 @@ func TestBaseClient_Close(t *testing.T) {
 	testutil.AssertError(t, err)
 	testutil.AssertEqual(t, ErrClientClosed, err)
 
-	err = client.executeWithRetry(context.Background(), "test", func(ctx context.Context, c pb.RaftLockClient) error {
-		return nil
-	})
+	err = client.executeWithRetry(
+		context.Background(),
+		"test",
+		func(ctx context.Context, c pb.RaftLockClient) error {
+			return nil
+		},
+	)
 	testutil.AssertEqual(t, ErrClientClosed, err)
 }
 
@@ -118,9 +126,13 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			err := client.executeWithRetry(context.Background(), "testOp", func(ctx context.Context, c pb.RaftLockClient) error {
-				return nil
-			})
+			err := client.executeWithRetry(
+				context.Background(),
+				"testOp",
+				func(ctx context.Context, c pb.RaftLockClient) error {
+					return nil
+				},
+			)
 			done <- err
 		}()
 
@@ -151,7 +163,11 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 	checkResults: // Early success: exit retry loop and proceed to assertions to avoid blocking on nonexistent timers.
 		testutil.AssertEqual(t, int32(3), callCount.Load())
 		testutil.AssertEqual(t, uint64(1), client.metrics.GetSuccessCount("testOp"))
-		testutil.AssertTrue(t, client.metrics.GetRetryCount("testOp") >= 1, "Expected at least 1 retry")
+		testutil.AssertTrue(
+			t,
+			client.metrics.GetRetryCount("testOp") >= 1,
+			"Expected at least 1 retry",
+		)
 	})
 
 	t.Run("FailureAfterMaxRetries", func(t *testing.T) {
@@ -169,10 +185,14 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			err := client.executeWithRetry(context.Background(), "testOp", func(ctx context.Context, c pb.RaftLockClient) error {
-				t.Error("Operation function should not be called when tryEndpoint fails")
-				return nil
-			})
+			err := client.executeWithRetry(
+				context.Background(),
+				"testOp",
+				func(ctx context.Context, c pb.RaftLockClient) error {
+					t.Error("Operation function should not be called when tryEndpoint fails")
+					return nil
+				},
+			)
 			done <- err
 		}()
 
@@ -219,14 +239,22 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 			expectedMinCalls, actualCalls)
 
 		testutil.AssertEqual(t, uint64(1), client.metrics.GetFailureCount("testOp"))
-		testutil.AssertEqual(t, uint64(config.RetryPolicy.MaxRetries), client.metrics.GetRetryCount("testOp"))
+		testutil.AssertEqual(
+			t,
+			uint64(config.RetryPolicy.MaxRetries),
+			client.metrics.GetRetryCount("testOp"),
+		)
 	})
 
 	t.Run("LeaderRedirectSuccess", func(t *testing.T) {
 		client, _, _, _ := setupMockedClient(DefaultClientConfig())
 		client.setCurrentLeader("endpoint1")
 
-		notLeaderErr := newStatusError(pb.ErrorCode_NOT_LEADER, "not leader", map[string]string{"leader_address": "endpoint2"})
+		notLeaderErr := newStatusError(
+			pb.ErrorCode_NOT_LEADER,
+			"not leader",
+			map[string]string{"leader_address": "endpoint2"},
+		)
 		var calls []string
 
 		// Current logic in base.go:
@@ -250,9 +278,13 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 			}
 		}
 
-		err := client.executeWithRetry(context.Background(), "testOp", func(ctx context.Context, c pb.RaftLockClient) error {
-			return nil
-		})
+		err := client.executeWithRetry(
+			context.Background(),
+			"testOp",
+			func(ctx context.Context, c pb.RaftLockClient) error {
+				return nil
+			},
+		)
 
 		testutil.RequireNoError(t, err)
 
@@ -333,9 +365,13 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			err := client.executeWithRetry(context.Background(), "testOp", func(ctx context.Context, c pb.RaftLockClient) error {
-				return nil
-			})
+			err := client.executeWithRetry(
+				context.Background(),
+				"testOp",
+				func(ctx context.Context, c pb.RaftLockClient) error {
+					return nil
+				},
+			)
 			done <- err
 		}()
 
@@ -377,7 +413,13 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 					count++
 				}
 			}
-			testutil.AssertEqual(t, 2, count, "Expected endpoint %s to be tried 2 times", expectedEndpoint)
+			testutil.AssertEqual(
+				t,
+				2,
+				count,
+				"Expected endpoint %s to be tried 2 times",
+				expectedEndpoint,
+			)
 		}
 
 		testutil.AssertEqual(t, uint64(1), client.metrics.GetFailureCount("testOp"))
@@ -602,7 +644,12 @@ func TestBaseClientImpl_GetConnection(t *testing.T) {
 			check: func(t *testing.T, conn *grpc.ClientConn, err error, client *baseClientImpl) {
 				testutil.RequireNoError(t, err)
 				testutil.AssertEqual(t, expectedConn, conn, "should return the new connection")
-				testutil.AssertEqual(t, expectedConn, client.conns["host1"], "connection should be cached")
+				testutil.AssertEqual(
+					t,
+					expectedConn,
+					client.conns["host1"],
+					"connection should be cached",
+				)
 			},
 		},
 		{
@@ -629,7 +676,9 @@ func TestBaseClientImpl_GetConnection(t *testing.T) {
 			setup: func(t *testing.T, client *baseClientImpl, m *mockConnector) {
 				client.conns["host1"] = expectedConn
 				m.GetConnectionFunc = func(endpoint string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-					t.Fatal("connector.GetConnection should not be called when a connection is cached")
+					t.Fatal(
+						"connector.GetConnection should not be called when a connection is cached",
+					)
 					return nil, nil
 				}
 			},

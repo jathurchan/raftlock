@@ -164,7 +164,10 @@ func TestServer_NewRaftLockServer_ValidationFailure(t *testing.T) {
 		t.Fatal("Expected error for invalid config but got nil")
 	}
 	if !strings.Contains(err.Error(), "invalid server configuration") {
-		t.Errorf("Expected error message to contain 'invalid server configuration', got: %s", err.Error())
+		t.Errorf(
+			"Expected error message to contain 'invalid server configuration', got: %s",
+			err.Error(),
+		)
 	}
 }
 
@@ -234,7 +237,12 @@ func TestServer_ExtractMethodName(t *testing.T) {
 	for _, test := range tests {
 		result := extractMethodName(test.fullMethod)
 		if result != test.expected {
-			t.Errorf("extractMethodName(%s) = %s, expected %s", test.fullMethod, result, test.expected)
+			t.Errorf(
+				"extractMethodName(%s) = %s, expected %s",
+				test.fullMethod,
+				result,
+				test.expected,
+			)
 		}
 	}
 }
@@ -536,8 +544,12 @@ func TestServer_CalculateBackoffDuration(t *testing.T) {
 	durationWithWaiters := server.calculateBackoffDuration(lockInfo)
 
 	if durationWithWaiters <= duration {
-		t.Errorf("Expected longer duration with more waiters: %v vs %v (both may be hitting MaxBackoffAdvice=%v)",
-			durationWithWaiters, duration, MaxBackoffAdvice)
+		t.Errorf(
+			"Expected longer duration with more waiters: %v vs %v (both may be hitting MaxBackoffAdvice=%v)",
+			durationWithWaiters,
+			duration,
+			MaxBackoffAdvice,
+		)
 	}
 }
 
@@ -550,7 +562,11 @@ func TestServer_LockInfoToBackoffAdvice(t *testing.T) {
 		t.Fatal("Expected non-nil advice")
 	}
 	if advice.InitialBackoff.AsDuration() != DefaultBackoffInitial {
-		t.Errorf("Expected initial backoff %v, got %v", DefaultBackoffInitial, advice.InitialBackoff.AsDuration())
+		t.Errorf(
+			"Expected initial backoff %v, got %v",
+			DefaultBackoffInitial,
+			advice.InitialBackoff.AsDuration(),
+		)
 	}
 
 	// Test with available lock
@@ -777,8 +793,11 @@ func TestServer_ResolveAcquireWaitTimeout(t *testing.T) {
 		errorMsgContent string // Check for a substring in the error message
 	}{
 		{
-			name:            "Wait is false, WaitTimeout ignored",
-			req:             &pb.AcquireRequest{Wait: false, WaitTimeout: durationpb.New(10 * time.Second)},
+			name: "Wait is false, WaitTimeout ignored",
+			req: &pb.AcquireRequest{
+				Wait:        false,
+				WaitTimeout: durationpb.New(10 * time.Second),
+			},
 			expectedTimeout: 0,
 			expectError:     false,
 		},
@@ -789,47 +808,80 @@ func TestServer_ResolveAcquireWaitTimeout(t *testing.T) {
 			expectError:     false,
 		},
 		{
-			name:            "Wait is true, WaitTimeout is invalid protobuf duration (e.g., negative seconds, valid nanos of different sign - though durationpb.New handles simple cases)",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: &durationpb.Duration{Seconds: 1, Nanos: -1000}},
+			name: "Wait is true, WaitTimeout is invalid protobuf duration (e.g., negative seconds, valid nanos of different sign - though durationpb.New handles simple cases)",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: &durationpb.Duration{Seconds: 1, Nanos: -1000},
+			},
 			expectedTimeout: lock.DefaultWaitQueueTimeout, // Falls back to default because !req.WaitTimeout.IsValid()
 			expectError:     false,
 		},
 		{
-			name:            "Wait is true, WaitTimeout is negative duration (semantically invalid)",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: durationpb.New(-5 * time.Second)},
+			name: "Wait is true, WaitTimeout is negative duration (semantically invalid)",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: durationpb.New(-5 * time.Second),
+			},
 			expectedTimeout: 0, // Duration is 0 when an error is returned for out-of-bounds
 			expectError:     true,
-			errorMsgContent: fmt.Sprintf(ErrMsgInvalidTimeout, lock.MinWaitQueueTimeout, lock.MaxWaitQueueTimeout),
+			errorMsgContent: fmt.Sprintf(
+				ErrMsgInvalidTimeout,
+				lock.MinWaitQueueTimeout,
+				lock.MaxWaitQueueTimeout,
+			),
 		},
 		{
-			name:            "Wait is true, WaitTimeout too short",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: durationpb.New(lock.MinWaitQueueTimeout - time.Millisecond)},
+			name: "Wait is true, WaitTimeout too short",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: durationpb.New(lock.MinWaitQueueTimeout - time.Millisecond),
+			},
 			expectedTimeout: 0,
 			expectError:     true,
-			errorMsgContent: fmt.Sprintf(ErrMsgInvalidTimeout, lock.MinWaitQueueTimeout, lock.MaxWaitQueueTimeout),
+			errorMsgContent: fmt.Sprintf(
+				ErrMsgInvalidTimeout,
+				lock.MinWaitQueueTimeout,
+				lock.MaxWaitQueueTimeout,
+			),
 		},
 		{
-			name:            "Wait is true, WaitTimeout too long",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: durationpb.New(lock.MaxWaitQueueTimeout + time.Second)},
+			name: "Wait is true, WaitTimeout too long",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: durationpb.New(lock.MaxWaitQueueTimeout + time.Second),
+			},
 			expectedTimeout: 0,
 			expectError:     true,
-			errorMsgContent: fmt.Sprintf(ErrMsgInvalidTimeout, lock.MinWaitQueueTimeout, lock.MaxWaitQueueTimeout),
+			errorMsgContent: fmt.Sprintf(
+				ErrMsgInvalidTimeout,
+				lock.MinWaitQueueTimeout,
+				lock.MaxWaitQueueTimeout,
+			),
 		},
 		{
-			name:            "Wait is true, WaitTimeout valid (min boundary)",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: durationpb.New(lock.MinWaitQueueTimeout)},
+			name: "Wait is true, WaitTimeout valid (min boundary)",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: durationpb.New(lock.MinWaitQueueTimeout),
+			},
 			expectedTimeout: lock.MinWaitQueueTimeout,
 			expectError:     false,
 		},
 		{
-			name:            "Wait is true, WaitTimeout valid (max boundary)",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: durationpb.New(lock.MaxWaitQueueTimeout)},
+			name: "Wait is true, WaitTimeout valid (max boundary)",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: durationpb.New(lock.MaxWaitQueueTimeout),
+			},
 			expectedTimeout: lock.MaxWaitQueueTimeout,
 			expectError:     false,
 		},
 		{
-			name:            "Wait is true, WaitTimeout valid (in between)",
-			req:             &pb.AcquireRequest{Wait: true, WaitTimeout: durationpb.New(30 * time.Second)},
+			name: "Wait is true, WaitTimeout valid (in between)",
+			req: &pb.AcquireRequest{
+				Wait:        true,
+				WaitTimeout: durationpb.New(30 * time.Second),
+			},
 			expectedTimeout: 30 * time.Second,
 			expectError:     false,
 		},
@@ -888,10 +940,14 @@ func TestServer_HandleAcquireError(t *testing.T) {
 		expectBackoff     bool
 	}{
 		{
-			name:              "LockHeld, not waiting, lock info found",
-			inputErr:          lock.ErrLockHeld,
-			req:               &pb.AcquireRequest{LockId: "l1", ClientId: "c1", Wait: false},
-			mockGetInfo:       &types.LockInfo{LockID: "l1", OwnerID: "c2", ExpiresAt: server.clock.Now().Add(time.Minute)},
+			name:     "LockHeld, not waiting, lock info found",
+			inputErr: lock.ErrLockHeld,
+			req:      &pb.AcquireRequest{LockId: "l1", ClientId: "c1", Wait: false},
+			mockGetInfo: &types.LockInfo{
+				LockID:    "l1",
+				OwnerID:   "c2",
+				ExpiresAt: server.clock.Now().Add(time.Minute),
+			},
 			expectResponse:    true,
 			expectedAcquired:  false,
 			expectedErrorCode: pb.ErrorCode_LOCK_HELD,
@@ -1196,9 +1252,11 @@ func TestServer_Start_InvalidInitialStates(t *testing.T) {
 
 func TestServer_Start_Successful(t *testing.T) {
 	cfg := RaftLockServerConfig{
-		NodeID:              "test-node-success",
-		ListenAddress:       "localhost:0", // Ephemeral port
-		Peers:               map[types.NodeID]raft.PeerConfig{"test-node-success": {ID: "test-node-success", Address: "localhost:0"}},
+		NodeID:        "test-node-success",
+		ListenAddress: "localhost:0", // Ephemeral port
+		Peers: map[types.NodeID]raft.PeerConfig{
+			"test-node-success": {ID: "test-node-success", Address: "localhost:0"},
+		},
 		DataDir:             t.TempDir(),
 		RequestTimeout:      time.Second,
 		ShutdownTimeout:     time.Second,
@@ -2306,8 +2364,13 @@ func TestServer_UnaryInterceptor(t *testing.T) {
 		server.state.Store(ServerStateStarting)
 		_, err := server.unaryInterceptor(context.Background(), "request", info, mockHandler)
 		st, _ := status.FromError(err)
-		if st.Code() != codes.Unavailable || !strings.Contains(st.Message(), ErrServerNotStarted.Error()) {
-			t.Errorf("Expected Unavailable with ErrServerNotStarted, got code %v, msg %s", st.Code(), st.Message())
+		if st.Code() != codes.Unavailable ||
+			!strings.Contains(st.Message(), ErrServerNotStarted.Error()) {
+			t.Errorf(
+				"Expected Unavailable with ErrServerNotStarted, got code %v, msg %s",
+				st.Code(),
+				st.Message(),
+			)
 		}
 	})
 
@@ -2316,7 +2379,8 @@ func TestServer_UnaryInterceptor(t *testing.T) {
 		server.rateLimiter = &mockRateLimiter{allow: false} // Force rate limit
 		_, err := server.unaryInterceptor(context.Background(), "request", info, mockHandler)
 		st, _ := status.FromError(err)
-		if st.Code() != codes.ResourceExhausted || !strings.Contains(st.Message(), "rate limit exceeded") {
+		if st.Code() != codes.ResourceExhausted ||
+			!strings.Contains(st.Message(), "rate limit exceeded") {
 			t.Errorf("Expected ResourceExhausted, got %v", st.Code())
 		}
 		server.rateLimiter = nil // Reset for other tests
@@ -2328,7 +2392,10 @@ func TestServer_UnaryInterceptor(t *testing.T) {
 		for range server.config.MaxConcurrentReqs {
 			server.requestSemaphore <- struct{}{}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond) // Short timeout
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			10*time.Millisecond,
+		) // Short timeout
 		defer cancel()
 		_, err := server.unaryInterceptor(ctx, "request", info, mockHandler)
 		st, _ := status.FromError(err)
@@ -2370,7 +2437,11 @@ func TestServer_UnaryInterceptor(t *testing.T) {
 		st, _ := status.FromError(err)
 
 		if st.Code() != codes.DeadlineExceeded {
-			t.Errorf("Expected DeadlineExceeded due to request timeout, got code %v, msg %s", st.Code(), st.Message())
+			t.Errorf(
+				"Expected DeadlineExceeded due to request timeout, got code %v, msg %s",
+				st.Code(),
+				st.Message(),
+			)
 		}
 		server.config.RequestTimeout = time.Second // Reset for other tests
 	})
@@ -2616,7 +2687,11 @@ func TestServer_RunLeaderChangeMonitor_ChannelClosed(t *testing.T) {
 	}
 	currentLeader := server.currentLeaderID.Load()
 	if id, ok := currentLeader.(types.NodeID); !ok || id != "" {
-		t.Errorf("Expected currentLeaderID to be empty types.NodeID, got %v (type %T)", currentLeader, currentLeader)
+		t.Errorf(
+			"Expected currentLeaderID to be empty types.NodeID, got %v (type %T)",
+			currentLeader,
+			currentLeader,
+		)
 	}
 }
 
@@ -2624,7 +2699,10 @@ func TestServer_SubmitRaftProposal_ContextCancellation(t *testing.T) {
 	server := createTestServer(t)
 	server.raftNode = &mockRaft{isLeader: true} // Ensure it thinks it's leader
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond) // Very short timeout
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		5*time.Millisecond,
+	) // Very short timeout
 	defer cancel()
 
 	cmd := types.Command{Op: types.OperationAcquire, LockID: "test"}

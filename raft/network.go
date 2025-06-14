@@ -1026,6 +1026,13 @@ func (h *grpcServerHandler) RequestVote(
 		)
 		h.nm.metrics.IncCounter("grpc_server_rpc_handler_errors_total", "rpc", rpc)
 
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Error(codes.DeadlineExceeded, "handler deadline exceeded")
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Error(codes.Canceled, "handler context canceled")
+		}
+
 		if _, ok := status.FromError(err); ok {
 			return nil, err
 		}

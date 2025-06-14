@@ -265,7 +265,11 @@ func TestProtoToLockInfo(t *testing.T) {
 				t.Errorf("OwnerID: expected %q, got %q", tt.expected.OwnerID, result.OwnerID)
 			}
 			if result.WaiterCount != tt.expected.WaiterCount {
-				t.Errorf("WaiterCount: expected %d, got %d", tt.expected.WaiterCount, result.WaiterCount)
+				t.Errorf(
+					"WaiterCount: expected %d, got %d",
+					tt.expected.WaiterCount,
+					result.WaiterCount,
+				)
 			}
 
 			assertTimeEqual(t, tt.expected.AcquiredAt, result.AcquiredAt, "AcquiredAt")
@@ -381,7 +385,11 @@ func TestProtoToAcquireResult(t *testing.T) {
 				t.Errorf("Acquired: expected %v, got %v", tt.expected.Acquired, result.Acquired)
 			}
 			if result.QueuePosition != tt.expected.QueuePosition {
-				t.Errorf("QueuePosition: expected %d, got %d", tt.expected.QueuePosition, result.QueuePosition)
+				t.Errorf(
+					"QueuePosition: expected %d, got %d",
+					tt.expected.QueuePosition,
+					result.QueuePosition,
+				)
 			}
 			if result.EstimatedWaitDuration != tt.expected.EstimatedWaitDuration {
 				t.Errorf("EstimatedWaitDuration: expected %v, got %v",
@@ -571,7 +579,12 @@ func TestLockFilterToProto(t *testing.T) {
 				t.Errorf("ExpiresAfter presence mismatch")
 			}
 
-			assertStringMapEqual(t, tt.expected.MetadataFilter, result.MetadataFilter, "MetadataFilter")
+			assertStringMapEqual(
+				t,
+				tt.expected.MetadataFilter,
+				result.MetadataFilter,
+				"MetadataFilter",
+			)
 		})
 	}
 }
@@ -690,7 +703,11 @@ func TestProtoToReleaseResult(t *testing.T) {
 				t.Errorf("Released: expected %v, got %v", tt.expected.Released, result.Released)
 			}
 			if result.WaiterPromoted != tt.expected.WaiterPromoted {
-				t.Errorf("WaiterPromoted: expected %v, got %v", tt.expected.WaiterPromoted, result.WaiterPromoted)
+				t.Errorf(
+					"WaiterPromoted: expected %v, got %v",
+					tt.expected.WaiterPromoted,
+					result.WaiterPromoted,
+				)
 			}
 
 			// Check error details
@@ -700,12 +717,25 @@ func TestProtoToReleaseResult(t *testing.T) {
 			}
 			if tt.expected.Error != nil && result.Error != nil {
 				if result.Error.Code != tt.expected.Error.Code {
-					t.Errorf("Error.Code: expected %v, got %v", tt.expected.Error.Code, result.Error.Code)
+					t.Errorf(
+						"Error.Code: expected %v, got %v",
+						tt.expected.Error.Code,
+						result.Error.Code,
+					)
 				}
 				if result.Error.Message != tt.expected.Error.Message {
-					t.Errorf("Error.Message: expected %q, got %q", tt.expected.Error.Message, result.Error.Message)
+					t.Errorf(
+						"Error.Message: expected %q, got %q",
+						tt.expected.Error.Message,
+						result.Error.Message,
+					)
 				}
-				assertStringMapEqual(t, tt.expected.Error.Details, result.Error.Details, "Error.Details")
+				assertStringMapEqual(
+					t,
+					tt.expected.Error.Details,
+					result.Error.Details,
+					"Error.Details",
+				)
 			}
 		})
 	}
@@ -840,12 +870,25 @@ func TestProtoToRenewResult(t *testing.T) {
 			}
 			if tt.expected.Lock != nil && result.Lock != nil {
 				if result.Lock.LockID != tt.expected.Lock.LockID {
-					t.Errorf("Lock.LockID: expected %q, got %q", tt.expected.Lock.LockID, result.Lock.LockID)
+					t.Errorf(
+						"Lock.LockID: expected %q, got %q",
+						tt.expected.Lock.LockID,
+						result.Lock.LockID,
+					)
 				}
 				if result.Lock.Version != tt.expected.Lock.Version {
-					t.Errorf("Lock.Version: expected %d, got %d", tt.expected.Lock.Version, result.Lock.Version)
+					t.Errorf(
+						"Lock.Version: expected %d, got %d",
+						tt.expected.Lock.Version,
+						result.Lock.Version,
+					)
 				}
-				assertTimeEqual(t, tt.expected.Lock.ExpiresAt, result.Lock.ExpiresAt, "Lock.ExpiresAt")
+				assertTimeEqual(
+					t,
+					tt.expected.Lock.ExpiresAt,
+					result.Lock.ExpiresAt,
+					"Lock.ExpiresAt",
+				)
 			}
 
 			if (tt.expected.Error == nil) != (result.Error == nil) {
@@ -1010,14 +1053,22 @@ func TestProtoToGetLocksResult(t *testing.T) {
 			}
 
 			if result.TotalMatching != tt.expected.TotalMatching {
-				t.Errorf("TotalMatching: expected %d, got %d", tt.expected.TotalMatching, result.TotalMatching)
+				t.Errorf(
+					"TotalMatching: expected %d, got %d",
+					tt.expected.TotalMatching,
+					result.TotalMatching,
+				)
 			}
 			if result.HasMore != tt.expected.HasMore {
 				t.Errorf("HasMore: expected %v, got %v", tt.expected.HasMore, result.HasMore)
 			}
 
 			if len(result.Locks) != len(tt.expected.Locks) {
-				t.Errorf("Locks length: expected %d, got %d", len(tt.expected.Locks), len(result.Locks))
+				t.Errorf(
+					"Locks length: expected %d, got %d",
+					len(tt.expected.Locks),
+					len(result.Locks),
+				)
 			}
 
 			for i, expectedLock := range tt.expected.Locks {
@@ -1027,13 +1078,28 @@ func TestProtoToGetLocksResult(t *testing.T) {
 				}
 				resultLock := result.Locks[i]
 				if resultLock.LockID != expectedLock.LockID {
-					t.Errorf("Locks[%d].LockID: expected %q, got %q", i, expectedLock.LockID, resultLock.LockID)
+					t.Errorf(
+						"Locks[%d].LockID: expected %q, got %q",
+						i,
+						expectedLock.LockID,
+						resultLock.LockID,
+					)
 				}
 				if resultLock.OwnerID != expectedLock.OwnerID {
-					t.Errorf("Locks[%d].OwnerID: expected %q, got %q", i, expectedLock.OwnerID, resultLock.OwnerID)
+					t.Errorf(
+						"Locks[%d].OwnerID: expected %q, got %q",
+						i,
+						expectedLock.OwnerID,
+						resultLock.OwnerID,
+					)
 				}
 				if resultLock.WaiterCount != expectedLock.WaiterCount {
-					t.Errorf("Locks[%d].WaiterCount: expected %d, got %d", i, expectedLock.WaiterCount, resultLock.WaiterCount)
+					t.Errorf(
+						"Locks[%d].WaiterCount: expected %d, got %d",
+						i,
+						expectedLock.WaiterCount,
+						resultLock.WaiterCount,
+					)
 				}
 			}
 		})
@@ -1175,7 +1241,11 @@ func TestProtoToRaftStatus(t *testing.T) {
 				t.Errorf("LeaderID: expected %q, got %q", tt.expected.LeaderID, result.LeaderID)
 			}
 			if result.CommitIndex != tt.expected.CommitIndex {
-				t.Errorf("CommitIndex: expected %d, got %d", tt.expected.CommitIndex, result.CommitIndex)
+				t.Errorf(
+					"CommitIndex: expected %d, got %d",
+					tt.expected.CommitIndex,
+					result.CommitIndex,
+				)
 			}
 
 			if len(result.Replication) != len(tt.expected.Replication) {
@@ -1533,7 +1603,11 @@ func TestProtoToPeerState(t *testing.T) {
 				t.Errorf("NextIndex: expected %d, got %d", tt.expected.NextIndex, result.NextIndex)
 			}
 			if result.MatchIndex != tt.expected.MatchIndex {
-				t.Errorf("MatchIndex: expected %d, got %d", tt.expected.MatchIndex, result.MatchIndex)
+				t.Errorf(
+					"MatchIndex: expected %d, got %d",
+					tt.expected.MatchIndex,
+					result.MatchIndex,
+				)
 			}
 			if result.IsActive != tt.expected.IsActive {
 				t.Errorf("IsActive: expected %v, got %v", tt.expected.IsActive, result.IsActive)
@@ -1670,7 +1744,11 @@ func TestProtoToHealthStatus(t *testing.T) {
 				t.Errorf("Message: expected %q, got %q", tt.expected.Message, result.Message)
 			}
 			if result.IsRaftLeader != tt.expected.IsRaftLeader {
-				t.Errorf("IsRaftLeader: expected %v, got %v", tt.expected.IsRaftLeader, result.IsRaftLeader)
+				t.Errorf(
+					"IsRaftLeader: expected %v, got %v",
+					tt.expected.IsRaftLeader,
+					result.IsRaftLeader,
+				)
 			}
 			if result.RaftLeaderAddress != tt.expected.RaftLeaderAddress {
 				t.Errorf("RaftLeaderAddress: expected %q, got %q",
@@ -1695,7 +1773,12 @@ func TestProtoToHealthStatus(t *testing.T) {
 				t.Errorf("Uptime: expected %v, got %v", tt.expected.Uptime, result.Uptime)
 			}
 
-			assertTimeEqual(t, tt.expected.LastHealthCheckAt, result.LastHealthCheckAt, "LastHealthCheckAt")
+			assertTimeEqual(
+				t,
+				tt.expected.LastHealthCheckAt,
+				result.LastHealthCheckAt,
+				"LastHealthCheckAt",
+			)
 		})
 	}
 }
@@ -1783,8 +1866,10 @@ func TestProtoToHealthStatusFromHealthResponse(t *testing.T) {
 				},
 			},
 			expected: &HealthStatus{
-				Status:              HealthServingStatus(pb.HealthStatus_NOT_SERVING), // Top-level status wins
-				Message:             "Load balancer health check failed",              // Top-level message wins
+				Status: HealthServingStatus(
+					pb.HealthStatus_NOT_SERVING,
+				), // Top-level status wins
+				Message:             "Load balancer health check failed", // Top-level message wins
 				IsRaftLeader:        false,
 				RaftLeaderAddress:   "other-node.cluster.local:8080",
 				RaftTerm:            12,
@@ -1850,7 +1935,11 @@ func TestProtoToHealthStatusFromHealthResponse(t *testing.T) {
 				t.Errorf("Message: expected %q, got %q", tt.expected.Message, result.Message)
 			}
 			if result.IsRaftLeader != tt.expected.IsRaftLeader {
-				t.Errorf("IsRaftLeader: expected %v, got %v", tt.expected.IsRaftLeader, result.IsRaftLeader)
+				t.Errorf(
+					"IsRaftLeader: expected %v, got %v",
+					tt.expected.IsRaftLeader,
+					result.IsRaftLeader,
+				)
 			}
 			if result.RaftLeaderAddress != tt.expected.RaftLeaderAddress {
 				t.Errorf("RaftLeaderAddress: expected %q, got %q",
@@ -1875,7 +1964,12 @@ func TestProtoToHealthStatusFromHealthResponse(t *testing.T) {
 				t.Errorf("Uptime: expected %v, got %v", tt.expected.Uptime, result.Uptime)
 			}
 
-			assertTimeEqual(t, tt.expected.LastHealthCheckAt, result.LastHealthCheckAt, "LastHealthCheckAt")
+			assertTimeEqual(
+				t,
+				tt.expected.LastHealthCheckAt,
+				result.LastHealthCheckAt,
+				"LastHealthCheckAt",
+			)
 		})
 	}
 }
@@ -2247,12 +2341,25 @@ func TestProtoToCancelWaitResult(t *testing.T) {
 
 			if tt.expected.Error != nil && result.Error != nil {
 				if result.Error.Code != tt.expected.Error.Code {
-					t.Errorf("Error.Code: expected %v, got %v", tt.expected.Error.Code, result.Error.Code)
+					t.Errorf(
+						"Error.Code: expected %v, got %v",
+						tt.expected.Error.Code,
+						result.Error.Code,
+					)
 				}
 				if result.Error.Message != tt.expected.Error.Message {
-					t.Errorf("Error.Message: expected %q, got %q", tt.expected.Error.Message, result.Error.Message)
+					t.Errorf(
+						"Error.Message: expected %q, got %q",
+						tt.expected.Error.Message,
+						result.Error.Message,
+					)
 				}
-				assertStringMapEqual(t, tt.expected.Error.Details, result.Error.Details, "Error.Details")
+				assertStringMapEqual(
+					t,
+					tt.expected.Error.Details,
+					result.Error.Details,
+					"Error.Details",
+				)
 			}
 		})
 	}

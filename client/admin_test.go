@@ -263,7 +263,11 @@ func TestNewAdminClient(t *testing.T) {
 				if tt.errorType == "validation" {
 					var validationErr *ValidationError
 					if !errors.As(err, &validationErr) {
-						t.Errorf("Expected ValidationError (possibly wrapped), got %T: %v", err, err)
+						t.Errorf(
+							"Expected ValidationError (possibly wrapped), got %T: %v",
+							err,
+							err,
+						)
 					}
 				}
 
@@ -344,9 +348,13 @@ func TestAdminClient_GetStatus(t *testing.T) {
 					mockClient := &adminMockClient{
 						getStatusFunc: func(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error) {
 
-							if tt.request != nil && req.IncludeReplicationDetails != tt.request.IncludeReplicationDetails {
-								t.Errorf("Expected IncludeReplicationDetails %v, got %v",
-									tt.request.IncludeReplicationDetails, req.IncludeReplicationDetails)
+							if tt.request != nil &&
+								req.IncludeReplicationDetails != tt.request.IncludeReplicationDetails {
+								t.Errorf(
+									"Expected IncludeReplicationDetails %v, got %v",
+									tt.request.IncludeReplicationDetails,
+									req.IncludeReplicationDetails,
+								)
 							}
 							return tt.mockResponse, nil
 						},

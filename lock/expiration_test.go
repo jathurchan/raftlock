@@ -27,14 +27,29 @@ func TestLockExpiration_ExpirationHeapBasicOperations(t *testing.T) {
 	testutil.AssertEqual(t, 3, h.Len(), "Heap should have 3 items")
 
 	popped := heap.Pop(h).(*expirationItem)
-	testutil.AssertEqual(t, types.LockID("lock2"), popped.lockID, "First item should be the one with earliest expiry")
+	testutil.AssertEqual(
+		t,
+		types.LockID("lock2"),
+		popped.lockID,
+		"First item should be the one with earliest expiry",
+	)
 	testutil.AssertEqual(t, -1, popped.index, "Popped item should have index = -1")
 
 	popped = heap.Pop(h).(*expirationItem)
-	testutil.AssertEqual(t, types.LockID("lock3"), popped.lockID, "Second item should have the second earliest expiry")
+	testutil.AssertEqual(
+		t,
+		types.LockID("lock3"),
+		popped.lockID,
+		"Second item should have the second earliest expiry",
+	)
 
 	popped = heap.Pop(h).(*expirationItem)
-	testutil.AssertEqual(t, types.LockID("lock1"), popped.lockID, "Last item should have the latest expiry")
+	testutil.AssertEqual(
+		t,
+		types.LockID("lock1"),
+		popped.lockID,
+		"Last item should have the latest expiry",
+	)
 
 	testutil.AssertEqual(t, 0, h.Len(), "Heap should be empty after all pops")
 }
@@ -61,7 +76,12 @@ func TestLockExpiration_ExpirationHeapUpdateOperation(t *testing.T) {
 	}
 
 	popped := heap.Pop(h).(*expirationItem)
-	testutil.AssertEqual(t, types.LockID("lock3"), popped.lockID, "Updated lock3 should now be first to expire")
+	testutil.AssertEqual(
+		t,
+		types.LockID("lock3"),
+		popped.lockID,
+		"Updated lock3 should now be first to expire",
+	)
 
 	popped = heap.Pop(h).(*expirationItem)
 	testutil.AssertEqual(t, types.LockID("lock2"), popped.lockID, "lock2 should be next")

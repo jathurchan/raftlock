@@ -15,31 +15,59 @@ func TestDefaultClientConfig(t *testing.T) {
 	}
 
 	if config.RequestTimeout != defaultRequestTimeout {
-		t.Errorf("Expected RequestTimeout to be %v, got %v", defaultRequestTimeout, config.RequestTimeout)
+		t.Errorf(
+			"Expected RequestTimeout to be %v, got %v",
+			defaultRequestTimeout,
+			config.RequestTimeout,
+		)
 	}
 
 	if config.KeepAlive.Time != defaultKeepAliveTime {
-		t.Errorf("Expected KeepAlive.Time to be %v, got %v", defaultKeepAliveTime, config.KeepAlive.Time)
+		t.Errorf(
+			"Expected KeepAlive.Time to be %v, got %v",
+			defaultKeepAliveTime,
+			config.KeepAlive.Time,
+		)
 	}
 
 	if config.KeepAlive.Timeout != defaultKeepAliveTimeout {
-		t.Errorf("Expected KeepAlive.Timeout to be %v, got %v", defaultKeepAliveTimeout, config.KeepAlive.Timeout)
+		t.Errorf(
+			"Expected KeepAlive.Timeout to be %v, got %v",
+			defaultKeepAliveTimeout,
+			config.KeepAlive.Timeout,
+		)
 	}
 
 	if config.KeepAlive.PermitWithoutStream != defaultPermitWithoutStream {
-		t.Errorf("Expected KeepAlive.PermitWithoutStream to be %v, got %v", defaultPermitWithoutStream, config.KeepAlive.PermitWithoutStream)
+		t.Errorf(
+			"Expected KeepAlive.PermitWithoutStream to be %v, got %v",
+			defaultPermitWithoutStream,
+			config.KeepAlive.PermitWithoutStream,
+		)
 	}
 
 	if config.EnableMetrics != defaultEnableMetrics {
-		t.Errorf("Expected EnableMetrics to be %v, got %v", defaultEnableMetrics, config.EnableMetrics)
+		t.Errorf(
+			"Expected EnableMetrics to be %v, got %v",
+			defaultEnableMetrics,
+			config.EnableMetrics,
+		)
 	}
 
 	if config.MaxMessageSize != defaultMaxMessageSize {
-		t.Errorf("Expected MaxMessageSize to be %v, got %v", defaultMaxMessageSize, config.MaxMessageSize)
+		t.Errorf(
+			"Expected MaxMessageSize to be %v, got %v",
+			defaultMaxMessageSize,
+			config.MaxMessageSize,
+		)
 	}
 
 	if config.RetryPolicy.MaxRetries != defaultMaxRetries {
-		t.Errorf("Expected RetryPolicy.MaxRetries to be %v, got %v", defaultMaxRetries, config.RetryPolicy.MaxRetries)
+		t.Errorf(
+			"Expected RetryPolicy.MaxRetries to be %v, got %v",
+			defaultMaxRetries,
+			config.RetryPolicy.MaxRetries,
+		)
 	}
 
 	if len(config.Endpoints) != 0 {
@@ -55,7 +83,11 @@ func TestDefaultRetryPolicy(t *testing.T) {
 	}
 
 	if policy.InitialBackoff != defaultInitialBackoff {
-		t.Errorf("Expected InitialBackoff to be %v, got %v", defaultInitialBackoff, policy.InitialBackoff)
+		t.Errorf(
+			"Expected InitialBackoff to be %v, got %v",
+			defaultInitialBackoff,
+			policy.InitialBackoff,
+		)
 	}
 
 	if policy.MaxBackoff != defaultMaxBackoff {
@@ -63,7 +95,11 @@ func TestDefaultRetryPolicy(t *testing.T) {
 	}
 
 	if policy.BackoffMultiplier != defaultBackoffMultiplier {
-		t.Errorf("Expected BackoffMultiplier to be %v, got %v", defaultBackoffMultiplier, policy.BackoffMultiplier)
+		t.Errorf(
+			"Expected BackoffMultiplier to be %v, got %v",
+			defaultBackoffMultiplier,
+			policy.BackoffMultiplier,
+		)
 	}
 
 	if policy.JitterFactor != defaultJitterFactor {
@@ -78,7 +114,11 @@ func TestDefaultRetryPolicy(t *testing.T) {
 	}
 
 	if len(policy.RetryableErrors) != len(expectedErrors) {
-		t.Errorf("Expected %d retryable errors, got %d", len(expectedErrors), len(policy.RetryableErrors))
+		t.Errorf(
+			"Expected %d retryable errors, got %d",
+			len(expectedErrors),
+			len(policy.RetryableErrors),
+		)
 	}
 
 	errorMap := make(map[pb.ErrorCode]bool)
@@ -133,10 +173,18 @@ func TestKeepAliveConfig(t *testing.T) {
 				t.Errorf("Expected Time to be %v, got %v", tt.expected.Time, tt.config.Time)
 			}
 			if tt.config.Timeout != tt.expected.Timeout {
-				t.Errorf("Expected Timeout to be %v, got %v", tt.expected.Timeout, tt.config.Timeout)
+				t.Errorf(
+					"Expected Timeout to be %v, got %v",
+					tt.expected.Timeout,
+					tt.config.Timeout,
+				)
 			}
 			if tt.config.PermitWithoutStream != tt.expected.PermitWithoutStream {
-				t.Errorf("Expected PermitWithoutStream to be %v, got %v", tt.expected.PermitWithoutStream, tt.config.PermitWithoutStream)
+				t.Errorf(
+					"Expected PermitWithoutStream to be %v, got %v",
+					tt.expected.PermitWithoutStream,
+					tt.config.PermitWithoutStream,
+				)
 			}
 		})
 	}
@@ -197,22 +245,46 @@ func TestRetryPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.policy.MaxRetries != tt.expected.MaxRetries {
-				t.Errorf("Expected MaxRetries to be %v, got %v", tt.expected.MaxRetries, tt.policy.MaxRetries)
+				t.Errorf(
+					"Expected MaxRetries to be %v, got %v",
+					tt.expected.MaxRetries,
+					tt.policy.MaxRetries,
+				)
 			}
 			if tt.policy.InitialBackoff != tt.expected.InitialBackoff {
-				t.Errorf("Expected InitialBackoff to be %v, got %v", tt.expected.InitialBackoff, tt.policy.InitialBackoff)
+				t.Errorf(
+					"Expected InitialBackoff to be %v, got %v",
+					tt.expected.InitialBackoff,
+					tt.policy.InitialBackoff,
+				)
 			}
 			if tt.policy.MaxBackoff != tt.expected.MaxBackoff {
-				t.Errorf("Expected MaxBackoff to be %v, got %v", tt.expected.MaxBackoff, tt.policy.MaxBackoff)
+				t.Errorf(
+					"Expected MaxBackoff to be %v, got %v",
+					tt.expected.MaxBackoff,
+					tt.policy.MaxBackoff,
+				)
 			}
 			if tt.policy.BackoffMultiplier != tt.expected.BackoffMultiplier {
-				t.Errorf("Expected BackoffMultiplier to be %v, got %v", tt.expected.BackoffMultiplier, tt.policy.BackoffMultiplier)
+				t.Errorf(
+					"Expected BackoffMultiplier to be %v, got %v",
+					tt.expected.BackoffMultiplier,
+					tt.policy.BackoffMultiplier,
+				)
 			}
 			if tt.policy.JitterFactor != tt.expected.JitterFactor {
-				t.Errorf("Expected JitterFactor to be %v, got %v", tt.expected.JitterFactor, tt.policy.JitterFactor)
+				t.Errorf(
+					"Expected JitterFactor to be %v, got %v",
+					tt.expected.JitterFactor,
+					tt.policy.JitterFactor,
+				)
 			}
 			if len(tt.policy.RetryableErrors) != len(tt.expected.RetryableErrors) {
-				t.Errorf("Expected %d retryable errors, got %d", len(tt.expected.RetryableErrors), len(tt.policy.RetryableErrors))
+				t.Errorf(
+					"Expected %d retryable errors, got %d",
+					len(tt.expected.RetryableErrors),
+					len(tt.policy.RetryableErrors),
+				)
 			}
 		})
 	}
@@ -289,26 +361,51 @@ func TestConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if len(tt.config.Endpoints) != len(tt.expected.Endpoints) {
-				t.Errorf("Expected %d endpoints, got %d", len(tt.expected.Endpoints), len(tt.config.Endpoints))
+				t.Errorf(
+					"Expected %d endpoints, got %d",
+					len(tt.expected.Endpoints),
+					len(tt.config.Endpoints),
+				)
 			}
 			for i, endpoint := range tt.config.Endpoints {
 				if i < len(tt.expected.Endpoints) && endpoint != tt.expected.Endpoints[i] {
-					t.Errorf("Expected endpoint[%d] to be %v, got %v", i, tt.expected.Endpoints[i], endpoint)
+					t.Errorf(
+						"Expected endpoint[%d] to be %v, got %v",
+						i,
+						tt.expected.Endpoints[i],
+						endpoint,
+					)
 				}
 			}
 
 			if tt.config.DialTimeout != tt.expected.DialTimeout {
-				t.Errorf("Expected DialTimeout to be %v, got %v", tt.expected.DialTimeout, tt.config.DialTimeout)
+				t.Errorf(
+					"Expected DialTimeout to be %v, got %v",
+					tt.expected.DialTimeout,
+					tt.config.DialTimeout,
+				)
 			}
 			if tt.config.RequestTimeout != tt.expected.RequestTimeout {
-				t.Errorf("Expected RequestTimeout to be %v, got %v", tt.expected.RequestTimeout, tt.config.RequestTimeout)
+				t.Errorf(
+					"Expected RequestTimeout to be %v, got %v",
+					tt.expected.RequestTimeout,
+					tt.config.RequestTimeout,
+				)
 			}
 
 			if tt.config.EnableMetrics != tt.expected.EnableMetrics {
-				t.Errorf("Expected EnableMetrics to be %v, got %v", tt.expected.EnableMetrics, tt.config.EnableMetrics)
+				t.Errorf(
+					"Expected EnableMetrics to be %v, got %v",
+					tt.expected.EnableMetrics,
+					tt.config.EnableMetrics,
+				)
 			}
 			if tt.config.MaxMessageSize != tt.expected.MaxMessageSize {
-				t.Errorf("Expected MaxMessageSize to be %v, got %v", tt.expected.MaxMessageSize, tt.config.MaxMessageSize)
+				t.Errorf(
+					"Expected MaxMessageSize to be %v, got %v",
+					tt.expected.MaxMessageSize,
+					tt.config.MaxMessageSize,
+				)
 			}
 		})
 	}
@@ -332,7 +429,10 @@ func TestConstants(t *testing.T) {
 	}
 
 	if defaultPermitWithoutStream != true {
-		t.Errorf("Expected defaultPermitWithoutStream to be true, got %v", defaultPermitWithoutStream)
+		t.Errorf(
+			"Expected defaultPermitWithoutStream to be true, got %v",
+			defaultPermitWithoutStream,
+		)
 	}
 
 	if defaultEnableMetrics != true {
@@ -386,7 +486,11 @@ func TestDefaultRetryPolicyErrorCodes(t *testing.T) {
 	}
 
 	if len(policy.RetryableErrors) != len(requiredCodes) {
-		t.Errorf("Expected exactly %d retryable error codes, got %d", len(requiredCodes), len(policy.RetryableErrors))
+		t.Errorf(
+			"Expected exactly %d retryable error codes, got %d",
+			len(requiredCodes),
+			len(policy.RetryableErrors),
+		)
 	}
 }
 

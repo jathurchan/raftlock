@@ -126,7 +126,9 @@ func TestReadNext(t *testing.T) {
 			name:    "Incomplete Entry Body",
 			maxSize: testMaxSize,
 			fileReader: &mockFile{
-				Reader: bytes.NewReader(append(binary.BigEndian.AppendUint32(nil, 10), []byte("short")...)),
+				Reader: bytes.NewReader(
+					append(binary.BigEndian.AppendUint32(nil, 10), []byte("short")...),
+				),
 			},
 			serializer:    &mockSerializer{},
 			wantEntry:     types.LogEntry{},
@@ -192,7 +194,11 @@ func TestReadNext(t *testing.T) {
 
 			if tt.name == "Success" || tt.name == "Deserialization Error" {
 				if !bytes.Equal(tt.serializer.calledWith, serializedTestEntry) {
-					t.Errorf("UnmarshalLogEntry called with %v, want %v", tt.serializer.calledWith, serializedTestEntry)
+					t.Errorf(
+						"UnmarshalLogEntry called with %v, want %v",
+						tt.serializer.calledWith,
+						serializedTestEntry,
+					)
 				}
 			}
 		})

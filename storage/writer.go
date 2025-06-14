@@ -198,21 +198,21 @@ func (a *defaultLogAppender) Append(
 	if err != nil {
 		return appendResult{}, err
 	}
-
 	defer func() {
 		if err := file.Close(); err != nil {
-			a.logger.Errorw("error closing file: %v", err)
+			// Error path is handled by rollback
 		}
 	}()
 
 	offsets, _, err := a.writer.WriteEntriesToFile(ctx, file, startOffset, entries)
 	if err != nil {
-		_ = a.failAndRollback(file, startOffset, ErrStorageIO, "logWriter failed")
-		return appendResult{}, err
+		// Perform rollback if writing fails
+		return appendResult{}, a.performRollback(file, startOffset, err)
 	}
 
-	if err := a.syncIfNeeded(file, startOffset); err != nil {
-		return appendResult{}, err
+	if err := a.syncIfNeeded(file); err != nil {
+		// Perform rollback if syncing fails
+		return appendResult{}, a.performRollback(file, startOffset, err)
 	}
 
 	return appendResult{
@@ -268,38 +268,40 @@ func (a *defaultLogAppender) openLogFile() (file, int64, error) {
 	return f, pos, nil
 }
 
+// performRollback truncates the file back to its original state and handles all cleanup.
+func (a *defaultLogAppender) performRollback(f file, startOffset int64, writeErr error) error {
+	a.logger.Warnw("rolling back write operation",
+		"offset", startOffset,
+		"reason", writeErr,
+	)
+
+	if truncErr := a.fileSystem.Truncate(a.logFilePath, startOffset); truncErr != nil {
+		a.logger.Errorw("rollback failed: unable to truncate file",
+			"path", a.logFilePath,
+			"offset", startOffset,
+			"error", truncErr,
+		)
+	}
+
+	if closeErr := f.Close(); closeErr != nil {
+		a.logger.Errorw("rollback failed: unable to close file",
+			"path", a.logFilePath,
+			"error", closeErr,
+		)
+	}
+
+	return fmt.Errorf("%w: %w", ErrStorageIO, writeErr)
+}
+
 // syncIfNeeded flushes the file if syncOnAppend is enabled.
-func (a *defaultLogAppender) syncIfNeeded(f file, start int64) error {
+func (a *defaultLogAppender) syncIfNeeded(f file) error {
 	if !a.syncOnAppend {
 		return nil
 	}
 	if err := f.Sync(); err != nil {
-		return a.failAndRollback(f, start, ErrStorageIO, "sync failed")
+		return fmt.Errorf("sync failed: %w", err)
 	}
 	return nil
-}
-
-// failAndRollback truncates the file back to the start offset after failure.
-func (a *defaultLogAppender) failAndRollback(f file, start int64, cause error, msg string) error {
-	// Ignoring close error as we're already handling the main error
-	_ = f.Close()
-
-	truncErr := a.fileSystem.Truncate(a.logFilePath, start)
-	if truncErr != nil {
-		a.logger.Errorw("rollback failed during truncate",
-			"offset", start,
-			"error", truncErr,
-		)
-	} else {
-		a.logger.Warnw("rollback performed",
-			"offset", start,
-		)
-	}
-
-	fullMsg := fmt.Sprintf("rollback to offset %d after failure: %s", start, msg)
-	a.logger.Warnw(fullMsg)
-
-	return fmt.Errorf("%s: %w", fullMsg, cause)
 }
 
 // logRewriter defines an interface for replacing the entire log file with a new set of entries.

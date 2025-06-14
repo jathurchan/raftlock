@@ -22,7 +22,11 @@ func TestRaftDependencies_Validate_Success(t *testing.T) {
 	deps.Logger = nil
 	deps.Metrics = nil
 	err = deps.Validate()
-	testutil.AssertNoError(t, err, "Expected valid dependencies with explicitly nil optional fields to pass validation")
+	testutil.AssertNoError(
+		t,
+		err,
+		"Expected valid dependencies with explicitly nil optional fields to pass validation",
+	)
 
 	deps.Logger = logger.NewNoOpLogger()
 	deps.Metrics = NewNoOpMetrics()

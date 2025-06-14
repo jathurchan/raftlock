@@ -345,7 +345,15 @@ func TestSnapshotWriterErrors(t *testing.T) {
 			tt.setupFS(fs)
 			serializer := tt.setupSerializer()
 
-			writer := newSnapshotWriter(fs, serializer, log, dir, nil, tt.enableChunkedIO, tt.chunkSize)
+			writer := newSnapshotWriter(
+				fs,
+				serializer,
+				log,
+				dir,
+				nil,
+				tt.enableChunkedIO,
+				tt.chunkSize,
+			)
 
 			err := writer.Write(context.Background(), tt.inputMetadata, tt.inputData)
 
@@ -871,7 +879,10 @@ func TestSnapshotReaderWithContextDeadline(t *testing.T) {
 		chunkSize:       1024,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond) // Shorter than total read time
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		100*time.Millisecond,
+	) // Shorter than total read time
 	defer cancel()
 
 	_, _, err = reader.Read(ctx)
@@ -907,7 +918,11 @@ func TestCleanupAfterPartialWrite(t *testing.T) {
 
 	writer := newSnapshotWriter(fs, serializer, log, dir, nil, false, 0)
 
-	err := writer.Write(context.Background(), types.SnapshotMetadata{LastIncludedIndex: 1}, []byte("data"))
+	err := writer.Write(
+		context.Background(),
+		types.SnapshotMetadata{LastIncludedIndex: 1},
+		[]byte("data"),
+	)
 	testutil.AssertError(t, err)
 	testutil.AssertErrorIs(t, err, ErrStorageIO)
 	testutil.AssertContains(t, err.Error(), "commit snapshot data")
@@ -957,7 +972,15 @@ func TestSnapshotEndToEnd(t *testing.T) {
 				data[i] = byte(i % 256)
 			}
 
-			writer := newSnapshotWriter(fs, serializer, log, fs.dir, nil, tc.enableChunked, tc.chunkSize)
+			writer := newSnapshotWriter(
+				fs,
+				serializer,
+				log,
+				fs.dir,
+				nil,
+				tc.enableChunked,
+				tc.chunkSize,
+			)
 
 			err := writer.Write(context.Background(), metadata, data)
 			testutil.AssertNoError(t, err)

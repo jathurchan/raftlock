@@ -63,7 +63,16 @@ func TestNewRecoveryService(t *testing.T) {
 		HostnameFunc:     func() string { return "test-host" },
 		NowUnixMilliFunc: func() int64 { return 1000 },
 	}
-	rs := newRecoveryService(fs, serializer, log, "/tmp/raft", normalMode, indexSvc, metadataSvc, sysInfo)
+	rs := newRecoveryService(
+		fs,
+		serializer,
+		log,
+		"/tmp/raft",
+		normalMode,
+		indexSvc,
+		metadataSvc,
+		sysInfo,
+	)
 
 	if rs == nil {
 		t.Fatal("Expected non-nil recovery service from dependencies constructor")
@@ -128,7 +137,8 @@ func TestCheckForRecoveryMarkers(t *testing.T) {
 			fs := newMockFileSystem()
 			fs.ExistsFunc = func(path string) (bool, error) {
 				if tc.existsErr != nil {
-					if tc.name == "Error checking recovery marker" && path == "/tmp/raft/recovery.marker" {
+					if tc.name == "Error checking recovery marker" &&
+						path == "/tmp/raft/recovery.marker" {
 						return false, tc.existsErr
 					} else if tc.name == "Error checking snapshot marker" && path == "/tmp/raft/snapshot.marker" {
 						return false, tc.existsErr
@@ -143,7 +153,16 @@ func TestCheckForRecoveryMarkers(t *testing.T) {
 				return false, nil
 			}
 
-			rs := newRecoveryService(fs, &mockSerializer{}, &logger.NoOpLogger{}, "/tmp/raft", normalMode, &mockIndexService{}, &mockMetadataService{}, &mockSystemInfo{})
+			rs := newRecoveryService(
+				fs,
+				&mockSerializer{},
+				&logger.NoOpLogger{},
+				"/tmp/raft",
+				normalMode,
+				&mockIndexService{},
+				&mockMetadataService{},
+				&mockSystemInfo{},
+			)
 			result, err := rs.CheckForRecoveryMarkers()
 
 			if tc.expectedErr && err == nil {
@@ -299,7 +318,11 @@ func TestRecoverFromSnapshotOperation(t *testing.T) {
 			// Inject mock for RecoverSnapshot
 			rs.RecoverSnapshotFunc = func(metaCommitted bool) error {
 				if tc.markerContains != metaCommitted {
-					t.Errorf("Expected metaCommitted to be %v but got %v", tc.markerContains, metaCommitted)
+					t.Errorf(
+						"Expected metaCommitted to be %v but got %v",
+						tc.markerContains,
+						metaCommitted,
+					)
 				}
 				return tc.recoverErr
 			}
@@ -373,12 +396,15 @@ func TestReadSnapshotMarker(t *testing.T) {
 				if tc.openErr != nil {
 					return nil, tc.openErr
 				}
-				return &mockFile{Reader: newMockReader([]byte(tc.fileContent)), ReadAllFunc: func() ([]byte, error) {
-					if tc.readAllErr != nil {
-						return nil, tc.readAllErr
-					}
-					return []byte(tc.fileContent), nil
-				}}, nil
+				return &mockFile{
+					Reader: newMockReader([]byte(tc.fileContent)),
+					ReadAllFunc: func() ([]byte, error) {
+						if tc.readAllErr != nil {
+							return nil, tc.readAllErr
+						}
+						return []byte(tc.fileContent), nil
+					},
+				}, nil
 			}
 
 			metaCommitted, err := rs.readSnapshotMarker("/tmp/raft/snapshot.marker")
@@ -391,7 +417,11 @@ func TestReadSnapshotMarker(t *testing.T) {
 			}
 
 			if metaCommitted != tc.expectedMetaCommitted {
-				t.Errorf("Expected metaCommitted to be %v but got %v", tc.expectedMetaCommitted, metaCommitted)
+				t.Errorf(
+					"Expected metaCommitted to be %v but got %v",
+					tc.expectedMetaCommitted,
+					metaCommitted,
+				)
 			}
 		})
 	}
@@ -728,7 +758,9 @@ func TestCompleteSnapshotDataCommit(t *testing.T) {
 			// In aggressive mode with rename error, metadata should be removed
 			if tc.renameErr != nil && tc.mode == aggressiveMode {
 				if !metaRemoved {
-					t.Error("Expected metadata file to be removed in aggressive mode with rename error")
+					t.Error(
+						"Expected metadata file to be removed in aggressive mode with rename error",
+					)
 				}
 			}
 		})
@@ -893,7 +925,10 @@ func TestCheckAndRepairConsistency(t *testing.T) {
 					t.Errorf("Expected error to wrap ErrStorageIO but got: %v", err)
 				}
 				if !strings.Contains(err.Error(), "failed to check log file") {
-					t.Errorf("Expected error message to contain 'failed to check log file' but got: %v", err)
+					t.Errorf(
+						"Expected error message to contain 'failed to check log file' but got: %v",
+						err,
+					)
 				}
 			}
 		})
@@ -1072,7 +1107,8 @@ func TestCleanupTempFiles(t *testing.T) {
 				}
 
 				// For testing "with temp files" case, return some matches
-				if tc.name == "Success - with temp files" || tc.name == "Remove error" || tc.name == "File doesn't exist error - should be ignored" {
+				if tc.name == "Success - with temp files" || tc.name == "Remove error" ||
+					tc.name == "File doesn't exist error - should be ignored" {
 					return []string{pattern}, nil
 				}
 				return []string{}, nil
@@ -1231,7 +1267,11 @@ func TestCreateSnapshotRecoveryMarker(t *testing.T) {
 			}
 
 			if !tc.expectedErr {
-				testutil.AssertTrue(t, writeFileCalled, "Expected WriteFile to be called for marker")
+				testutil.AssertTrue(
+					t,
+					writeFileCalled,
+					"Expected WriteFile to be called for marker",
+				)
 			}
 		})
 	}

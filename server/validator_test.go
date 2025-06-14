@@ -244,7 +244,11 @@ func TestValidateAcquireRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateAcquireRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateAcquireRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -325,7 +329,11 @@ func TestValidateReleaseRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateReleaseRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateReleaseRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -433,7 +441,11 @@ func TestValidateRenewRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateRenewRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateRenewRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -489,7 +501,11 @@ func TestValidateGetLockInfoRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateGetLockInfoRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateGetLockInfoRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -578,7 +594,11 @@ func TestValidateGetLocksRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateGetLocksRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateGetLocksRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -704,7 +724,11 @@ func TestValidateEnqueueWaiterRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateEnqueueWaiterRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateEnqueueWaiterRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -784,7 +808,11 @@ func TestValidateCancelWaitRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateCancelWaitRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateCancelWaitRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -839,7 +867,11 @@ func TestValidateBackoffAdviceRequest(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("ValidateBackoffAdviceRequest() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"ValidateBackoffAdviceRequest() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -997,7 +1029,11 @@ func TestValidateLockFilter(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validateLockFilter() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validateLockFilter() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -1075,7 +1111,11 @@ func TestValidateLockID(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validateLockID() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validateLockID() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -1153,7 +1193,11 @@ func TestValidateClientID(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validateClientID() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validateClientID() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -1295,7 +1339,11 @@ func TestValidateWaitTimeout(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validateWaitTimeout() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validateWaitTimeout() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -1364,7 +1412,11 @@ func TestValidatePriority(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validatePriority() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validatePriority() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -1475,7 +1527,11 @@ func TestValidateMetadata(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validateMetadata() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validateMetadata() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {
@@ -1528,7 +1584,11 @@ func TestValidateRequestID(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("validateRequestID() error = %v, want error containing %q", err, tt.errorMsg)
+					t.Errorf(
+						"validateRequestID() error = %v, want error containing %q",
+						err,
+						tt.errorMsg,
+					)
 				}
 			} else {
 				if err != nil {

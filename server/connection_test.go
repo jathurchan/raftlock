@@ -41,7 +41,10 @@ func TestNewConnectionManager(t *testing.T) {
 			var _ ConnectionManager = cm
 
 			if cm.GetActiveConnections() != 0 {
-				t.Errorf("Expected 0 active connections initially, got %d", cm.GetActiveConnections())
+				t.Errorf(
+					"Expected 0 active connections initially, got %d",
+					cm.GetActiveConnections(),
+				)
 			}
 
 			infos := cm.GetAllConnectionInfo()
@@ -69,7 +72,10 @@ func TestConnectionManager_OnConnect(t *testing.T) {
 		}
 
 		if metrics.getActiveConnections() != 1 {
-			t.Errorf("Expected metrics to show 1 active connection, got %d", metrics.getActiveConnections())
+			t.Errorf(
+				"Expected metrics to show 1 active connection, got %d",
+				metrics.getActiveConnections(),
+			)
 		}
 
 		infos := cm.GetAllConnectionInfo()
@@ -133,12 +139,18 @@ func TestConnectionManager_OnConnect(t *testing.T) {
 
 		cm.OnConnect(addr)
 		if cm.GetActiveConnections() != 1 {
-			t.Errorf("Expected 1 active connection after first connect, got %d", cm.GetActiveConnections())
+			t.Errorf(
+				"Expected 1 active connection after first connect, got %d",
+				cm.GetActiveConnections(),
+			)
 		}
 
 		cm.OnConnect(addr)
 		if cm.GetActiveConnections() != 1 {
-			t.Errorf("Expected 1 active connection after duplicate connect, got %d", cm.GetActiveConnections())
+			t.Errorf(
+				"Expected 1 active connection after duplicate connect, got %d",
+				cm.GetActiveConnections(),
+			)
 		}
 	})
 }
@@ -154,21 +166,33 @@ func TestConnectionManager_OnDisconnect(t *testing.T) {
 
 		cm.OnConnect(addr)
 		if cm.GetActiveConnections() != 1 {
-			t.Errorf("Expected 1 active connection after connect, got %d", cm.GetActiveConnections())
+			t.Errorf(
+				"Expected 1 active connection after connect, got %d",
+				cm.GetActiveConnections(),
+			)
 		}
 
 		cm.OnDisconnect(addr)
 		if cm.GetActiveConnections() != 0 {
-			t.Errorf("Expected 0 active connections after disconnect, got %d", cm.GetActiveConnections())
+			t.Errorf(
+				"Expected 0 active connections after disconnect, got %d",
+				cm.GetActiveConnections(),
+			)
 		}
 
 		if metrics.getActiveConnections() != 0 {
-			t.Errorf("Expected metrics to show 0 active connections, got %d", metrics.getActiveConnections())
+			t.Errorf(
+				"Expected metrics to show 0 active connections, got %d",
+				metrics.getActiveConnections(),
+			)
 		}
 
 		infos := cm.GetAllConnectionInfo()
 		if len(infos) != 0 {
-			t.Errorf("Expected empty connection info map after disconnect, got %d entries", len(infos))
+			t.Errorf(
+				"Expected empty connection info map after disconnect, got %d entries",
+				len(infos),
+			)
 		}
 	})
 
@@ -317,7 +341,11 @@ func TestConnectionManager_GetActiveConnections(t *testing.T) {
 		cm.OnConnect(addr)
 		expectedCount := i + 1
 		if cm.GetActiveConnections() != expectedCount {
-			t.Errorf("Expected %d active connections, got %d", expectedCount, cm.GetActiveConnections())
+			t.Errorf(
+				"Expected %d active connections, got %d",
+				expectedCount,
+				cm.GetActiveConnections(),
+			)
 		}
 	}
 
@@ -358,7 +386,10 @@ func TestConnectionManager_GetAllConnectionInfo(t *testing.T) {
 
 		infos2 := cm.GetAllConnectionInfo()
 		if len(infos2) != 1 {
-			t.Errorf("Expected original connection info to be unmodified, got %d entries", len(infos2))
+			t.Errorf(
+				"Expected original connection info to be unmodified, got %d entries",
+				len(infos2),
+			)
 		}
 
 		info, exists := infos2[addr]

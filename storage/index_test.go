@@ -186,7 +186,10 @@ func TestIndexService_Build(t *testing.T) {
 				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
 				r.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10)
 				r.AddEntry(types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")}, 15)
-				r.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd3")}, 20) // Out of order
+				r.AddEntry(
+					types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd3")},
+					20,
+				) // Out of order
 			},
 			expectedResult: buildResult{
 				IndexMap: []types.IndexOffsetPair{
@@ -208,7 +211,10 @@ func TestIndexService_Build(t *testing.T) {
 				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
 				r.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10)
 				r.AddEntry(types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")}, 15)
-				r.AddEntry(types.LogEntry{Term: 1, Index: 4, Command: []byte("cmd3")}, 20) // Gap (should be 3)
+				r.AddEntry(
+					types.LogEntry{Term: 1, Index: 4, Command: []byte("cmd3")},
+					20,
+				) // Gap (should be 3)
 			},
 			expectedResult: buildResult{
 				IndexMap: []types.IndexOffsetPair{
@@ -995,9 +1001,21 @@ func TestIndexService_ReadInRange(t *testing.T) {
 			name: "Read full range",
 			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
 				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
-				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10, 0)
-				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")}, 15, 10)
-				r.AddEntryWithOffset(types.LogEntry{Term: 2, Index: 3, Command: []byte("cmd3")}, 20, 25)
+				r.AddEntryWithOffset(
+					types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")},
+					10,
+					0,
+				)
+				r.AddEntryWithOffset(
+					types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")},
+					15,
+					10,
+				)
+				r.AddEntryWithOffset(
+					types.LogEntry{Term: 2, Index: 3, Command: []byte("cmd3")},
+					20,
+					25,
+				)
 			},
 			indexMap: []types.IndexOffsetPair{
 				{Index: 1, Offset: 0},
@@ -1018,7 +1036,11 @@ func TestIndexService_ReadInRange(t *testing.T) {
 			name: "Read partial range",
 			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
 				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
-				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")}, 15, 10)
+				r.AddEntryWithOffset(
+					types.LogEntry{Term: 1, Index: 2, Command: []byte("cmd2")},
+					15,
+					10,
+				)
 			},
 			indexMap: []types.IndexOffsetPair{
 				{Index: 1, Offset: 0},
@@ -1151,7 +1173,11 @@ func TestIndexService_ReadInRange(t *testing.T) {
 			name: "ReadAtOffset returns non-EOF error",
 			setupMocks: func(fs *mockFileSystem, r *mockLogEntryReader) {
 				fs.files[logPath] = []byte{0x01, 0x02, 0x03}
-				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10, 0)
+				r.AddEntryWithOffset(
+					types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")},
+					10,
+					0,
+				)
 				r.AddEntryWithOffset(types.LogEntry{Term: 1, Index: 2, Command: nil}, 0, 10)
 				r.readErrors[1] = errForcedReadFailure
 			},
@@ -1211,7 +1237,10 @@ func TestIndexServiceEdgeCases(t *testing.T) {
 		// Setup mocks: add entries with duplicate indices
 		mfs.files[logPath] = []byte{0x01, 0x02, 0x03}
 		mr.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1")}, 10)
-		mr.AddEntry(types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1-duplicate")}, 15) // Duplicate index
+		mr.AddEntry(
+			types.LogEntry{Term: 1, Index: 1, Command: []byte("cmd1-duplicate")},
+			15,
+		) // Duplicate index
 
 		result, err := is.Build(logPath)
 		testutil.AssertNoError(t, err) // Should not error, but truncate

@@ -340,7 +340,10 @@ func TestRaftLog_LogManager_GetTerm_ErrorPaths(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected storage error for index 3, got nil")
 		}
-		if !strings.Contains(err.Error(), "failed to get log entry 3 from storage: simulated storage failure") {
+		if !strings.Contains(
+			err.Error(),
+			"failed to get log entry 3 from storage: simulated storage failure",
+		) {
 			t.Errorf("Unexpected error for index 3: %v", err)
 		}
 	})
@@ -684,7 +687,10 @@ func TestRaftLog_LogManager_TruncatePrefix(t *testing.T) {
 		}
 
 		if metrics.logTruncateCount != 1 {
-			t.Errorf("Expected 1 log truncate metric even for no-op, got %d", metrics.logTruncateCount)
+			t.Errorf(
+				"Expected 1 log truncate metric even for no-op, got %d",
+				metrics.logTruncateCount,
+			)
 		}
 	})
 
@@ -847,7 +853,10 @@ func TestRaftLog_LogManager_TruncateSuffix(t *testing.T) {
 		}
 
 		if metrics.logConsistencyErr != 1 {
-			t.Errorf("Expected log consistency error to be recorded, got %d", metrics.logConsistencyErr)
+			t.Errorf(
+				"Expected log consistency error to be recorded, got %d",
+				metrics.logConsistencyErr,
+			)
 		}
 	})
 
@@ -876,7 +885,11 @@ func TestRaftLog_LogManager_IsConsistentWithStorage(t *testing.T) {
 
 		consistent, err := lm.IsConsistentWithStorage(ctx)
 		if err == nil || consistent {
-			t.Errorf("Expected inconsistency due to term mismatch for empty log, got: consistent=%v, err=%v", consistent, err)
+			t.Errorf(
+				"Expected inconsistency due to term mismatch for empty log, got: consistent=%v, err=%v",
+				consistent,
+				err,
+			)
 		}
 
 		if metrics.logConsistencyErr != 1 {
@@ -893,7 +906,11 @@ func TestRaftLog_LogManager_IsConsistentWithStorage(t *testing.T) {
 
 		consistent, err := lm.IsConsistentWithStorage(ctx)
 		if err == nil || consistent {
-			t.Errorf("Expected inconsistency due to index mismatch, got: consistent=%v, err=%v", consistent, err)
+			t.Errorf(
+				"Expected inconsistency due to index mismatch, got: consistent=%v, err=%v",
+				consistent,
+				err,
+			)
 		}
 	})
 
@@ -1149,7 +1166,8 @@ func TestRaftLog_LogManager_FindFirstIndexInTermUnsafe(t *testing.T) {
 		}
 
 		_, err := lm.FindFirstIndexInTermUnsafe(ctx, 1, 3)
-		if err == nil || !strings.Contains(err.Error(), "GetTermUnsafe") || !strings.Contains(err.Error(), "hard failure") {
+		if err == nil || !strings.Contains(err.Error(), "GetTermUnsafe") ||
+			!strings.Contains(err.Error(), "hard failure") {
 			t.Errorf("Expected wrapped hard failure error after term block, got: %v", err)
 		}
 	})

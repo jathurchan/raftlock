@@ -39,10 +39,17 @@ func TestDoWithLock(t *testing.T) {
 		defer cleanup()
 
 		fnExecuted := false
-		err := DoWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, func(ctx context.Context) error {
-			fnExecuted = true
-			return nil
-		})
+		err := DoWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			func(ctx context.Context) error {
+				fnExecuted = true
+				return nil
+			},
+		)
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertTrue(t, fnExecuted, "Expected the wrapped function to be executed")
@@ -59,10 +66,17 @@ func TestDoWithLock(t *testing.T) {
 		}
 
 		fnExecuted := false
-		err := DoWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, func(ctx context.Context) error {
-			fnExecuted = true
-			return nil
-		})
+		err := DoWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			func(ctx context.Context) error {
+				fnExecuted = true
+				return nil
+			},
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertContains(t, err.Error(), "failed to create lock handle")
@@ -77,10 +91,17 @@ func TestDoWithLock(t *testing.T) {
 		mockHandle.acquireErr = expectedErr
 
 		fnExecuted := false
-		err := DoWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, func(ctx context.Context) error {
-			fnExecuted = true
-			return nil
-		})
+		err := DoWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			func(ctx context.Context) error {
+				fnExecuted = true
+				return nil
+			},
+		)
 
 		testutil.AssertErrorIs(t, err, expectedErr)
 		testutil.AssertFalse(t, fnExecuted, "Function should not execute if acquire fails")
@@ -91,9 +112,16 @@ func TestDoWithLock(t *testing.T) {
 		defer cleanup()
 
 		expectedErr := errors.New("function execution failed")
-		err := DoWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, func(ctx context.Context) error {
-			return expectedErr
-		})
+		err := DoWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			func(ctx context.Context) error {
+				return expectedErr
+			},
+		)
 
 		testutil.AssertErrorIs(t, err, expectedErr)
 	})
@@ -105,9 +133,16 @@ func TestDoWithLock(t *testing.T) {
 		closeErr := errors.New("close failed")
 		mockHandle.closeErr = closeErr
 
-		err := DoWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, func(ctx context.Context) error {
-			return nil
-		})
+		err := DoWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			func(ctx context.Context) error {
+				return nil
+			},
+		)
 
 		testutil.AssertErrorIs(t, err, closeErr)
 	})
@@ -119,16 +154,25 @@ func TestDoWithLock(t *testing.T) {
 		fnErr := errors.New("function failed")
 		mockHandle.closeErr = errors.New("close failed")
 
-		err := DoWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, func(ctx context.Context) error {
-			return fnErr
-		})
+		err := DoWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			func(ctx context.Context) error {
+				return fnErr
+			},
+		)
 
 		testutil.AssertErrorIs(t, err, fnErr)
 	})
 }
 
 // setupRunWithLockTest provides a consistent setup for RunWithLock tests.
-func setupRunWithLockTest(t *testing.T) (*mockLockClient, *mockLockHandle, *mockAutoRenewer, func()) {
+func setupRunWithLockTest(
+	t *testing.T,
+) (*mockLockClient, *mockLockHandle, *mockAutoRenewer, func()) {
 	t.Helper()
 
 	mockClient := &mockLockClient{}
@@ -160,10 +204,18 @@ func TestRunWithLock(t *testing.T) {
 		defer cleanup()
 
 		fnExecuted := false
-		err := RunWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, 10*time.Second, func(ctx context.Context) error {
-			fnExecuted = true
-			return nil
-		})
+		err := RunWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			10*time.Second,
+			func(ctx context.Context) error {
+				fnExecuted = true
+				return nil
+			},
+		)
 
 		testutil.AssertNoError(t, err)
 		testutil.AssertTrue(t, fnExecuted, "Function should have been executed")
@@ -188,10 +240,18 @@ func TestRunWithLock(t *testing.T) {
 		defer func() { NewAutoRenewerFunc = originalNewAutoRenewer }()
 
 		fnExecuted := false
-		err := RunWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, 10*time.Second, func(ctx context.Context) error {
-			fnExecuted = true
-			return nil
-		})
+		err := RunWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			10*time.Second,
+			func(ctx context.Context) error {
+				fnExecuted = true
+				return nil
+			},
+		)
 
 		testutil.AssertError(t, err)
 		testutil.AssertContains(t, err.Error(), "failed to create auto-renewer")
@@ -205,9 +265,17 @@ func TestRunWithLock(t *testing.T) {
 		fnErr := errors.New("function failed")
 		mockRenewer.stopErr = errors.New("stop failed")
 
-		err := RunWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, 10*time.Second, func(ctx context.Context) error {
-			return fnErr
-		})
+		err := RunWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			10*time.Second,
+			func(ctx context.Context) error {
+				return fnErr
+			},
+		)
 
 		testutil.AssertErrorIs(t, err, fnErr)
 		testutil.AssertTrue(t, mockRenewer.startCalled, "Renewer.Start should have been called")
@@ -221,9 +289,17 @@ func TestRunWithLock(t *testing.T) {
 		stopErr := errors.New("stop failed")
 		mockRenewer.stopErr = stopErr
 
-		err := RunWithLock(context.Background(), mockClient, "test-lock", "test-client", 30*time.Second, 10*time.Second, func(ctx context.Context) error {
-			return nil
-		})
+		err := RunWithLock(
+			context.Background(),
+			mockClient,
+			"test-lock",
+			"test-client",
+			30*time.Second,
+			10*time.Second,
+			func(ctx context.Context) error {
+				return nil
+			},
+		)
 
 		testutil.AssertErrorIs(t, err, stopErr)
 	})

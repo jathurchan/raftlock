@@ -15,7 +15,9 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-func setupTestReplicationManager(t *testing.T) (*replicationManager, *mockLogManager, *mockStateManager, *mockNetworkManager, *mockSnapshotManager, *mockClock) {
+func setupTestReplicationManager(
+	t *testing.T,
+) (*replicationManager, *mockLogManager, *mockStateManager, *mockNetworkManager, *mockSnapshotManager, *mockClock) {
 	t.Helper()
 
 	mu := &sync.RWMutex{}
@@ -271,7 +273,12 @@ func TestRaftReplication_Tick(t *testing.T) {
 		rm.cfg.Options.HeartbeatTickCount = 0
 
 		interval := rm.getHeartbeatInterval()
-		testutil.AssertEqual(t, DefaultHeartbeatTickCount, interval, "expected fallback to default heartbeat interval")
+		testutil.AssertEqual(
+			t,
+			DefaultHeartbeatTickCount,
+			interval,
+			"expected fallback to default heartbeat interval",
+		)
 		rm.Stop()
 	})
 
@@ -417,7 +424,12 @@ func TestRaftReplication_SendHeartbeats(t *testing.T) {
 
 		rm.SendHeartbeats(ctx)
 		appendEntries, _ := network.getAndResetCallCounts()
-		testutil.AssertEqual(t, 0, appendEntries, "Should not send heartbeats with canceled context")
+		testutil.AssertEqual(
+			t,
+			0,
+			appendEntries,
+			"Should not send heartbeats with canceled context",
+		)
 		rm.Stop()
 	})
 }
@@ -437,23 +449,30 @@ func TestRaftReplication_ReplicateToPeerInternal_Success(t *testing.T) {
 	ps.MatchIndex = 0
 	rm.mu.Unlock()
 
-	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		t.Logf("AppendEntries sent: to=%s term=%d entries=%d", target, args.Term, len(args.Entries))
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			t.Logf(
+				"AppendEntries sent: to=%s term=%d entries=%d",
+				target,
+				args.Term,
+				len(args.Entries),
+			)
 
-		reply := &types.AppendEntriesReply{
-			Term:    args.Term,
-			Success: true,
-		}
+			reply := &types.AppendEntriesReply{
+				Term:    args.Term,
+				Success: true,
+			}
 
-		start := rm.clock.Now()
-		end := start.Add(1 * time.Millisecond)
+			start := rm.clock.Now()
+			end := start.Add(1 * time.Millisecond)
 
-		rm.mu.Lock()
-		defer rm.mu.Unlock()
-		rm.handleAppendReply(target, args.Term, args, reply, false, end.Sub(start))
+			rm.mu.Lock()
+			defer rm.mu.Unlock()
+			rm.handleAppendReply(target, args.Term, args, reply, false, end.Sub(start))
 
-		return reply, nil
-	})
+			return reply, nil
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -480,20 +499,27 @@ func TestRaftReplication_ReplicateToPeerInternal_LogConflict(t *testing.T) {
 	ps.MatchIndex = 2
 	rm.mu.Unlock()
 
-	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		return &types.AppendEntriesReply{
-			Term:          args.Term,
-			Success:       false,
-			ConflictTerm:  1,
-			ConflictIndex: 2,
-		}, nil
-	})
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			return &types.AppendEntriesReply{
+				Term:          args.Term,
+				Success:       false,
+				ConflictTerm:  1,
+				ConflictIndex: 2,
+			}, nil
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 2, 0, false)
 
 	rm.mu.RLock()
 	ps = rm.peerStates["node2"]
-	testutil.AssertEqual(t, types.Index(2), ps.NextIndex, "expected NextIndex rollback due to conflict")
+	testutil.AssertEqual(
+		t,
+		types.Index(2),
+		ps.NextIndex,
+		"expected NextIndex rollback due to conflict",
+	)
 	testutil.AssertEqual(t, types.Index(2), ps.MatchIndex, "expected MatchIndex unchanged")
 	testutil.AssertTrue(t, ps.IsActive, "expected peer to remain active")
 	rm.mu.RUnlock()
@@ -518,12 +544,14 @@ func TestRaftReplication_ReplicateToPeerInternal_HigherTerm(t *testing.T) {
 	ps.MatchIndex = 0
 	rm.mu.Unlock()
 
-	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		return &types.AppendEntriesReply{
-			Term:    2,
-			Success: false,
-		}, nil
-	})
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			return &types.AppendEntriesReply{
+				Term:    2,
+				Success: false,
+			}, nil
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -547,9 +575,11 @@ func TestRaftReplication_ReplicateToPeerInternal_NetworkError(t *testing.T) {
 	rm.mu.Unlock()
 
 	expectedErr := errors.New("network error")
-	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		return nil, expectedErr
-	})
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			return nil, expectedErr
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -559,7 +589,12 @@ func TestRaftReplication_ReplicateToPeerInternal_NetworkError(t *testing.T) {
 	rm.mu.RUnlock()
 }
 
-func setupReplicationWithPeer(t *testing.T, nextIndex types.Index, entries map[types.Index]types.LogEntry, snapshotInProgress bool) (*replicationManager, *mockLogManager) {
+func setupReplicationWithPeer(
+	t *testing.T,
+	nextIndex types.Index,
+	entries map[types.Index]types.LogEntry,
+	snapshotInProgress bool,
+) (*replicationManager, *mockLogManager) {
 	rm, logMgr, _, _, _, _ := setupTestReplicationManager(t)
 
 	for idx, entry := range entries {
@@ -668,10 +703,12 @@ func TestRaftReplication_ReplicateToPeerInternal_TriggersSnapshotWhenLogUnavaila
 		snapshotTriggered <- struct{}{}
 	}
 
-	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		t.Fatal("AppendEntries should not be called when snapshot is initiated")
-		return nil, nil
-	})
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			t.Fatal("AppendEntries should not be called when snapshot is initiated")
+			return nil, nil
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 1, 0, false)
 
@@ -701,10 +738,12 @@ func TestRaftReplication_ReplicateToPeerInternal_PrevLogInfoUnavailable_ReturnsE
 	rm.mu.Unlock()
 
 	called := false
-	network.setSendAppendEntriesFunc(func(ctx context.Context, peerID types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		called = true
-		return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
-	})
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, peerID types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			called = true
+			return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 2, 0, false)
 
@@ -746,10 +785,14 @@ func TestRaftReplication_ReplicateToPeerInternal_PrevLogTermCompacted_StartsSnap
 		},
 	}
 
-	network.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		t.Fatal("AppendEntries should not be called when snapshot is triggered due to compacted prevLogIndex")
-		return nil, nil
-	})
+	network.setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			t.Fatal(
+				"AppendEntries should not be called when snapshot is triggered due to compacted prevLogIndex",
+			)
+			return nil, nil
+		},
+	)
 
 	rm.replicateToPeerInternal(context.Background(), "node2", 2, 0, false)
 
@@ -868,11 +911,13 @@ func TestReplicateToPeerInternal_EmptyEntriesForValidRange(t *testing.T) {
 	}
 
 	var appendCalled, snapshotCalled bool
-	networkMgr.setSendAppendEntriesFunc(func(_ context.Context, _ types.NodeID, _ *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		appendCalled = true
-		t.Error("AppendEntries should not be called")
-		return nil, nil
-	})
+	networkMgr.setSendAppendEntriesFunc(
+		func(_ context.Context, _ types.NodeID, _ *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			appendCalled = true
+			t.Error("AppendEntries should not be called")
+			return nil, nil
+		},
+	)
 	snapshotMgr.sendSnapshotFunc = func(_ context.Context, _ types.NodeID, _ types.Term) {
 		snapshotCalled = true
 		t.Error("SendSnapshot should not be called")
@@ -1040,7 +1085,12 @@ func TestRaftReplication_HandleLogInconsistency(t *testing.T) {
 	})
 }
 
-func setPeerState(t *testing.T, rm *replicationManager, nodeID types.NodeID, nextIndex, matchIndex types.Index) {
+func setPeerState(
+	t *testing.T,
+	rm *replicationManager,
+	nodeID types.NodeID,
+	nextIndex, matchIndex types.Index,
+) {
 	t.Helper()
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
@@ -1049,14 +1099,24 @@ func setPeerState(t *testing.T, rm *replicationManager, nodeID types.NodeID, nex
 	state.MatchIndex = matchIndex
 }
 
-func assertNextIndex(t *testing.T, rm *replicationManager, nodeID types.NodeID, expected types.Index) {
+func assertNextIndex(
+	t *testing.T,
+	rm *replicationManager,
+	nodeID types.NodeID,
+	expected types.Index,
+) {
 	t.Helper()
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 	testutil.AssertEqual(t, expected, rm.peerStates[nodeID].NextIndex, "NextIndex mismatch")
 }
 
-func assertMatchIndex(t *testing.T, rm *replicationManager, nodeID types.NodeID, expected types.Index) {
+func assertMatchIndex(
+	t *testing.T,
+	rm *replicationManager,
+	nodeID types.NodeID,
+	expected types.Index,
+) {
 	t.Helper()
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
@@ -1190,14 +1250,24 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(2), stateMgr.GetCommitIndex(), "Commit index should advance to 2")
+		testutil.AssertEqual(
+			t,
+			types.Index(2),
+			stateMgr.GetCommitIndex(),
+			"Commit index should advance to 2",
+		)
 
 		rm.mu.Lock()
 		rm.peerStates["node3"].MatchIndex = 3
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(3), stateMgr.GetCommitIndex(), "Commit index should advance to 3")
+		testutil.AssertEqual(
+			t,
+			types.Index(3),
+			stateMgr.GetCommitIndex(),
+			"Commit index should advance to 3",
+		)
 	})
 
 	t.Run("SkipsOlderTermEntriesEvenWithQuorum", func(t *testing.T) {
@@ -1220,7 +1290,12 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(0), stateMgr.GetCommitIndex(), "Should not commit older term entries")
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			stateMgr.GetCommitIndex(),
+			"Should not commit older term entries",
+		)
 
 		rm.mu.Lock()
 		rm.peerStates["node2"].MatchIndex = 3
@@ -1228,7 +1303,12 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(3), stateMgr.GetCommitIndex(), "Should commit index 3 from current term")
+		testutil.AssertEqual(
+			t,
+			types.Index(3),
+			stateMgr.GetCommitIndex(),
+			"Should commit index 3 from current term",
+		)
 	})
 
 	t.Run("NoopIfAlreadyShutdown", func(t *testing.T) {
@@ -1293,7 +1373,12 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		rm.MaybeAdvanceCommitIndex()
-		testutil.AssertEqual(t, types.Index(0), stateMgr.GetCommitIndex(), "Commit should not advance when term check fails")
+		testutil.AssertEqual(
+			t,
+			types.Index(0),
+			stateMgr.GetCommitIndex(),
+			"Commit should not advance when term check fails",
+		)
 	})
 
 	t.Run("ReturnWhenPotentialCommitIndexIsNotGreater", func(t *testing.T) {
@@ -1318,7 +1403,12 @@ func TestRaftReplication_MaybeAdvanceCommitIndex(t *testing.T) {
 
 		rm.MaybeAdvanceCommitIndex()
 
-		testutil.AssertEqual(t, types.Index(2), stateMgr.GetCommitIndex(), "Should early return without advancing commit index")
+		testutil.AssertEqual(
+			t,
+			types.Index(2),
+			stateMgr.GetCommitIndex(),
+			"Should early return without advancing commit index",
+		)
 	})
 }
 
@@ -1530,9 +1620,11 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 
 		// Use the thread-safe setter for the mock network manager
 		mockNet := network
-		mockNet.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-			return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
-		})
+		mockNet.setSendAppendEntriesFunc(
+			func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+				return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
+			},
+		)
 		defer mockNet.setSendAppendEntriesFunc(nil) // cleanup
 
 		index, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
@@ -1556,9 +1648,11 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		mockNet := network
-		mockNet.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-			return nil, fmt.Errorf("unreachable")
-		})
+		mockNet.setSendAppendEntriesFunc(
+			func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+				return nil, fmt.Errorf("unreachable")
+			},
+		)
 		defer mockNet.setSendAppendEntriesFunc(nil)
 
 		index, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
@@ -1599,10 +1693,12 @@ func TestRaftReplication_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 		stateMgr.leaderID = rm.id
 		stateMgr.mu.Unlock()
 
-		networkMgrMock.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-			<-ctx.Done()
-			return nil, ctx.Err()
-		})
+		networkMgrMock.setSendAppendEntriesFunc(
+			func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+		)
 		defer networkMgrMock.setSendAppendEntriesFunc(nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -1676,9 +1772,11 @@ func TestRaftReplication_VerifyLeadershipViaQuorum_HigherTermResponse(t *testing
 	stateMgr.leaderID = rm.id
 	stateMgr.mu.Unlock()
 
-	rm.networkMgr.(*mockNetworkManager).setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-		return &types.AppendEntriesReply{Term: args.Term + 1, Success: false}, nil
-	})
+	rm.networkMgr.(*mockNetworkManager).setSendAppendEntriesFunc(
+		func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+			return &types.AppendEntriesReply{Term: args.Term + 1, Success: false}, nil
+		},
+	)
 
 	ctx := context.Background()
 	ok := rm.verifyLeadershipViaQuorum(ctx, 2)
@@ -1738,7 +1836,11 @@ func TestRaftReplication_HandleAppendEntries(t *testing.T) {
 
 		rpcTerm := types.Term(6)
 		leaderID := types.NodeID("newLeader")
-		args := defaultArgs(rpcTerm, leaderID, types.LogEntry{Term: rpcTerm, Index: 1, Command: []byte("cmd1")})
+		args := defaultArgs(
+			rpcTerm,
+			leaderID,
+			types.LogEntry{Term: rpcTerm, Index: 1, Command: []byte("cmd1")},
+		)
 		args.LeaderCommit = 0
 
 		stateMgrMock.checkTermAndStepDownFunc = func(ctx context.Context, rpcTermCalled types.Term, rpcLeaderCalled types.NodeID) (bool, types.Term) {
@@ -2073,7 +2175,11 @@ func TestRaftReplication_SetPeerSnapshotInProgress(t *testing.T) {
 
 		rm.mu.RLock()
 		defer rm.mu.RUnlock()
-		testutil.AssertTrue(t, rm.peerStates["node2"].SnapshotInProgress, "Expected SnapshotInProgress to be true")
+		testutil.AssertTrue(
+			t,
+			rm.peerStates["node2"].SnapshotInProgress,
+			"Expected SnapshotInProgress to be true",
+		)
 	})
 
 	t.Run("Set to false", func(t *testing.T) {
@@ -2081,7 +2187,11 @@ func TestRaftReplication_SetPeerSnapshotInProgress(t *testing.T) {
 
 		rm.mu.RLock()
 		defer rm.mu.RUnlock()
-		testutil.AssertFalse(t, rm.peerStates["node2"].SnapshotInProgress, "Expected SnapshotInProgress to be false")
+		testutil.AssertFalse(
+			t,
+			rm.peerStates["node2"].SnapshotInProgress,
+			"Expected SnapshotInProgress to be false",
+		)
 	})
 
 	t.Run("No-op on shutdown", func(t *testing.T) {
@@ -2095,7 +2205,11 @@ func TestRaftReplication_SetPeerSnapshotInProgress(t *testing.T) {
 
 		rm.mu.RLock()
 		defer rm.mu.RUnlock()
-		testutil.AssertTrue(t, rm.peerStates["node2"].SnapshotInProgress, "Expected no change due to shutdown")
+		testutil.AssertTrue(
+			t,
+			rm.peerStates["node2"].SnapshotInProgress,
+			"Expected no change due to shutdown",
+		)
 	})
 
 	t.Run("Graceful handling of missing peer", func(t *testing.T) {
@@ -2197,11 +2311,25 @@ func TestUpdatePeerAfterSnapshotSend(t *testing.T) {
 		updatedPs := rm.peerStates[peerID]
 		rm.mu.RUnlock()
 
-		testutil.AssertEqual(t, newSnapshotIndex, updatedPs.MatchIndex, "MatchIndex should be updated to snapshotIndex")
-		testutil.AssertEqual(t, newSnapshotIndex+1, updatedPs.NextIndex, "NextIndex should be snapshotIndex + 1")
+		testutil.AssertEqual(
+			t,
+			newSnapshotIndex,
+			updatedPs.MatchIndex,
+			"MatchIndex should be updated to snapshotIndex",
+		)
+		testutil.AssertEqual(
+			t,
+			newSnapshotIndex+1,
+			updatedPs.NextIndex,
+			"NextIndex should be snapshotIndex + 1",
+		)
 		testutil.AssertFalse(t, updatedPs.SnapshotInProgress, "SnapshotInProgress should be false")
 		testutil.AssertTrue(t, updatedPs.IsActive, "IsActive should be true")
-		testutil.AssertTrue(t, updatedPs.LastActive.After(initialTime) || updatedPs.LastActive.Equal(initialTime), "LastActive should be updated to current clock time")
+		testutil.AssertTrue(
+			t,
+			updatedPs.LastActive.After(initialTime) || updatedPs.LastActive.Equal(initialTime),
+			"LastActive should be updated to current clock time",
+		)
 
 		select {
 		case <-rm.notifyCommitCh:
@@ -2230,11 +2358,25 @@ func TestUpdatePeerAfterSnapshotSend(t *testing.T) {
 		updatedPs := rm.peerStates[peerID]
 		rm.mu.RUnlock()
 
-		testutil.AssertEqual(t, currentMatchIndex, updatedPs.MatchIndex, "MatchIndex should NOT be updated as snapshotIndex is lower")
-		testutil.AssertEqual(t, lowerSnapshotIndex+1, updatedPs.NextIndex, "NextIndex should be snapshotIndex + 1")
+		testutil.AssertEqual(
+			t,
+			currentMatchIndex,
+			updatedPs.MatchIndex,
+			"MatchIndex should NOT be updated as snapshotIndex is lower",
+		)
+		testutil.AssertEqual(
+			t,
+			lowerSnapshotIndex+1,
+			updatedPs.NextIndex,
+			"NextIndex should be snapshotIndex + 1",
+		)
 		testutil.AssertFalse(t, updatedPs.SnapshotInProgress, "SnapshotInProgress should be false")
 		testutil.AssertTrue(t, updatedPs.IsActive, "IsActive should be true")
-		testutil.AssertTrue(t, updatedPs.LastActive.After(initialTime) || updatedPs.LastActive.Equal(initialTime), "LastActive should be updated")
+		testutil.AssertTrue(
+			t,
+			updatedPs.LastActive.After(initialTime) || updatedPs.LastActive.Equal(initialTime),
+			"LastActive should be updated",
+		)
 
 		select {
 		case <-rm.notifyCommitCh:
@@ -2286,9 +2428,23 @@ func TestUpdatePeerAfterSnapshotSend(t *testing.T) {
 		currentPs := rm.peerStates[peerID]
 		rm.mu.RUnlock()
 
-		testutil.AssertEqual(t, originalMatchIndex, currentPs.MatchIndex, "MatchIndex should not change on shutdown")
-		testutil.AssertEqual(t, originalNextIndex, currentPs.NextIndex, "NextIndex should not change on shutdown")
-		testutil.AssertTrue(t, currentPs.SnapshotInProgress, "SnapshotInProgress should not change on shutdown")
+		testutil.AssertEqual(
+			t,
+			originalMatchIndex,
+			currentPs.MatchIndex,
+			"MatchIndex should not change on shutdown",
+		)
+		testutil.AssertEqual(
+			t,
+			originalNextIndex,
+			currentPs.NextIndex,
+			"NextIndex should not change on shutdown",
+		)
+		testutil.AssertTrue(
+			t,
+			currentPs.SnapshotInProgress,
+			"SnapshotInProgress should not change on shutdown",
+		)
 		testutil.AssertFalse(t, currentPs.IsActive, "IsActive should not change on shutdown")
 
 		// triggerCommitCheck should not be called if shutdown
@@ -2317,6 +2473,11 @@ func TestUpdatePeerAfterSnapshotSend(t *testing.T) {
 		updatedPs := rm.peerStates[peerID]
 		rm.mu.RUnlock()
 
-		testutil.AssertEqual(t, specificTime, updatedPs.LastActive, "LastActive should be set to the mock clock's current time")
+		testutil.AssertEqual(
+			t,
+			specificTime,
+			updatedPs.LastActive,
+			"LastActive should be set to the mock clock's current time",
+		)
 	})
 }

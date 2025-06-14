@@ -31,7 +31,12 @@ func newTestStateManager() (*stateManager, *mockStorage, chan types.NodeID) {
 }
 
 // setState is a helper to set the initial state of a state manager
-func setState(sm *stateManager, term types.Term, role types.NodeRole, votedFor, leaderID types.NodeID) {
+func setState(
+	sm *stateManager,
+	term types.Term,
+	role types.NodeRole,
+	votedFor, leaderID types.NodeID,
+) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -85,12 +90,19 @@ func TestRaftState_Initialize(t *testing.T) {
 		}
 
 		if mockStore.saveCounter != 1 {
-			t.Errorf("Initialize() with corrupted state should persist once, got %d persists", mockStore.saveCounter)
+			t.Errorf(
+				"Initialize() with corrupted state should persist once, got %d persists",
+				mockStore.saveCounter,
+			)
 		}
 
 		term, role, _, _ := getState(sm)
 		if term != 0 || role != types.RoleFollower {
-			t.Errorf("Initialize() corrupted state got term=%v, role=%v; want term=0, role=Follower", term, role)
+			t.Errorf(
+				"Initialize() corrupted state got term=%v, role=%v; want term=0, role=Follower",
+				term,
+				role,
+			)
 		}
 	})
 
@@ -169,7 +181,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 						t.Errorf("GetStateUnsafe() got role=%v, want %v", role, initialRole)
 					}
 					if leaderID != initialLeaderID {
-						t.Errorf("GetStateUnsafe() got leaderID=%v, want %v", leaderID, initialLeaderID)
+						t.Errorf(
+							"GetStateUnsafe() got leaderID=%v, want %v",
+							leaderID,
+							initialLeaderID,
+						)
 					}
 				},
 			},
@@ -178,7 +194,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 				runTest: func(t *testing.T) {
 					leaderID := sm.GetLastKnownLeader()
 					if leaderID != initialLastKnownLeaderID {
-						t.Errorf("GetLastKnownLeader() got %v, want %v", leaderID, initialLastKnownLeaderID)
+						t.Errorf(
+							"GetLastKnownLeader() got %v, want %v",
+							leaderID,
+							initialLastKnownLeaderID,
+						)
 					}
 
 					sm.mu.Lock()
@@ -187,7 +207,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 
 					leaderID = sm.GetLastKnownLeader()
 					if leaderID != initialLastKnownLeaderID {
-						t.Errorf("GetLastKnownLeader() after leader unknown, got %v, want %v", leaderID, initialLastKnownLeaderID)
+						t.Errorf(
+							"GetLastKnownLeader() after leader unknown, got %v, want %v",
+							leaderID,
+							initialLastKnownLeaderID,
+						)
 					}
 				},
 			},
@@ -196,7 +220,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 				runTest: func(t *testing.T) {
 					commitIndex := sm.GetCommitIndex()
 					if commitIndex != initialCommitIndex {
-						t.Errorf("GetCommitIndex() got %v, want %v", commitIndex, initialCommitIndex)
+						t.Errorf(
+							"GetCommitIndex() got %v, want %v",
+							commitIndex,
+							initialCommitIndex,
+						)
 					}
 				},
 			},
@@ -208,7 +236,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 					sm.mu.RUnlock()
 
 					if commitIndex != initialCommitIndex {
-						t.Errorf("GetCommitIndexUnsafe() got %v, want %v", commitIndex, initialCommitIndex)
+						t.Errorf(
+							"GetCommitIndexUnsafe() got %v, want %v",
+							commitIndex,
+							initialCommitIndex,
+						)
 					}
 				},
 			},
@@ -217,7 +249,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 				runTest: func(t *testing.T) {
 					lastApplied := sm.GetLastApplied()
 					if lastApplied != initialLastApplied {
-						t.Errorf("GetLastApplied() got %v, want %v", lastApplied, initialLastApplied)
+						t.Errorf(
+							"GetLastApplied() got %v, want %v",
+							lastApplied,
+							initialLastApplied,
+						)
 					}
 				},
 			},
@@ -229,7 +265,11 @@ func TestRaftState_GetMethods(t *testing.T) {
 					sm.mu.RUnlock()
 
 					if lastApplied != initialLastApplied {
-						t.Errorf("GetLastAppliedUnsafe() got %v, want %v", lastApplied, initialLastApplied)
+						t.Errorf(
+							"GetLastAppliedUnsafe() got %v, want %v",
+							lastApplied,
+							initialLastApplied,
+						)
 					}
 				},
 			},
@@ -295,8 +335,12 @@ func TestRaftState_BecomeCandidate(t *testing.T) {
 
 		term, role, votedFor, _ := getState(sm)
 		if term != 2 || role != types.RoleCandidate || votedFor != "node1" {
-			t.Errorf("BecomeCandidate() got term=%v, role=%v, votedFor=%v; want term=2, role=Candidate, votedFor=node1",
-				term, role, votedFor)
+			t.Errorf(
+				"BecomeCandidate() got term=%v, role=%v, votedFor=%v; want term=2, role=Candidate, votedFor=node1",
+				term,
+				role,
+				votedFor,
+			)
 		}
 	})
 
@@ -364,8 +408,12 @@ func TestRaftState_BecomeLeader(t *testing.T) {
 
 		term, role, _, leaderID := getState(sm)
 		if term != 3 || role != types.RoleLeader || leaderID != "node1" {
-			t.Errorf("BecomeLeader() got term=%v, role=%v, leaderID=%v; want term=3, role=Leader, leaderID=node1",
-				term, role, leaderID)
+			t.Errorf(
+				"BecomeLeader() got term=%v, role=%v, leaderID=%v; want term=3, role=Leader, leaderID=node1",
+				term,
+				role,
+				leaderID,
+			)
 		}
 
 		select {
@@ -424,12 +472,20 @@ func TestRaftState_BecomeFollower(t *testing.T) {
 
 		term, role, votedFor, leaderID := getState(sm)
 		if term != 3 || role != types.RoleFollower || votedFor != "" || leaderID != "node2" {
-			t.Errorf("BecomeFollower() got term=%v, role=%v, votedFor=%v, leaderID=%v; want term=3, role=Follower, votedFor=, leaderID=node2",
-				term, role, votedFor, leaderID)
+			t.Errorf(
+				"BecomeFollower() got term=%v, role=%v, votedFor=%v, leaderID=%v; want term=3, role=Follower, votedFor=, leaderID=node2",
+				term,
+				role,
+				votedFor,
+				leaderID,
+			)
 		}
 
 		if mockStore.saveCounter != 1 {
-			t.Errorf("BecomeFollower() with term change persistence count = %v, want 1", mockStore.saveCounter)
+			t.Errorf(
+				"BecomeFollower() with term change persistence count = %v, want 1",
+				mockStore.saveCounter,
+			)
 		}
 
 		select {
@@ -455,7 +511,10 @@ func TestRaftState_BecomeFollower(t *testing.T) {
 		}
 
 		if mockStore.saveCounter != 0 {
-			t.Errorf("BecomeFollower() same term persistence count = %v, want 0", mockStore.saveCounter)
+			t.Errorf(
+				"BecomeFollower() same term persistence count = %v, want 0",
+				mockStore.saveCounter,
+			)
 		}
 	})
 
@@ -494,8 +553,13 @@ func TestRaftState_BecomeFollower(t *testing.T) {
 
 		term, role, votedFor, leaderID := getState(sm)
 		if term != 4 || role != types.RoleFollower || votedFor != "node1" || leaderID != "node2" {
-			t.Errorf("BecomeFollower() on persist failure rolled back term/vote, but still set leader; got term=%v, role=%v, votedFor=%v, leaderID=%v",
-				term, role, votedFor, leaderID)
+			t.Errorf(
+				"BecomeFollower() on persist failure rolled back term/vote, but still set leader; got term=%v, role=%v, votedFor=%v, leaderID=%v",
+				term,
+				role,
+				votedFor,
+				leaderID,
+			)
 		}
 	})
 
@@ -509,11 +573,19 @@ func TestRaftState_BecomeFollower(t *testing.T) {
 
 		term, role, _, leaderID := getState(sm)
 		if term != 6 || role != types.RoleFollower || leaderID != "node2" {
-			t.Errorf("BecomeFollower() no-op failed; got term=%v, role=%v, leaderID=%v; want 6, Follower, node2", term, role, leaderID)
+			t.Errorf(
+				"BecomeFollower() no-op failed; got term=%v, role=%v, leaderID=%v; want 6, Follower, node2",
+				term,
+				role,
+				leaderID,
+			)
 		}
 
 		if mockStore.saveCounter != 0 {
-			t.Errorf("BecomeFollower() no-op should not persist; got saveCounter=%v, want 0", mockStore.saveCounter)
+			t.Errorf(
+				"BecomeFollower() no-op should not persist; got saveCounter=%v, want 0",
+				mockStore.saveCounter,
+			)
 		}
 	})
 }
@@ -529,14 +601,22 @@ func TestRaftState_CheckTermAndStepDown(t *testing.T) {
 
 		steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 4, "node2")
 		if !steppedDown || prevTerm != 3 {
-			t.Errorf("CheckTermAndStepDown() got steppedDown=%v, prevTerm=%v; want steppedDown=true, prevTerm=3",
-				steppedDown, prevTerm)
+			t.Errorf(
+				"CheckTermAndStepDown() got steppedDown=%v, prevTerm=%v; want steppedDown=true, prevTerm=3",
+				steppedDown,
+				prevTerm,
+			)
 		}
 
 		term, role, votedFor, leaderID := getState(sm)
 		if term != 4 || role != types.RoleFollower || votedFor != "" || leaderID != "node2" {
-			t.Errorf("CheckTermAndStepDown() got term=%v, role=%v, votedFor=%v, leaderID=%v; want term=4, role=Follower, votedFor=, leaderID=node2",
-				term, role, votedFor, leaderID)
+			t.Errorf(
+				"CheckTermAndStepDown() got term=%v, role=%v, votedFor=%v, leaderID=%v; want term=4, role=Follower, votedFor=, leaderID=node2",
+				term,
+				role,
+				votedFor,
+				leaderID,
+			)
 		}
 
 		select {
@@ -570,8 +650,11 @@ func TestRaftState_CheckTermAndStepDown(t *testing.T) {
 
 		steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 8, "node2")
 		if steppedDown || prevTerm != 10 {
-			t.Errorf("CheckTermAndStepDown() lower term got steppedDown=%v, prevTerm=%v; want steppedDown=false, prevTerm=10",
-				steppedDown, prevTerm)
+			t.Errorf(
+				"CheckTermAndStepDown() lower term got steppedDown=%v, prevTerm=%v; want steppedDown=false, prevTerm=10",
+				steppedDown,
+				prevTerm,
+			)
 		}
 
 		_, role, _, leaderID := getState(sm)
@@ -587,7 +670,11 @@ func TestRaftState_CheckTermAndStepDown(t *testing.T) {
 
 		steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 6, "node2")
 		if steppedDown || prevTerm != 5 {
-			t.Errorf("CheckTermAndStepDown() on shutdown got steppedDown=%v, prevTerm=%v; want false, 5", steppedDown, prevTerm)
+			t.Errorf(
+				"CheckTermAndStepDown() on shutdown got steppedDown=%v, prevTerm=%v; want false, 5",
+				steppedDown,
+				prevTerm,
+			)
 		}
 	})
 
@@ -598,7 +685,11 @@ func TestRaftState_CheckTermAndStepDown(t *testing.T) {
 
 		steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 4, "node2")
 		if !steppedDown || prevTerm != 3 {
-			t.Errorf("CheckTermAndStepDown() with persist error got steppedDown=%v, prevTerm=%v; want true, 3", steppedDown, prevTerm)
+			t.Errorf(
+				"CheckTermAndStepDown() with persist error got steppedDown=%v, prevTerm=%v; want true, 3",
+				steppedDown,
+				prevTerm,
+			)
 		}
 
 		term, role, votedFor, leaderID := getState(sm)
@@ -613,12 +704,18 @@ func TestRaftState_CheckTermAndStepDown(t *testing.T) {
 
 		steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 6, "node3")
 		if !steppedDown || prevTerm != 6 {
-			t.Errorf("CheckTermAndStepDown() same term non-follower got steppedDown=%v, prevTerm=%v; want true, 6", steppedDown, prevTerm)
+			t.Errorf(
+				"CheckTermAndStepDown() same term non-follower got steppedDown=%v, prevTerm=%v; want true, 6",
+				steppedDown,
+				prevTerm,
+			)
 		}
 
 		_, role, _, leaderID := getState(sm)
 		if role != types.RoleFollower || leaderID != "node3" {
-			t.Errorf("CheckTermAndStepDown() same term non-follower should become follower with new leader")
+			t.Errorf(
+				"CheckTermAndStepDown() same term non-follower should become follower with new leader",
+			)
 		}
 	})
 }
@@ -697,7 +794,10 @@ func TestRaftState_GrantVote(t *testing.T) {
 
 		_, _, votedFor, _ := getState(sm)
 		if votedFor != "" {
-			t.Errorf("GrantVote() with persist failure should rollback vote, got votedFor=%v", votedFor)
+			t.Errorf(
+				"GrantVote() with persist failure should rollback vote, got votedFor=%v",
+				votedFor,
+			)
 		}
 	})
 }
@@ -835,8 +935,12 @@ func TestSetRoleAndLeaderLocked_NoChange(t *testing.T) {
 
 	term, role, _, leaderID := getState(sm)
 	if role != initialRole || leaderID != initialLeader || term != initialTerm {
-		t.Errorf("setRoleAndLeaderLocked() with no change modified state unexpectedly: role=%v, leaderID=%v, term=%v",
-			role, leaderID, term)
+		t.Errorf(
+			"setRoleAndLeaderLocked() with no change modified state unexpectedly: role=%v, leaderID=%v, term=%v",
+			role,
+			leaderID,
+			term,
+		)
 	}
 }
 

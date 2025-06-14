@@ -71,8 +71,10 @@ func TestRaftElection_ElectionManager_Initialize(t *testing.T) {
 			}
 
 			deps := ElectionManagerDeps{
-				ID:                "node1",
-				Peers:             map[types.NodeID]PeerConfig{"node1": {ID: "node1", Address: "addr1"}},
+				ID: "node1",
+				Peers: map[types.NodeID]PeerConfig{
+					"node1": {ID: "node1", Address: "addr1"},
+				},
 				QuorumSize:        1,
 				Mu:                mu,
 				IsShutdown:        shutdown,
@@ -350,8 +352,10 @@ func TestRaftElection_ElectionManager_Tick(t *testing.T) {
 			electionTriggered := make(chan struct{}, 1)
 
 			deps := ElectionManagerDeps{
-				ID:                "node1",
-				Peers:             map[types.NodeID]PeerConfig{"node1": {ID: "node1", Address: "addr1"}},
+				ID: "node1",
+				Peers: map[types.NodeID]PeerConfig{
+					"node1": {ID: "node1", Address: "addr1"},
+				},
 				QuorumSize:        1,
 				Mu:                mu,
 				IsShutdown:        shutdownFlag,
@@ -651,7 +655,10 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 
 			mockNetwork := &mockNetworkManager{
 				sendRequestVoteFunc: func(ctxNet context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
-					return &types.RequestVoteReply{Term: args.Term, VoteGranted: tc.networkSucceeds}, nil
+					return &types.RequestVoteReply{
+						Term:        args.Term,
+						VoteGranted: tc.networkSucceeds,
+					}, nil
 				},
 			}
 
@@ -709,7 +716,13 @@ func TestRaftElection_ElectionManager_StartElection(t *testing.T) {
 
 			if tc.expectLeadership {
 				if finalRole != types.RoleLeader {
-					t.Errorf("[%s] Expected leader role for term %d, got: %s. Final Leader ID: %s", tc.name, finalTerm, finalRole, finalLeader)
+					t.Errorf(
+						"[%s] Expected leader role for term %d, got: %s. Final Leader ID: %s",
+						tc.name,
+						finalTerm,
+						finalRole,
+						finalLeader,
+					)
 				}
 				if !leaderInit.initializeStateCalled {
 					t.Errorf("[%s] Expected InitializeLeaderState to be called", tc.name)
@@ -738,15 +751,44 @@ func TestRaftElection_ElectionManager_ElectionEdgeCases(t *testing.T) {
 		{"Fail to become candidate", false, false, true, false, nil, nil},
 		{"Wrong role after BecomeCandidate", false, false, false, true, nil, nil},
 		{"Vote RPC fails (nil reply)", false, false, false, false, nil, nil},
-		{"Vote denied by peer", false, false, false, false, &types.RequestVoteReply{Term: 1, VoteGranted: false}, nil},
-		{"Higher term in vote reply", false, false, false, false, &types.RequestVoteReply{Term: 5, VoteGranted: false}, nil},
-		{"Stale vote reply ignored", false, false, false, false, &types.RequestVoteReply{Term: 1, VoteGranted: true}, nil},
+		{
+			"Vote denied by peer",
+			false,
+			false,
+			false,
+			false,
+			&types.RequestVoteReply{Term: 1, VoteGranted: false},
+			nil,
+		},
+		{
+			"Higher term in vote reply",
+			false,
+			false,
+			false,
+			false,
+			&types.RequestVoteReply{Term: 5, VoteGranted: false},
+			nil,
+		},
+		{
+			"Stale vote reply ignored",
+			false,
+			false,
+			false,
+			false,
+			&types.RequestVoteReply{Term: 1, VoteGranted: true},
+			nil,
+		},
 		{
 			"Shutdown during processVoteReply",
 			false, true, false, false,
 			&types.RequestVoteReply{Term: 1, VoteGranted: true},
 			func(t *testing.T, em *electionManager) {
-				em.processVoteReply(context.Background(), "node2", 1, &types.RequestVoteReply{Term: 1, VoteGranted: true})
+				em.processVoteReply(
+					context.Background(),
+					"node2",
+					1,
+					&types.RequestVoteReply{Term: 1, VoteGranted: true},
+				)
 			},
 		},
 	}
@@ -800,7 +842,11 @@ func TestRaftElection_ElectionManager_ElectionEdgeCases(t *testing.T) {
 				Logger:            logger.NewNoOpLogger(),
 				Rand:              &mockRand{},
 				Config: Config{
-					Options:      Options{ElectionTickCount: 5, HeartbeatTickCount: 1, ElectionRandomizationFactor: 0},
+					Options: Options{
+						ElectionTickCount:           5,
+						HeartbeatTickCount:          1,
+						ElectionRandomizationFactor: 0,
+					},
 					FeatureFlags: FeatureFlags{PreVoteEnabled: false},
 				},
 			})
@@ -1239,8 +1285,10 @@ func TestElectionManager_ResetTimerOnHeartbeat(t *testing.T) {
 		logMgr := &mockLogManager{lastIndex: 10, lastTerm: 5}
 
 		electionMgr, err := NewElectionManager(ElectionManagerDeps{
-			ID:                "node1",
-			Peers:             map[types.NodeID]PeerConfig{"node1": {ID: "node1", Address: "addr1"}},
+			ID: "node1",
+			Peers: map[types.NodeID]PeerConfig{
+				"node1": {ID: "node1", Address: "addr1"},
+			},
 			QuorumSize:        1,
 			Mu:                mu,
 			IsShutdown:        shutdownFlag,
