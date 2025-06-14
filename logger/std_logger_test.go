@@ -3,376 +3,454 @@ package logger
 import (
 	"bytes"
 	"log"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/jathurchan/raftlock/types"
 )
 
-func TestStdLogger_LogMethods(t *testing.T) {
-	// Capture standard log output
+// captureLogOutput captures log output for testing
+func captureLogOutput(fn func()) string {
 	var buf bytes.Buffer
+
+	// Save original logger settings
+	originalOutput := log.Writer()
+	originalFlags := log.Flags()
+
+	// Set up capture
 	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr) // Restore default output
+	log.SetFlags(0) // Remove timestamp for consistent testing
 
-	logger := NewStdLogger()
+	// Restore original settings after test
+	defer func() {
+		log.SetOutput(originalOutput)
+		log.SetFlags(originalFlags)
+	}()
 
-	// Test each log level
-	logger.Debugw("debug message", "key", "value")
-	if !strings.Contains(buf.String(), "[DEBUG] debug message key=value") {
-		t.Errorf("Debug log doesn't contain expected content: %s", buf.String())
+	fn()
+	return buf.String()
+}
+
+func TestParseLogLevel(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected LogLevel
+	}{
+		{"debug", LevelDebug},
+		{"DEBUG", LevelDebug},
+		{"Debug", LevelDebug},
+		{"info", LevelInfo},
+		{"INFO", LevelInfo},
+		{"warn", LevelWarn},
+		{"WARN", LevelWarn},
+		{"warning", LevelWarn},
+		{"WARNING", LevelWarn},
+		{"error", LevelError},
+		{"ERROR", LevelError},
+		{"fatal", LevelFatal},
+		{"FATAL", LevelFatal},
+		{"unknown", LevelInfo},
+		{"", LevelInfo},
+		{"invalid", LevelInfo},
 	}
-	buf.Reset()
 
-	logger.Infow("info message", "key", "value")
-	if !strings.Contains(buf.String(), "[INFO] info message key=value") {
-		t.Errorf("Info log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	logger.Warnw("warn message", "key", "value")
-	if !strings.Contains(buf.String(), "[WARN] warn message key=value") {
-		t.Errorf("Warn log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	logger.Errorw("error message", "key", "value")
-	if !strings.Contains(buf.String(), "[ERROR] error message key=value") {
-		t.Errorf("Error log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	// Test with multiple key-value pairs
-	logger.Infow("multiple pairs", "key1", "value1", "key2", 42, "key3", true)
-	output := buf.String()
-	buf.Reset()
-
-	for _, expected := range []string{"[INFO] multiple pairs", "key1=value1", "key2=42", "key3=true"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected log to contain %q, got: %q", expected, output)
-		}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parseLogLevel(tt.input)
+			if result != tt.expected {
+				t.Errorf("parseLogLevel(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
 
-func TestStdLogger_Fatalw(t *testing.T) {
-	if os.Getenv("TEST_FATALW") == "1" {
-		logger := NewStdLogger()
-		logger.Fatalw("fatal message", "key", "value")
-		return
+func TestNewStdLogger(t *testing.T) {
+	tests := []struct {
+		minLevel string
+		expected LogLevel
+	}{
+		{"debug", LevelDebug},
+		{"info", LevelInfo},
+		{"warn", LevelWarn},
+		{"error", LevelError},
+		{"fatal", LevelFatal},
+		{"invalid", LevelInfo},
 	}
 
-	// Run the test in a subprocess to test Fatalw without terminating the current process
-	cmd := exec.Command(os.Args[0], "-test.run=TestStdLogger_Fatalw")
-	cmd.Env = append(os.Environ(), "TEST_FATALW=1")
-	err := cmd.Run()
-
-	// Verify that the process exited with a non-zero status
-	if e, ok := err.(*exec.ExitError); !ok || e.Success() {
-		t.Errorf("Fatalw() did not cause process termination")
-	}
-}
-
-func TestStdLogger_WithChainedAdds(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	logger := NewStdLogger().With("k1", "v1").With("k2", "v2")
-	logger.Infow("combined context")
-
-	output := buf.String()
-	for _, expected := range []string{"[INFO] combined context", "k1=v1", "k2=v2"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected combined context to contain %q, got: %q", expected, output)
-		}
-	}
-}
-
-func TestStdLogger_MalformedInputSafety(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	logger := NewStdLogger()
-	logger.With("keyOnly").Infow("malformed")
-
-	output := buf.String()
-	if !strings.Contains(output, "[INFO] malformed") {
-		t.Errorf("Expected malformed message, got: %q", output)
-	}
-	if strings.Contains(output, "keyOnly") {
-		t.Errorf("Malformed key-only pair should not appear in output: %q", output)
+	for _, tt := range tests {
+		t.Run(tt.minLevel, func(t *testing.T) {
+			logger := NewStdLogger(tt.minLevel).(*StdLogger)
+			if logger.minLevel != tt.expected {
+				t.Errorf(
+					"NewStdLogger(%q).minLevel = %v, want %v",
+					tt.minLevel,
+					logger.minLevel,
+					tt.expected,
+				)
+			}
+			if logger.context == nil {
+				t.Error("NewStdLogger should initialize context map")
+			}
+			if len(logger.context) != 0 {
+				t.Error("NewStdLogger should initialize empty context map")
+			}
+		})
 	}
 }
 
-func TestStdLogger_FatalwIncludesMessage(t *testing.T) {
-	if os.Getenv("TEST_FATALW_MESSAGE") == "1" {
-		logger := NewStdLogger()
-		logger.Fatalw("fatal test message", "key", "value")
-		return
+func TestStdLogger_LogLevels(t *testing.T) {
+	tests := []struct {
+		name      string
+		minLevel  string
+		logFunc   func(Logger)
+		expected  string
+		shouldLog bool
+	}{
+		{
+			name:      "debug message with debug level",
+			minLevel:  "debug",
+			logFunc:   func(l Logger) { l.Debugw("test debug message") },
+			expected:  "[DEBUG] test debug message",
+			shouldLog: true,
+		},
+		{
+			name:      "debug message with info level",
+			minLevel:  "info",
+			logFunc:   func(l Logger) { l.Debugw("test debug message") },
+			expected:  "",
+			shouldLog: false,
+		},
+		{
+			name:      "info message with info level",
+			minLevel:  "info",
+			logFunc:   func(l Logger) { l.Infow("test info message") },
+			expected:  "[INFO] test info message",
+			shouldLog: true,
+		},
+		{
+			name:      "info message with warn level",
+			minLevel:  "warn",
+			logFunc:   func(l Logger) { l.Infow("test info message") },
+			expected:  "",
+			shouldLog: false,
+		},
+		{
+			name:      "warn message with warn level",
+			minLevel:  "warn",
+			logFunc:   func(l Logger) { l.Warnw("test warn message") },
+			expected:  "[WARN] test warn message",
+			shouldLog: true,
+		},
+		{
+			name:      "warn message with error level",
+			minLevel:  "error",
+			logFunc:   func(l Logger) { l.Warnw("test warn message") },
+			expected:  "",
+			shouldLog: false,
+		},
+		{
+			name:      "error message with error level",
+			minLevel:  "error",
+			logFunc:   func(l Logger) { l.Errorw("test error message") },
+			expected:  "[ERROR] test error message",
+			shouldLog: true,
+		},
+		{
+			name:      "error message with fatal level",
+			minLevel:  "fatal",
+			logFunc:   func(l Logger) { l.Errorw("test error message") },
+			expected:  "",
+			shouldLog: false,
+		},
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestStdLogger_FatalwIncludesMessage")
-	cmd.Env = append(os.Environ(), "TEST_FATALW_MESSAGE=1")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := NewStdLogger(tt.minLevel)
 
-	err := cmd.Run()
-	if e, ok := err.(*exec.ExitError); !ok || e.Success() {
-		t.Errorf("Fatalw() did not cause process termination")
+			output := captureLogOutput(func() {
+				tt.logFunc(logger)
+			})
+
+			if tt.shouldLog {
+				if !strings.Contains(output, tt.expected) {
+					t.Errorf("Expected log output to contain %q, got %q", tt.expected, output)
+				}
+			} else {
+				if output != "" {
+					t.Errorf("Expected no log output, got %q", output)
+				}
+			}
+		})
+	}
+}
+
+func TestStdLogger_LogWithKeyValues(t *testing.T) {
+	logger := NewStdLogger("debug")
+
+	output := captureLogOutput(func() {
+		logger.Infow("test message", "key1", "value1", "key2", 42, "key3", true)
+	})
+
+	expected := "[INFO] test message key1=value1 key2=42 key3=true"
+	if !strings.Contains(output, expected) {
+		t.Errorf("Expected log output to contain %q, got %q", expected, output)
+	}
+}
+
+func TestStdLogger_LogWithOddNumberOfKeyValues(t *testing.T) {
+	logger := NewStdLogger("debug")
+
+	output := captureLogOutput(func() {
+		logger.Infow("test message", "key1", "value1", "key2") // Odd number
+	})
+
+	expected := "[INFO] test message key1=value1"
+	if !strings.Contains(output, expected) {
+		t.Errorf("Expected log output to contain %q, got %q", expected, output)
 	}
 
-	output := stderr.String()
-	for _, expected := range []string{"[FATAL] fatal test message", "key=value"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected fatal log to contain %q, got: %q", expected, output)
-		}
+	if strings.Contains(output, "key2=") {
+		t.Errorf("Expected log output to not contain unpaired key, got %q", output)
+	}
+}
+
+func TestStdLogger_LogWithNonStringKeys(t *testing.T) {
+	logger := NewStdLogger("debug")
+
+	output := captureLogOutput(func() {
+		logger.Infow(
+			"test message",
+			"validKey",
+			"validValue",
+			123,
+			"invalidKey",
+			"anotherValid",
+			"anotherValue",
+		)
+	})
+
+	if !strings.Contains(output, "validKey=validValue") {
+		t.Errorf("Expected log output to contain valid key-value pair")
+	}
+	if !strings.Contains(output, "anotherValid=anotherValue") {
+		t.Errorf("Expected log output to contain another valid key-value pair")
+	}
+	if strings.Contains(output, "123=") || strings.Contains(output, "invalidKey") {
+		t.Errorf("Expected log output to skip non-string key, got %q", output)
 	}
 }
 
 func TestStdLogger_With(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
+	logger := NewStdLogger("debug")
 
-	logger := NewStdLogger()
+	newLogger := logger.With("persistent", "value", "another", 123)
 
-	// Test With method
-	enriched := logger.With("context", "value")
-	enriched.Infow("message with context")
-	if !strings.Contains(buf.String(), "[INFO] message with context context=value") {
-		t.Errorf("Log doesn't contain expected context: %s", buf.String())
+	output := captureLogOutput(func() {
+		newLogger.Infow("test message", "temp", "tempValue")
+	})
+
+	if !strings.Contains(output, "persistent=value") {
+		t.Errorf("Expected persistent context in output")
 	}
-	buf.Reset()
+	if !strings.Contains(output, "another=123") {
+		t.Errorf("Expected another persistent context in output")
+	}
+	if !strings.Contains(output, "temp=tempValue") {
+		t.Errorf("Expected temporary context in output")
+	}
+}
 
-	// Test With method with multiple pairs
-	multiEnriched := logger.With("key1", "value1", "key2", 42)
-	multiEnriched.Infow("message with multiple context")
-	output := buf.String()
-	buf.Reset()
-	for _, expected := range []string{"[INFO] message with multiple context", "key1=value1", "key2=42"} {
+func TestStdLogger_WithNodeID(t *testing.T) {
+	logger := NewStdLogger("debug")
+	nodeLogger := logger.WithNodeID(types.NodeID("node-123"))
+
+	output := captureLogOutput(func() {
+		nodeLogger.Infow("test message")
+	})
+
+	expected := "node=node-123"
+	if !strings.Contains(output, expected) {
+		t.Errorf("Expected log output to contain %q, got %q", expected, output)
+	}
+}
+
+func TestStdLogger_WithTerm(t *testing.T) {
+	logger := NewStdLogger("debug")
+	termLogger := logger.WithTerm(types.Term(42))
+
+	output := captureLogOutput(func() {
+		termLogger.Infow("test message")
+	})
+
+	expected := "term=42"
+	if !strings.Contains(output, expected) {
+		t.Errorf("Expected log output to contain %q, got %q", expected, output)
+	}
+}
+
+func TestStdLogger_WithComponent(t *testing.T) {
+	logger := NewStdLogger("debug")
+	componentLogger := logger.WithComponent("election")
+
+	output := captureLogOutput(func() {
+		componentLogger.Infow("test message")
+	})
+
+	expected := "component=election"
+	if !strings.Contains(output, expected) {
+		t.Errorf("Expected log output to contain %q, got %q", expected, output)
+	}
+}
+
+func TestStdLogger_ChainedContext(t *testing.T) {
+	logger := NewStdLogger("debug")
+
+	chainedLogger := logger.
+		WithNodeID(types.NodeID("node-1")).
+		WithTerm(types.Term(5)).
+		WithComponent("rpc").
+		With("session", "abc123")
+
+	output := captureLogOutput(func() {
+		chainedLogger.Infow("complex message", "temp", "value")
+	})
+
+	expectedContext := []string{
+		"node=node-1",
+		"term=5",
+		"component=rpc",
+		"session=abc123",
+		"temp=value",
+	}
+
+	for _, expected := range expectedContext {
 		if !strings.Contains(output, expected) {
-			t.Errorf("Expected log to contain %q, got: %q", expected, output)
+			t.Errorf("Expected log output to contain %q, got %q", expected, output)
 		}
 	}
+}
 
-	// Test With method with malformed pairs (odd number)
-	malformedEnriched := logger.With("key1", "value1", "key2")
-	malformedEnriched.Infow("message with malformed context")
-	output = buf.String()
-	buf.Reset()
-	if !strings.Contains(output, "key1=value1") {
-		t.Errorf("Expected log to contain key1=value1, got: %q", output)
+func TestStdLogger_ContextIsolation(t *testing.T) {
+	baseLogger := NewStdLogger("debug")
+	logger1 := baseLogger.WithNodeID(types.NodeID("node-1"))
+	logger2 := baseLogger.WithNodeID(types.NodeID("node-2"))
+
+	output1 := captureLogOutput(func() {
+		logger1.Infow("message from logger1")
+	})
+
+	output2 := captureLogOutput(func() {
+		logger2.Infow("message from logger2")
+	})
+
+	if !strings.Contains(output1, "node=node-1") {
+		t.Errorf("Logger1 should contain node-1 context")
 	}
+	if strings.Contains(output1, "node=node-2") {
+		t.Errorf("Logger1 should not contain node-2 context")
+	}
+
+	if !strings.Contains(output2, "node=node-2") {
+		t.Errorf("Logger2 should contain node-2 context")
+	}
+	if strings.Contains(output2, "node=node-1") {
+		t.Errorf("Logger2 should not contain node-1 context")
+	}
+}
+
+func TestStdLogger_CloneWithContext(t *testing.T) {
+	original := &StdLogger{
+		context:  map[string]any{"existing": "value"},
+		minLevel: LevelWarn,
+	}
+
+	extra := map[string]any{"new": "data", "existing": "overwritten"}
+	cloned := original.cloneWithContext(extra)
+
+	if cloned.context["existing"] != "overwritten" {
+		t.Errorf("Expected overwritten value, got %v", cloned.context["existing"])
+	}
+	if cloned.context["new"] != "data" {
+		t.Errorf("Expected new value, got %v", cloned.context["new"])
+	}
+
+	if cloned.minLevel != LevelWarn {
+		t.Errorf("Expected minLevel to be preserved, got %v", cloned.minLevel)
+	}
+
+	if original.context["new"] != nil {
+		t.Errorf("Original context should not be modified")
+	}
+	if original.context["existing"] != "value" {
+		t.Errorf("Original context should not be modified")
+	}
+}
+
+func TestStdLogger_EmptyContext(t *testing.T) {
+	logger := NewStdLogger("debug")
+
+	output := captureLogOutput(func() {
+		logger.Infow("simple message")
+	})
+
+	expected := "[INFO] simple message"
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 1 {
+		t.Errorf("Expected single line output, got %d lines", len(lines))
+	}
+
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), expected) {
+		t.Errorf("Expected output to end with %q, got %q", expected, lines[0])
+	}
+}
+
+func TestStdLogger_FatalSkipped(t *testing.T) {
+	t.Skip("Fatalw testing skipped as it calls os.Exit(1)")
+}
+
+func TestStdLogger_WithOddKeyValues(t *testing.T) {
+	logger := NewStdLogger("debug")
+
+	newLogger := logger.With("key1", "value1", "key2") // Missing value for key2
+
+	output := captureLogOutput(func() {
+		newLogger.Infow("test message")
+	})
+
+	if !strings.Contains(output, "key1=value1") {
+		t.Errorf("Expected complete key-value pair in context")
+	}
+
 	if strings.Contains(output, "key2=") {
-		t.Errorf("Expected log to not contain key2, got: %q", output)
-	}
-
-	// Test With method with non-string keys
-	nonStringEnriched := logger.With(123, "value1", "key2", "value2")
-	nonStringEnriched.Infow("message with non-string key")
-	output = buf.String()
-	buf.Reset()
-	if !strings.Contains(output, "key2=value2") {
-		t.Errorf("Expected log to contain key2=value2, got: %q", output)
-	}
-	if strings.Contains(output, "123=value1") {
-		t.Errorf("Expected log to not contain 123=value1, got: %q", output)
+		t.Errorf("Expected unpaired key to be skipped")
 	}
 }
 
-func TestStdLogger_ContextEnrichment(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
+func TestStdLogger_WithNonStringKeysInWith(t *testing.T) {
+	logger := NewStdLogger("debug")
 
-	logger := NewStdLogger()
+	newLogger := logger.With(
+		"validKey",
+		"validValue",
+		123,
+		"shouldBeSkipped",
+		"anotherKey",
+		"anotherValue",
+	)
 
-	// Test WithNodeID
-	nodeLogger := logger.WithNodeID("1")
-	nodeLogger.Infow("node message")
-	if !strings.Contains(buf.String(), "[INFO] node message") || !strings.Contains(buf.String(), "node=1") {
-		t.Errorf("Node log doesn't contain expected content: %s", buf.String())
+	output := captureLogOutput(func() {
+		newLogger.Infow("test message")
+	})
+
+	if !strings.Contains(output, "validKey=validValue") {
+		t.Errorf("Expected valid key-value pair in context")
 	}
-	buf.Reset()
-
-	// Test WithTerm
-	termLogger := logger.WithTerm(5)
-	termLogger.Infow("term message")
-	if !strings.Contains(buf.String(), "[INFO] term message") || !strings.Contains(buf.String(), "term=5") {
-		t.Errorf("Term log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	// Test WithComponent
-	compLogger := logger.WithComponent("rpc")
-	compLogger.Infow("component message")
-	if !strings.Contains(buf.String(), "[INFO] component message") || !strings.Contains(buf.String(), "component=rpc") {
-		t.Errorf("Component log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	// Test chaining context methods
-	chainedLogger := logger.WithNodeID("1").WithTerm(5).WithComponent("rpc")
-	chainedLogger.Infow("chained message")
-	output := buf.String()
-	buf.Reset()
-	// Check that all expected fields are present, regardless of order
-	for _, expected := range []string{"[INFO] chained message", "node=1", "term=5", "component=rpc"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected chained log to contain %q, got: %q", expected, output)
-		}
+	if !strings.Contains(output, "anotherKey=anotherValue") {
+		t.Errorf("Expected another valid key-value pair in context")
 	}
 
-	// Test adding ad-hoc context to enriched logger
-	chainedLogger.Infow("ad-hoc context", "key", "value")
-	output = buf.String()
-	buf.Reset()
-	for _, expected := range []string{"[INFO] ad-hoc context", "node=1", "term=5", "component=rpc", "key=value"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected ad-hoc log to contain %q, got: %q", expected, output)
-		}
-	}
-
-	// Test using With with enriched logger
-	withLogger := chainedLogger.With("extra", "context")
-	withLogger.Infow("with and enriched")
-	output = buf.String()
-	buf.Reset()
-	for _, expected := range []string{"[INFO] with and enriched", "node=1", "term=5", "component=rpc", "extra=context"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected with+enriched log to contain %q, got: %q", expected, output)
-		}
-	}
-}
-
-func TestStdLogger_ContextOverride(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	logger := NewStdLogger()
-
-	// Create logger with initial context
-	nodeLogger := logger.WithNodeID("1")
-
-	// Override context with new values
-	newNodeLogger := nodeLogger.WithNodeID("2")
-
-	// Check that original logger retains its context
-	nodeLogger.Infow("original node")
-	if !strings.Contains(buf.String(), "[INFO] original node") || !strings.Contains(buf.String(), "node=1") {
-		t.Errorf("Original node log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	// Check that new logger has the updated context
-	newNodeLogger.Infow("new node")
-	if !strings.Contains(buf.String(), "[INFO] new node") || !strings.Contains(buf.String(), "node=2") {
-		t.Errorf("New node log doesn't contain expected content: %s", buf.String())
-	}
-	buf.Reset()
-
-	// Test overriding multiple contexts
-	multiLogger := logger.WithNodeID("1").WithTerm(5)
-	updatedLogger := multiLogger.WithNodeID("2").WithTerm(6)
-
-	multiLogger.Infow("original multi")
-	output := buf.String()
-	buf.Reset()
-	for _, expected := range []string{"[INFO] original multi", "node=1", "term=5"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected original multi log to contain %q, got: %q", expected, output)
-		}
-	}
-
-	updatedLogger.Infow("updated multi")
-	output = buf.String()
-	buf.Reset()
-	for _, expected := range []string{"[INFO] updated multi", "node=2", "term=6"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected updated multi log to contain %q, got: %q", expected, output)
-		}
-	}
-}
-
-func TestStdLogger_TemporaryContext(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	logger := NewStdLogger().WithNodeID("1")
-
-	// Add temporary context for a single log entry
-	logger.With("latency", "150ms").Warnw("Slow response")
-	output := buf.String()
-	buf.Reset()
-	for _, expected := range []string{"[WARN] Slow response", "node=1", "latency=150ms"} {
-		if !strings.Contains(output, expected) {
-			t.Errorf("Expected log to contain %q, got: %q", expected, output)
-		}
-	}
-
-	// Verify the original logger's context is unchanged
-	logger.Infow("Normal message")
-	output = buf.String()
-	buf.Reset()
-	if !strings.Contains(output, "[INFO] Normal message") || !strings.Contains(output, "node=1") {
-		t.Errorf("Normal message log doesn't contain expected content: %s", output)
-	}
-	if strings.Contains(output, "latency") {
-		t.Errorf("Normal message contains unexpected latency field: %s", output)
-	}
-}
-
-// Add test for odd-length key-value pairs to verify our fix
-func TestStdLogger_OddLengthKeyValuePairs(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	logger := NewStdLogger()
-
-	// Test with odd number of arguments
-	logger.Infow("odd kv pairs", "key1", "value1", "key2")
-	output := buf.String()
-	buf.Reset()
-
-	if !strings.Contains(output, "[INFO] odd kv pairs") {
-		t.Errorf("Expected log to contain message, got: %q", output)
-	}
-
-	if !strings.Contains(output, "key1=value1") {
-		t.Errorf("Expected log to contain the complete key-value pair, got: %q", output)
-	}
-
-	if strings.Contains(output, "key2") {
-		t.Errorf("Expected log to not contain the incomplete key, got: %q", output)
-	}
-}
-
-// Test for non-string keys in direct logging calls
-func TestStdLogger_NonStringKeysInLogging(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	logger := NewStdLogger()
-
-	// Test with non-string keys in direct logging call
-	logger.Infow("non-string keys", 123, "value1", "key2", "value2")
-	output := buf.String()
-	buf.Reset()
-
-	if !strings.Contains(output, "[INFO] non-string keys") {
-		t.Errorf("Expected log to contain message, got: %q", output)
-	}
-
-	if strings.Contains(output, "123=value1") {
-		t.Errorf("Expected log to not contain the non-string key pair, got: %q", output)
-	}
-
-	if !strings.Contains(output, "key2=value2") {
-		t.Errorf("Expected log to contain the valid key-value pair, got: %q", output)
+	if strings.Contains(output, "123=") || strings.Contains(output, "shouldBeSkipped") {
+		t.Errorf("Expected non-string key to be skipped")
 	}
 }

@@ -9,26 +9,57 @@ import (
 	"github.com/jathurchan/raftlock/types"
 )
 
-// StdLogger implements the Logger interface using Go's standard log package.
-// It supports structured logging by formatting key-value pairs and includes
-// persistent context such as node ID, term, and component name.
-type StdLogger struct {
-	context map[string]any
-}
+// LogLevel represents the severity of a log message.
+type LogLevel int
 
-// NewStdLogger creates a new StdLogger instance that logs to standard output.
-func NewStdLogger() Logger {
-	return &StdLogger{
-		context: make(map[string]any),
+const (
+	LevelDebug LogLevel = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+	LevelFatal
+)
+
+// parseLogLevel maps a string to a LogLevel. Defaults to LevelInfo on unknown input.
+func parseLogLevel(levelStr string) LogLevel {
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "warn", "warning":
+		return LevelWarn
+	case "error":
+		return LevelError
+	case "fatal":
+		return LevelFatal
+	default:
+		return LevelInfo
 	}
 }
 
-// log is a helper method that formats and outputs a structured log message
-// at the given log level. It includes persistent context and message-specific key-value pairs.
-// If the level is "fatal", it logs the message and terminates the application.
-func (l *StdLogger) log(level string, msg string, kvs ...any) {
+// StdLogger logs messages using Go's standard library log package.
+type StdLogger struct {
+	context  map[string]any
+	minLevel LogLevel
+}
+
+// NewStdLogger returns a new StdLogger with a minimum log level filter.
+func NewStdLogger(minLevelStr string) Logger {
+	return &StdLogger{
+		context:  make(map[string]any),
+		minLevel: parseLogLevel(minLevelStr),
+	}
+}
+
+// log outputs a structured log entry if the level meets the threshold.
+func (l *StdLogger) log(level LogLevel, levelStr string, msg string, kvs ...any) {
+	if level < l.minLevel {
+		return
+	}
+
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("[%s] %s", strings.ToUpper(level), msg))
+	b.WriteString(fmt.Sprintf("[%s] %s", strings.ToUpper(levelStr), msg))
 
 	// Add persistent context
 	for k, v := range l.context {
@@ -37,14 +68,12 @@ func (l *StdLogger) log(level string, msg string, kvs ...any) {
 
 	// Add message-specific key-value pairs
 	for i := 0; i < len(kvs); i += 2 {
-		// Check if we have both key and value
 		if i+1 >= len(kvs) {
-			break // Odd number of arguments, stop processing
+			break
 		}
-
 		key, ok := kvs[i].(string)
 		if !ok {
-			continue // skip malformed key
+			continue
 		}
 		val := kvs[i+1]
 		b.WriteString(fmt.Sprintf(" %s=%v", key, val))
@@ -52,72 +81,56 @@ func (l *StdLogger) log(level string, msg string, kvs ...any) {
 
 	log.Println(b.String())
 
-	if level == "fatal" {
+	if level == LevelFatal {
 		os.Exit(1)
 	}
 }
 
-// Logging methods implement the Logger interface at different log levels.
+func (l *StdLogger) Debugw(msg string, kvs ...any) { l.log(LevelDebug, "debug", msg, kvs...) }
+func (l *StdLogger) Infow(msg string, kvs ...any)  { l.log(LevelInfo, "info", msg, kvs...) }
+func (l *StdLogger) Warnw(msg string, kvs ...any)  { l.log(LevelWarn, "warn", msg, kvs...) }
+func (l *StdLogger) Errorw(msg string, kvs ...any) { l.log(LevelError, "error", msg, kvs...) }
+func (l *StdLogger) Fatalw(msg string, kvs ...any) { l.log(LevelFatal, "fatal", msg, kvs...) }
 
-func (l *StdLogger) Debugw(msg string, kvs ...any) { l.log("debug", msg, kvs...) }
-
-func (l *StdLogger) Infow(msg string, kvs ...any) { l.log("info", msg, kvs...) }
-
-func (l *StdLogger) Warnw(msg string, kvs ...any) { l.log("warn", msg, kvs...) }
-
-func (l *StdLogger) Errorw(msg string, kvs ...any) { l.log("error", msg, kvs...) }
-
-func (l *StdLogger) Fatalw(msg string, kvs ...any) { l.log("fatal", msg, kvs...) }
-
-// cloneWithContext creates a new StdLogger with the given context merged
-// into the existing logger's context. Used to build loggers with additional metadata.
+// cloneWithContext returns a copy of the logger with merged context.
 func (l *StdLogger) cloneWithContext(extra map[string]any) *StdLogger {
 	newCtx := make(map[string]any, len(l.context)+len(extra))
-
-	// Copy existing context
 	for k, v := range l.context {
 		newCtx[k] = v
 	}
-
-	// Add new context
 	for k, v := range extra {
 		newCtx[k] = v
 	}
-
-	return &StdLogger{context: newCtx}
+	return &StdLogger{context: newCtx, minLevel: l.minLevel}
 }
 
-// With adds arbitrary key-value pairs to the logger's context.
-// Malformed pairs (non-string keys or unmatched values) are ignored.
+// With adds key-value pairs to the logger’s context.
 func (l *StdLogger) With(kvs ...any) Logger {
 	ctx := make(map[string]any)
 	for i := 0; i < len(kvs); i += 2 {
-		// Check if we have both key and value
 		if i+1 >= len(kvs) {
-			break // Odd number of arguments, stop processing
+			break
 		}
-
 		key, ok := kvs[i].(string)
 		if !ok {
-			continue // skip invalid key
+			continue
 		}
 		ctx[key] = kvs[i+1]
 	}
 	return l.cloneWithContext(ctx)
 }
 
-// WithNodeID returns a new logger with a node identifier added to the context.
+// WithNodeID returns a logger with a node ID added to the context.
 func (l *StdLogger) WithNodeID(id types.NodeID) Logger {
 	return l.cloneWithContext(map[string]any{"node": id})
 }
 
-// WithTerm returns a new logger with the Raft term added to the context.
+// WithTerm returns a logger with the Raft term added to the context.
 func (l *StdLogger) WithTerm(term types.Term) Logger {
 	return l.cloneWithContext(map[string]any{"term": term})
 }
 
-// WithComponent returns a new logger with a component label (e.g., "election", "rpc")
-// added to the context to categorize log output.
+// WithComponent returns a logger with a component name added to the context.
 func (l *StdLogger) WithComponent(name string) Logger {
 	return l.cloneWithContext(map[string]any{"component": name})
 }
