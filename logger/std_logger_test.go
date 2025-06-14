@@ -81,7 +81,12 @@ func TestNewStdLogger(t *testing.T) {
 		t.Run(tt.minLevel, func(t *testing.T) {
 			logger := NewStdLogger(tt.minLevel).(*StdLogger)
 			if logger.minLevel != tt.expected {
-				t.Errorf("NewStdLogger(%q).minLevel = %v, want %v", tt.minLevel, logger.minLevel, tt.expected)
+				t.Errorf(
+					"NewStdLogger(%q).minLevel = %v, want %v",
+					tt.minLevel,
+					logger.minLevel,
+					tt.expected,
+				)
 			}
 			if logger.context == nil {
 				t.Error("NewStdLogger should initialize context map")
@@ -214,7 +219,15 @@ func TestStdLogger_LogWithNonStringKeys(t *testing.T) {
 	logger := NewStdLogger("debug")
 
 	output := captureLogOutput(func() {
-		logger.Infow("test message", "validKey", "validValue", 123, "invalidKey", "anotherValid", "anotherValue")
+		logger.Infow(
+			"test message",
+			"validKey",
+			"validValue",
+			123,
+			"invalidKey",
+			"anotherValid",
+			"anotherValue",
+		)
 	})
 
 	if !strings.Contains(output, "validKey=validValue") {
@@ -417,7 +430,14 @@ func TestStdLogger_WithOddKeyValues(t *testing.T) {
 func TestStdLogger_WithNonStringKeysInWith(t *testing.T) {
 	logger := NewStdLogger("debug")
 
-	newLogger := logger.With("validKey", "validValue", 123, "shouldBeSkipped", "anotherKey", "anotherValue")
+	newLogger := logger.With(
+		"validKey",
+		"validValue",
+		123,
+		"shouldBeSkipped",
+		"anotherKey",
+		"anotherValue",
+	)
 
 	output := captureLogOutput(func() {
 		newLogger.Infow("test message")
