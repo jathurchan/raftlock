@@ -8,6 +8,9 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Reporter defines a generic interface for benchmark result reporters.
@@ -50,7 +53,7 @@ type TextReporter struct {
 // Generate writes a formatted benchmark report to the configured output.
 func (r *TextReporter) Generate(results *BenchmarkResults) error {
 	w := tabwriter.NewWriter(r.writer, 0, 0, 3, ' ', 0)
-	p := func(format string, a ...interface{}) {
+	p := func(format string, a ...any) {
 		fmt.Fprintf(w, format+"\n", a...)
 	}
 
@@ -85,27 +88,36 @@ func (r *TextReporter) Generate(results *BenchmarkResults) error {
 }
 
 // printExecutiveSummary prints high-level summary metrics.
-func (r *TextReporter) printExecutiveSummary(p func(string, ...interface{}), results *BenchmarkResults) {
+func (r *TextReporter) printExecutiveSummary(p func(string, ...any), results *BenchmarkResults) {
 	p("🎯 EXECUTIVE SUMMARY")
 	p("===================")
 
-	if summary := results.Summary; summary != nil {
-		p("Overall Score:\t%.1f/100", summary.OverallScore)
-		p("Performance Grade:\t%s", summary.PerformanceGrade)
-		p("Resilience Grade:\t%s", summary.ResilienceGrade)
-		p("Production Ready:\t%v", summary.ProductionReadiness)
-
-		p("\n📊 Key Metrics:")
-		for key, value := range summary.KeyMetrics {
-			displayKey := strings.ReplaceAll(strings.Title(strings.ReplaceAll(key, "_", " ")), " ", " ")
-			p("  %s:\t%v", displayKey, value)
-		}
+	summary := results.Summary
+	if summary == nil {
+		p("No summary available.")
+		p("")
+		return
 	}
+
+	p("Overall Score:\t%.1f/100", summary.OverallScore)
+	p("Performance Grade:\t%s", summary.PerformanceGrade)
+	p("Resilience Grade:\t%s", summary.ResilienceGrade)
+	p("Production Ready:\t%v", summary.ProductionReadiness)
+
+	p("\n📊 Key Metrics:")
+
+	titleCase := cases.Title(language.English)
+	for key, value := range summary.KeyMetrics {
+		normalized := strings.ReplaceAll(key, "_", " ")
+		displayKey := titleCase.String(normalized)
+		p("  %s:\t%v", displayKey, value)
+	}
+
 	p("")
 }
 
 // printUncontestedResults prints metrics from uncontested tests.
-func (r *TextReporter) printUncontestedResults(p func(string, ...interface{}), results *UncontestedBenchmark) {
+func (r *TextReporter) printUncontestedResults(p func(string, ...any), results *UncontestedBenchmark) {
 	p("📊 UNCONTESTED LATENCY ANALYSIS")
 	p("===============================")
 	p("Leader Optimization Factor:\t%.2fx", results.ImprovementFactor)
@@ -125,7 +137,7 @@ func (r *TextReporter) printUncontestedResults(p func(string, ...interface{}), r
 }
 
 // printContentionResults prints performance data under contention scenarios.
-func (r *TextReporter) printContentionResults(p func(string, ...interface{}), results *ContentionBenchmark) {
+func (r *TextReporter) printContentionResults(p func(string, ...any), results *ContentionBenchmark) {
 	p("⚔️ CONTENTION PERFORMANCE ANALYSIS")
 	p("===================================")
 	p("Scalability Assessment:\t%s", results.ScalabilityAssessment)
@@ -153,7 +165,7 @@ func (r *TextReporter) printContentionResults(p func(string, ...interface{}), re
 }
 
 // printFaultToleranceResults prints results related to system resilience.
-func (r *TextReporter) printFaultToleranceResults(p func(string, ...interface{}), results *FaultToleranceBenchmark) {
+func (r *TextReporter) printFaultToleranceResults(p func(string, ...any), results *FaultToleranceBenchmark) {
 	p("🛡️ FAULT TOLERANCE & RESILIENCE")
 	p("================================")
 	p("Resilience Grade:\t%s", results.ResilienceGrade)
@@ -173,7 +185,7 @@ func (r *TextReporter) printFaultToleranceResults(p func(string, ...interface{})
 }
 
 // printRecommendations outputs improvement suggestions.
-func (r *TextReporter) printRecommendations(p func(string, ...interface{}), summary *BenchmarkSummary) {
+func (r *TextReporter) printRecommendations(p func(string, ...any), summary *BenchmarkSummary) {
 	p("💡 RECOMMENDATIONS")
 	p("==================")
 	if len(summary.Recommendations) == 0 {
@@ -187,7 +199,7 @@ func (r *TextReporter) printRecommendations(p func(string, ...interface{}), summ
 }
 
 // printRiskAssessment outputs potential system risks.
-func (r *TextReporter) printRiskAssessment(p func(string, ...interface{}), summary *BenchmarkSummary) {
+func (r *TextReporter) printRiskAssessment(p func(string, ...any), summary *BenchmarkSummary) {
 	p("⚠️ RISK ASSESSMENT")
 	p("==================")
 	if len(summary.RiskAssessment) == 0 {
@@ -201,17 +213,25 @@ func (r *TextReporter) printRiskAssessment(p func(string, ...interface{}), summa
 }
 
 // printComplianceStatus reports on compliance with defined benchmarks.
-func (r *TextReporter) printComplianceStatus(p func(string, ...interface{}), summary *BenchmarkSummary) {
+func (r *TextReporter) printComplianceStatus(p func(string, ...any), summary *BenchmarkSummary) {
 	p("✅ COMPLIANCE STATUS")
 	p("====================")
+
+	caser := cases.Title(language.English)
+
 	for requirement, compliant := range summary.ComplianceStatus {
 		status := "❌ FAIL"
 		if compliant {
 			status = "✅ PASS"
 		}
-		displayReq := strings.ReplaceAll(strings.Title(strings.ReplaceAll(requirement, "_", " ")), " ", " ")
+
+		// Normalize and format the requirement key
+		words := strings.ReplaceAll(requirement, "_", " ")
+		displayReq := caser.String(words)
+
 		p("%s\t%s", displayReq, status)
 	}
+
 	p("")
 }
 
