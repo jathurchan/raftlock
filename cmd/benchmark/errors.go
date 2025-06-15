@@ -13,8 +13,6 @@ var (
 	ErrOperationTimeout     = errors.New("operation timed out")
 	ErrBenchmarkCanceled    = errors.New("benchmark was canceled")
 	ErrInvalidConfiguration = errors.New("invalid benchmark configuration")
-	ErrDockerNotAvailable   = errors.New("Docker is not available or accessible")
-	ErrContainerNotFound    = errors.New("Docker container not found")
 	ErrConnectionFailed     = errors.New("failed to establish connection")
 	ErrHealthCheckFailed    = errors.New("health check failed")
 )

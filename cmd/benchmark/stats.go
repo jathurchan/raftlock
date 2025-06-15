@@ -162,28 +162,6 @@ func calculateContentionCoefficient(workers, resources int, avgRetries float64) 
 	return contentionRatio * retryPenalty
 }
 
-// calculateBackoffEfficiency evaluates the effectiveness of the backoff strategy based on retry behavior.
-func (s *BenchmarkSuite) calculateBackoffEfficiency(avgRetries float64, workers int) float64 {
-	// Ideal scenario: no retries needed
-	if avgRetries <= 0.1 {
-		return 100.0
-	}
-
-	// Calculate efficiency based on retry rate
-	// Lower retries under high contention = better efficiency
-	expectedRetries := float64(workers) / 10.0 // Rough heuristic
-	if expectedRetries < 1.0 {
-		expectedRetries = 1.0
-	}
-
-	efficiency := (expectedRetries / avgRetries) * 100.0
-	if efficiency > 100.0 {
-		efficiency = 100.0
-	}
-
-	return efficiency
-}
-
 // calculateResourceUtilization estimates system efficiency during contention scenarios.
 func (s *BenchmarkSuite) calculateResourceUtilization(stats ContentionStats) float64 {
 	if stats.TotalOperations == 0 {
