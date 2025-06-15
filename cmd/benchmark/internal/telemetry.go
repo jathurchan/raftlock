@@ -132,7 +132,10 @@ func (mc *MetricsCollector) GetMetricsSummary() MetricsSummary {
 }
 
 // GetLatencyPercentiles returns selected latency percentiles for the given operation.
-func (mc *MetricsCollector) GetLatencyPercentiles(operation string, percentiles []float64) map[float64]time.Duration {
+func (mc *MetricsCollector) GetLatencyPercentiles(
+	operation string,
+	percentiles []float64,
+) map[float64]time.Duration {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
 

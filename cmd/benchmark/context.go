@@ -20,7 +20,11 @@ type BenchmarkContext struct {
 }
 
 // NewBenchmarkContext creates a new benchmark context with phase tracking
-func NewBenchmarkContext(ctx context.Context, suite *BenchmarkSuite, phase string) *BenchmarkContext {
+func NewBenchmarkContext(
+	ctx context.Context,
+	suite *BenchmarkSuite,
+	phase string,
+) *BenchmarkContext {
 	return &BenchmarkContext{
 		Context:   ctx,
 		suite:     suite,
@@ -83,7 +87,9 @@ func (bc *BenchmarkContext) GetAllMetrics() map[string]int64 {
 }
 
 // WithTimeout creates a child context with timeout
-func (bc *BenchmarkContext) WithTimeout(timeout time.Duration) (*BenchmarkContext, context.CancelFunc) {
+func (bc *BenchmarkContext) WithTimeout(
+	timeout time.Duration,
+) (*BenchmarkContext, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(bc.Context, timeout)
 	childCtx := &BenchmarkContext{
 		Context:   ctx,
@@ -109,7 +115,12 @@ func (bc *BenchmarkContext) WithTimeout(timeout time.Duration) (*BenchmarkContex
 func (bc *BenchmarkContext) LogProgress(message string, args ...any) {
 	if bc.suite.config.Verbose {
 		elapsed := bc.Elapsed()
-		prefixedMsg := fmt.Sprintf("[%s] [%v] %s", bc.phase, elapsed.Round(time.Millisecond), message)
+		prefixedMsg := fmt.Sprintf(
+			"[%s] [%v] %s",
+			bc.phase,
+			elapsed.Round(time.Millisecond),
+			message,
+		)
 		bc.suite.logger.Infow(prefixedMsg, args...)
 	}
 }
@@ -143,7 +154,11 @@ func (bc *BenchmarkContext) CheckCancellation() error {
 }
 
 // RecordOperation records an operation for metrics tracking
-func (bc *BenchmarkContext) RecordOperation(operation string, success bool, duration time.Duration) {
+func (bc *BenchmarkContext) RecordOperation(
+	operation string,
+	success bool,
+	duration time.Duration,
+) {
 	bc.IncrementMetric("total_operations")
 	if success {
 		bc.IncrementMetric("successful_operations")

@@ -84,7 +84,10 @@ func isRetryable(err error, config RetryConfig) bool {
 
 // calculateBackoff computes the retry delay for a given attempt using exponential backoff with jitter.
 func calculateBackoff(attempt int, config RetryConfig) time.Duration {
-	delay := min(float64(config.BaseDelay)*math.Pow(config.Multiplier, float64(attempt)), float64(config.MaxDelay))
+	delay := min(
+		float64(config.BaseDelay)*math.Pow(config.Multiplier, float64(attempt)),
+		float64(config.MaxDelay),
+	)
 
 	if config.Jitter > 0 {
 		jitter := delay * config.Jitter * (rand.Float64()*2 - 1)
@@ -100,7 +103,11 @@ func calculateBackoff(attempt int, config RetryConfig) time.Duration {
 
 // RetryWithResult is a generic retry wrapper that returns a result and error.
 // It retries the function based on the provided RetryConfig.
-func RetryWithResult[T any](ctx context.Context, config RetryConfig, fn func() (T, error)) (T, error) {
+func RetryWithResult[T any](
+	ctx context.Context,
+	config RetryConfig,
+	fn func() (T, error),
+) (T, error) {
 	var lastErr error
 	var zeroValue T
 
@@ -135,14 +142,22 @@ func RetryWithResult[T any](ctx context.Context, config RetryConfig, fn func() (
 
 // ExponentialBackoff calculates backoff duration based on attempt count using exponential growth.
 // It caps the result at maxDelay.
-func ExponentialBackoff(baseDelay, maxDelay time.Duration, multiplier float64, attempt int) time.Duration {
+func ExponentialBackoff(
+	baseDelay, maxDelay time.Duration,
+	multiplier float64,
+	attempt int,
+) time.Duration {
 	delay := min(float64(baseDelay)*math.Pow(multiplier, float64(attempt)), float64(maxDelay))
 	return time.Duration(delay)
 }
 
 // JitteredBackoff applies random jitter to exponential backoff to reduce load spikes.
 // Jitter is applied symmetrically around the base delay.
-func JitteredBackoff(baseDelay, maxDelay time.Duration, multiplier, jitter float64, attempt int) time.Duration {
+func JitteredBackoff(
+	baseDelay, maxDelay time.Duration,
+	multiplier, jitter float64,
+	attempt int,
+) time.Duration {
 	delay := ExponentialBackoff(baseDelay, maxDelay, multiplier, attempt)
 
 	if jitter > 0 && jitter <= 1.0 {

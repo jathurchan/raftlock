@@ -63,7 +63,14 @@ func (dm *DockerManager) verifyContainerExists(ctx context.Context, containerNam
 	ctx, cancel := context.WithTimeout(ctx, dm.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Status}}", containerName)
+	cmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"inspect",
+		"--format",
+		"{{.State.Status}}",
+		containerName,
+	)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("container %s not found or not accessible", containerName)
 	}
@@ -72,7 +79,10 @@ func (dm *DockerManager) verifyContainerExists(ctx context.Context, containerNam
 }
 
 // GetContainerStatus retrieves the current status (e.g. running, exited) of a container.
-func (dm *DockerManager) GetContainerStatus(ctx context.Context, containerName string) (string, error) {
+func (dm *DockerManager) GetContainerStatus(
+	ctx context.Context,
+	containerName string,
+) (string, error) {
 	if !dm.enabled {
 		return "unknown", nil
 	}
@@ -80,7 +90,14 @@ func (dm *DockerManager) GetContainerStatus(ctx context.Context, containerName s
 	ctx, cancel := context.WithTimeout(ctx, dm.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Status}}", containerName)
+	cmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"inspect",
+		"--format",
+		"{{.State.Status}}",
+		containerName,
+	)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get container status: %w", err)
@@ -101,7 +118,12 @@ func (dm *DockerManager) StopContainer(ctx context.Context, containerName string
 	cmd := exec.CommandContext(ctx, "docker", "stop", containerName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to stop container %s: %w (output: %s)", containerName, err, string(output))
+		return fmt.Errorf(
+			"failed to stop container %s: %w (output: %s)",
+			containerName,
+			err,
+			string(output),
+		)
 	}
 
 	return nil
@@ -119,14 +141,23 @@ func (dm *DockerManager) StartContainer(ctx context.Context, containerName strin
 	cmd := exec.CommandContext(ctx, "docker", "start", containerName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to start container %s: %w (output: %s)", containerName, err, string(output))
+		return fmt.Errorf(
+			"failed to start container %s: %w (output: %s)",
+			containerName,
+			err,
+			string(output),
+		)
 	}
 
 	return nil
 }
 
 // WaitForContainerReady waits until the container is running and, optionally, passes a health check.
-func (dm *DockerManager) WaitForContainerReady(ctx context.Context, containerName string, healthCheck func() error) error {
+func (dm *DockerManager) WaitForContainerReady(
+	ctx context.Context,
+	containerName string,
+	healthCheck func() error,
+) error {
 	if !dm.enabled {
 		return nil
 	}

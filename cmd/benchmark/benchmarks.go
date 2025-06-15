@@ -60,7 +60,11 @@ func (s *BenchmarkSuite) runUncontestedBenchmark(ctx *BenchmarkContext) error {
 }
 
 // measureUncontestedLatency performs latency measurements for a specific test type
-func (s *BenchmarkSuite) measureUncontestedLatency(ctx *BenchmarkContext, client pb.RaftLockClient, testType string) (LatencyStats, error) {
+func (s *BenchmarkSuite) measureUncontestedLatency(
+	ctx *BenchmarkContext,
+	client pb.RaftLockClient,
+	testType string,
+) (LatencyStats, error) {
 	operations := s.config.UncontestedOps
 	latencies := make([]time.Duration, 0, operations)
 	var successfulOps int64
@@ -185,7 +189,11 @@ func (s *BenchmarkSuite) runContentionBenchmark(ctx *BenchmarkContext) error {
 }
 
 // measureContention performs contention testing for a specific scenario
-func (s *BenchmarkSuite) measureContention(ctx *BenchmarkContext, level string, workers, resources int) (ContentionStats, error) {
+func (s *BenchmarkSuite) measureContention(
+	ctx *BenchmarkContext,
+	level string,
+	workers, resources int,
+) (ContentionStats, error) {
 	ctx.LogProgress("Executing %s contention scenario...", level)
 
 	var (
@@ -315,7 +323,11 @@ func (s *BenchmarkSuite) calculateContentionMetrics() {
 	}
 
 	// Calculate backoff effectiveness
-	res.BackoffEffectiveness = s.calculateBackoffEffectiveness(res.LowContention, res.MediumContention, res.HighContention)
+	res.BackoffEffectiveness = s.calculateBackoffEffectiveness(
+		res.LowContention,
+		res.MediumContention,
+		res.HighContention,
+	)
 
 	// Build contention model
 	res.ContentionModel = ContentionModel{
@@ -392,7 +404,10 @@ func (s *BenchmarkSuite) runFaultToleranceBenchmark(ctx *BenchmarkContext) error
 	// Phase 1: Baseline measurement
 	ctx.LogInfo("Phase 1: Measuring baseline performance...")
 	phase1Ctx, phase1Cancel := context.WithTimeout(faultCtx, s.config.FailureDelay)
-	res.BeforeFailure = s.measureOperationalPhase(NewBenchmarkContext(phase1Ctx, s, "baseline"), "baseline")
+	res.BeforeFailure = s.measureOperationalPhase(
+		NewBenchmarkContext(phase1Ctx, s, "baseline"),
+		"baseline",
+	)
 	phase1Cancel()
 
 	// Phase 2: Simulate leader failure
@@ -424,7 +439,10 @@ func (s *BenchmarkSuite) runFaultToleranceBenchmark(ctx *BenchmarkContext) error
 	ctx.LogInfo("Phase 3: Measuring performance during failure...")
 	failureDuration := s.config.RecoveryDelay - s.config.FailureDelay
 	phase2Ctx, phase2Cancel := context.WithTimeout(faultCtx, failureDuration)
-	res.DuringFailure = s.measureOperationalPhase(NewBenchmarkContext(phase2Ctx, s, "during_failure"), "during_failure")
+	res.DuringFailure = s.measureOperationalPhase(
+		NewBenchmarkContext(phase2Ctx, s, "during_failure"),
+		"during_failure",
+	)
 	phase2Cancel()
 
 	// Phase 4: Recovery
@@ -446,7 +464,10 @@ func (s *BenchmarkSuite) runFaultToleranceBenchmark(ctx *BenchmarkContext) error
 	ctx.LogInfo("Phase 5: Measuring post-recovery performance...")
 	recoveryDuration := s.config.FaultTestDuration - s.config.RecoveryDelay
 	phase3Ctx, phase3Cancel := context.WithTimeout(faultCtx, recoveryDuration)
-	res.AfterRecovery = s.measureOperationalPhase(NewBenchmarkContext(phase3Ctx, s, "after_recovery"), "after_recovery")
+	res.AfterRecovery = s.measureOperationalPhase(
+		NewBenchmarkContext(phase3Ctx, s, "after_recovery"),
+		"after_recovery",
+	)
 	phase3Cancel()
 
 	// Calculate final metrics
@@ -457,7 +478,10 @@ func (s *BenchmarkSuite) runFaultToleranceBenchmark(ctx *BenchmarkContext) error
 }
 
 // measureLeaderElection measures the time taken for leader election
-func (s *BenchmarkSuite) measureLeaderElection(ctx context.Context, oldLeaderAddr string) (time.Duration, string, error) {
+func (s *BenchmarkSuite) measureLeaderElection(
+	ctx context.Context,
+	oldLeaderAddr string,
+) (time.Duration, string, error) {
 	start := time.Now()
 	timeout := 30 * time.Second
 	interval := 500 * time.Millisecond
@@ -482,7 +506,10 @@ func (s *BenchmarkSuite) measureLeaderElection(ctx context.Context, oldLeaderAdd
 }
 
 // measureOperationalPhase measures operational statistics during a specific phase
-func (s *BenchmarkSuite) measureOperationalPhase(ctx *BenchmarkContext, phase string) OperationalStats {
+func (s *BenchmarkSuite) measureOperationalPhase(
+	ctx *BenchmarkContext,
+	phase string,
+) OperationalStats {
 	var (
 		totalOps      int64
 		successfulOps int64
@@ -558,7 +585,10 @@ func (s *BenchmarkSuite) measureOperationalPhase(ctx *BenchmarkContext, phase st
 }
 
 // calculateFaultToleranceMetrics computes derived fault tolerance metrics
-func (s *BenchmarkSuite) calculateFaultToleranceMetrics(res *FaultToleranceBenchmark, electionTime, recoveryTime time.Duration) {
+func (s *BenchmarkSuite) calculateFaultToleranceMetrics(
+	res *FaultToleranceBenchmark,
+	electionTime, recoveryTime time.Duration,
+) {
 	res.LeaderElectionTime = electionTime.String()
 	res.RecoveryTime = recoveryTime.String()
 
@@ -571,7 +601,8 @@ func (s *BenchmarkSuite) calculateFaultToleranceMetrics(res *FaultToleranceBench
 	res.DataConsistency = s.performConsistencyCheck()
 
 	// Calculate resilience grade
-	if res.SystemAvailability >= 99.9 && electionTime <= 10*time.Second && res.DataConsistency.ConsistencyRate >= 99.99 {
+	if res.SystemAvailability >= 99.9 && electionTime <= 10*time.Second &&
+		res.DataConsistency.ConsistencyRate >= 99.99 {
 		res.ResilienceGrade = "A (Excellent)"
 	} else if res.SystemAvailability >= 99.5 && electionTime <= 15*time.Second && res.DataConsistency.ConsistencyRate >= 99.9 {
 		res.ResilienceGrade = "B (Good)"

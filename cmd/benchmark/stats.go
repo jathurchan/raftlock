@@ -8,7 +8,11 @@ import (
 )
 
 // calculateLatencyStats computes detailed latency statistics from raw data.
-func calculateLatencyStats(description string, latencies []time.Duration, successful, total int64) LatencyStats {
+func calculateLatencyStats(
+	description string,
+	latencies []time.Duration,
+	successful, total int64,
+) LatencyStats {
 	if total == 0 {
 		return LatencyStats{
 			Description:     description,
@@ -375,7 +379,10 @@ func (s *BenchmarkSuite) generateKeyMetrics() map[string]interface{} {
 	}
 
 	if r := s.results.ContentionResults; r != nil {
-		metrics["high_contention_success_rate"] = fmt.Sprintf("%.2f%%", r.HighContention.SuccessRate)
+		metrics["high_contention_success_rate"] = fmt.Sprintf(
+			"%.2f%%",
+			r.HighContention.SuccessRate,
+		)
 		metrics["throughput_degradation"] = fmt.Sprintf("%.2f%%", r.ThroughputDegradation*100)
 		metrics["backoff_effectiveness"] = fmt.Sprintf("%.2f%%", r.BackoffEffectiveness)
 	}
@@ -400,53 +407,83 @@ func (s *BenchmarkSuite) generateRecommendations() []string {
 	var recs []string
 
 	if s.results.Summary.OverallScore >= 90 {
-		recs = append(recs, "System performs excellently across all benchmarks. Ready for production deployment.")
+		recs = append(
+			recs,
+			"System performs excellently across all benchmarks. Ready for production deployment.",
+		)
 		return recs
 	}
 
 	// Performance recommendations
 	if s.results.UncontestedResults != nil {
 		if p99, _ := time.ParseDuration(s.results.UncontestedResults.WithLeaderOptimization.P99); p99 > 100*time.Millisecond {
-			recs = append(recs, "Consider optimizing lock acquisition path to reduce P99 latency below 100ms.")
+			recs = append(
+				recs,
+				"Consider optimizing lock acquisition path to reduce P99 latency below 100ms.",
+			)
 		}
 
 		if s.results.UncontestedResults.ImprovementFactor < 2.0 {
-			recs = append(recs, "Leader optimization shows limited benefit. Review client-side leader discovery logic.")
+			recs = append(
+				recs,
+				"Leader optimization shows limited benefit. Review client-side leader discovery logic.",
+			)
 		}
 	}
 
 	// Contention recommendations
 	if s.results.ContentionResults != nil {
 		if s.results.ContentionResults.HighContention.SuccessRate < 85 {
-			recs = append(recs, "High contention success rate is below 85%. Consider implementing adaptive backoff or queue management.")
+			recs = append(
+				recs,
+				"High contention success rate is below 85%. Consider implementing adaptive backoff or queue management.",
+			)
 		}
 
 		if s.results.ContentionResults.ThroughputDegradation > 0.7 {
-			recs = append(recs, "Severe throughput degradation under contention. Review lock management algorithms.")
+			recs = append(
+				recs,
+				"Severe throughput degradation under contention. Review lock management algorithms.",
+			)
 		}
 
 		if s.results.ContentionResults.BackoffEffectiveness < 60 {
-			recs = append(recs, "Backoff strategy is ineffective. Consider exponential backoff with jitter.")
+			recs = append(
+				recs,
+				"Backoff strategy is ineffective. Consider exponential backoff with jitter.",
+			)
 		}
 	}
 
 	// Resilience recommendations
 	if s.results.FaultToleranceResults != nil {
 		if s.results.FaultToleranceResults.SystemAvailability < 99.9 {
-			recs = append(recs, "System availability is below 99.9%. Optimize leader election and failover procedures.")
+			recs = append(
+				recs,
+				"System availability is below 99.9%. Optimize leader election and failover procedures.",
+			)
 		}
 
 		if electionTime, _ := time.ParseDuration(s.results.FaultToleranceResults.LeaderElectionTime); electionTime > 10*time.Second {
-			recs = append(recs, "Leader election time exceeds 10 seconds. Tune election timeouts and heartbeat intervals.")
+			recs = append(
+				recs,
+				"Leader election time exceeds 10 seconds. Tune election timeouts and heartbeat intervals.",
+			)
 		}
 
 		if s.results.FaultToleranceResults.DataConsistency.ConsistencyRate < 99.99 {
-			recs = append(recs, "Data consistency rate is below 99.99%. Review Raft implementation and commit procedures.")
+			recs = append(
+				recs,
+				"Data consistency rate is below 99.99%. Review Raft implementation and commit procedures.",
+			)
 		}
 	}
 
 	if len(recs) == 0 {
-		recs = append(recs, "No specific recommendations. System performance is within acceptable ranges.")
+		recs = append(
+			recs,
+			"No specific recommendations. System performance is within acceptable ranges.",
+		)
 	}
 
 	return recs
@@ -463,18 +500,27 @@ func (s *BenchmarkSuite) generateRiskAssessment() []string {
 		}
 
 		if s.results.UncontestedResults.ThroughputBaseline < 100 {
-			risks = append(risks, "MEDIUM: Low baseline throughput may cause bottlenecks under load")
+			risks = append(
+				risks,
+				"MEDIUM: Low baseline throughput may cause bottlenecks under load",
+			)
 		}
 	}
 
 	// Contention risks
 	if s.results.ContentionResults != nil {
 		if s.results.ContentionResults.HighContention.SuccessRate < 70 {
-			risks = append(risks, "HIGH: Poor performance under contention, system may fail under peak load")
+			risks = append(
+				risks,
+				"HIGH: Poor performance under contention, system may fail under peak load",
+			)
 		}
 
 		if s.results.ContentionResults.HighContention.AverageRetries > 5 {
-			risks = append(risks, "MEDIUM: High retry rate indicates inefficient contention handling")
+			risks = append(
+				risks,
+				"MEDIUM: High retry rate indicates inefficient contention handling",
+			)
 		}
 	}
 
@@ -489,7 +535,10 @@ func (s *BenchmarkSuite) generateRiskAssessment() []string {
 		}
 
 		if s.results.FaultToleranceResults.DataConsistency.ConsistencyRate < 99.9 {
-			risks = append(risks, "CRITICAL: Data consistency issues detected, risk of data corruption")
+			risks = append(
+				risks,
+				"CRITICAL: Data consistency issues detected, risk of data corruption",
+			)
 		}
 	}
 

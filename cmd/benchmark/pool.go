@@ -73,7 +73,6 @@ func (p *clientPool) connect() error {
 
 		for j := range p.poolSize {
 			conn, err := grpc.NewClient(addr, opts...)
-
 			if err != nil {
 				p.closePartialConnections(i, j)
 				return NewConnectionError(addr, "dial", err)
@@ -103,7 +102,7 @@ func (p *clientPool) closePartialConnections(serverIndex, connectionIndex int) {
 
 		for j := 0; j < maxJ; j++ {
 			if p.pools[i][j] != nil && p.pools[i][j].conn != nil {
-				p.pools[i][j].conn.Close()
+				_ = p.pools[i][j].conn.Close()
 			}
 		}
 	}
@@ -283,7 +282,7 @@ func (p *clientPool) close() {
 	for _, pool := range p.pools {
 		for _, conn := range pool {
 			if conn != nil && conn.conn != nil {
-				conn.conn.Close()
+				_ = conn.conn.Close()
 			}
 		}
 	}

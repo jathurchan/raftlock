@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -125,14 +126,32 @@ func (s *BenchmarkSuite) runWithContext(ctx context.Context) error {
 		fn          func(context.Context) error
 		required    bool
 	}{
-		{"uncontested", "Uncontested Latency Assessment", s.runUncontestedBenchmarkWithContext, true},
-		{"contention", "Contention Performance Analysis", s.runContentionBenchmarkWithContext, true},
-		{"fault_tolerance", "Fault Tolerance & Recovery Validation", s.runFaultToleranceBenchmarkWithContext, s.config.UseDocker},
+		{
+			"uncontested",
+			"Uncontested Latency Assessment",
+			s.runUncontestedBenchmarkWithContext,
+			true,
+		},
+		{
+			"contention",
+			"Contention Performance Analysis",
+			s.runContentionBenchmarkWithContext,
+			true,
+		},
+		{
+			"fault_tolerance",
+			"Fault Tolerance & Recovery Validation",
+			s.runFaultToleranceBenchmarkWithContext,
+			s.config.UseDocker,
+		},
 	}
 
 	for i, benchmark := range benchmarks {
 		if !benchmark.required {
-			s.logger.Infow("⏭️  Skipping %s (not required in current configuration)", benchmark.description)
+			s.logger.Infow(
+				"⏭️  Skipping %s (not required in current configuration)",
+				benchmark.description,
+			)
 			continue
 		}
 
@@ -140,7 +159,7 @@ func (s *BenchmarkSuite) runWithContext(ctx context.Context) error {
 		s.logger.Infow(strings.Repeat("=", 60))
 
 		if err := benchmark.fn(ctx); err != nil {
-			if err == context.Canceled {
+			if errors.Is(err, context.Canceled) {
 				return err
 			}
 			return WrapErrorWithContext("execution", benchmark.name, err, map[string]interface{}{
@@ -278,7 +297,7 @@ func (s *BenchmarkSuite) generateAndOutputReport() error {
 	}
 	defer func() {
 		if writer != nil && writer != os.Stdout {
-			writer.Close()
+			_ = writer.Close()
 		}
 	}()
 
@@ -344,7 +363,12 @@ func (s *BenchmarkSuite) printBanner() {
 	s.logger.Infow("⚙️  Advanced Settings:")
 	s.logger.Infow("  • Connection Pools: %d per server", s.config.ConnectionPoolSize)
 	s.logger.Infow("  • Max Retries: %d", s.config.MaxRetries)
-	s.logger.Infow("  • Backoff: %v - %v (×%.1f)", s.config.BaseBackoff, s.config.MaxBackoff, s.config.BackoffMultiplier)
+	s.logger.Infow(
+		"  • Backoff: %v - %v (×%.1f)",
+		s.config.BaseBackoff,
+		s.config.MaxBackoff,
+		s.config.BackoffMultiplier,
+	)
 	s.logger.Infow("  • Output: %s format", s.config.OutputFormat)
 	if s.config.OutputFile != "" {
 		s.logger.Infow("  • Output File: %s", s.config.OutputFile)

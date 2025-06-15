@@ -91,7 +91,12 @@ type ValidationError struct {
 
 // Error implements the error interface for ValidationError.
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation error for field '%s': %s (value: %v)", e.Field, e.Message, e.Value)
+	return fmt.Sprintf(
+		"validation error for field '%s': %s (value: %v)",
+		e.Field,
+		e.Message,
+		e.Value,
+	)
 }
 
 // NewValidationError creates a new ValidationError.

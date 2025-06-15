@@ -13,7 +13,11 @@ import (
 )
 
 // performSingleOperation executes one non-blocking lock acquire and release.
-func (s *BenchmarkSuite) performSingleOperation(client pb.RaftLockClient, lockID, clientID string, ttl time.Duration) bool {
+func (s *BenchmarkSuite) performSingleOperation(
+	client pb.RaftLockClient,
+	lockID, clientID string,
+	ttl time.Duration,
+) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.OperationTimeout)
 	defer cancel()
 
@@ -47,7 +51,10 @@ func (s *BenchmarkSuite) performSingleOperation(client pb.RaftLockClient, lockID
 }
 
 // performEnhancedOperation executes a lock operation with retry, tracking full result metadata.
-func (s *BenchmarkSuite) performEnhancedOperation(ctx context.Context, lockID, clientID string) OperationResult {
+func (s *BenchmarkSuite) performEnhancedOperation(
+	ctx context.Context,
+	lockID, clientID string,
+) OperationResult {
 	result := OperationResult{
 		LockID:       lockID,
 		ClientID:     clientID,
@@ -82,7 +89,12 @@ func (s *BenchmarkSuite) performEnhancedOperation(ctx context.Context, lockID, c
 }
 
 // attemptLockOperation performs one acquire-and-release cycle and updates result details.
-func (s *BenchmarkSuite) attemptLockOperation(ctx context.Context, client pb.RaftLockClient, lockID, clientID string, result *OperationResult) error {
+func (s *BenchmarkSuite) attemptLockOperation(
+	ctx context.Context,
+	client pb.RaftLockClient,
+	lockID, clientID string,
+	result *OperationResult,
+) error {
 	opCtx, cancel := context.WithTimeout(ctx, s.config.OperationTimeout)
 	defer cancel()
 

@@ -143,14 +143,18 @@ func (c *Config) Validate() error {
 		return errors.New("uncontested operations must be positive")
 	}
 	if c.UncontestedOps > 100000 {
-		return errors.New("uncontested operations should not exceed 100,000 for reasonable test duration")
+		return errors.New(
+			"uncontested operations should not exceed 100,000 for reasonable test duration",
+		)
 	}
 
 	if c.ContentionOps <= 0 {
 		return errors.New("contention operations must be positive")
 	}
 	if c.ContentionOps > 50000 {
-		return errors.New("contention operations should not exceed 50,000 for reasonable test duration")
+		return errors.New(
+			"contention operations should not exceed 50,000 for reasonable test duration",
+		)
 	}
 
 	if c.MaxWorkers <= 0 {

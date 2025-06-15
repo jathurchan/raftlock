@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -54,7 +55,7 @@ func main() {
 	suite.printBanner()
 
 	if err := suite.runWithContext(ctx); err != nil {
-		if err == context.Canceled {
+		if errors.Is(err, context.Canceled) {
 			log.Printf("🛑 Benchmark canceled by user")
 			os.Exit(exitInterrupted)
 		}

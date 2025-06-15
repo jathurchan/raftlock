@@ -38,7 +38,7 @@ func NewReporter(cfg *Config) (Reporter, io.WriteCloser, error) {
 		return &TextReporter{writer: writer, verbose: cfg.Verbose}, writer, nil
 	default:
 		if writer != os.Stdout {
-			writer.Close()
+			_ = writer.Close()
 		}
 		return nil, nil, fmt.Errorf("unsupported output format: %s", cfg.OutputFormat)
 	}
@@ -54,7 +54,7 @@ type TextReporter struct {
 func (r *TextReporter) Generate(results *BenchmarkResults) error {
 	w := tabwriter.NewWriter(r.writer, 0, 0, 3, ' ', 0)
 	p := func(format string, a ...any) {
-		fmt.Fprintf(w, format+"\n", a...)
+		_, _ = fmt.Fprintf(w, format+"\n", a...)
 	}
 
 	// Header
@@ -117,7 +117,10 @@ func (r *TextReporter) printExecutiveSummary(p func(string, ...any), results *Be
 }
 
 // printUncontestedResults prints metrics from uncontested tests.
-func (r *TextReporter) printUncontestedResults(p func(string, ...any), results *UncontestedBenchmark) {
+func (r *TextReporter) printUncontestedResults(
+	p func(string, ...any),
+	results *UncontestedBenchmark,
+) {
 	p("📊 UNCONTESTED LATENCY ANALYSIS")
 	p("===============================")
 	p("Leader Optimization Factor:\t%.2fx", results.ImprovementFactor)
@@ -128,16 +131,39 @@ func (r *TextReporter) printUncontestedResults(p func(string, ...any), results *
 	p("Performance Comparison:")
 	p("Metric\tLeader Optimized\tFollower Redirected")
 	p("------\t----------------\t-------------------")
-	p("Mean Latency\t%s\t%s", results.WithLeaderOptimization.Mean, results.WithoutLeaderOptimization.Mean)
-	p("P95 Latency\t%s\t%s", results.WithLeaderOptimization.P95, results.WithoutLeaderOptimization.P95)
-	p("P99 Latency\t%s\t%s", results.WithLeaderOptimization.P99, results.WithoutLeaderOptimization.P99)
-	p("Success Rate\t%.2f%%\t%.2f%%", results.WithLeaderOptimization.SuccessRate, results.WithoutLeaderOptimization.SuccessRate)
-	p("Throughput\t%.2f ops/s\t%.2f ops/s", results.WithLeaderOptimization.ThroughputOpsPerSec, results.WithoutLeaderOptimization.ThroughputOpsPerSec)
+	p(
+		"Mean Latency\t%s\t%s",
+		results.WithLeaderOptimization.Mean,
+		results.WithoutLeaderOptimization.Mean,
+	)
+	p(
+		"P95 Latency\t%s\t%s",
+		results.WithLeaderOptimization.P95,
+		results.WithoutLeaderOptimization.P95,
+	)
+	p(
+		"P99 Latency\t%s\t%s",
+		results.WithLeaderOptimization.P99,
+		results.WithoutLeaderOptimization.P99,
+	)
+	p(
+		"Success Rate\t%.2f%%\t%.2f%%",
+		results.WithLeaderOptimization.SuccessRate,
+		results.WithoutLeaderOptimization.SuccessRate,
+	)
+	p(
+		"Throughput\t%.2f ops/s\t%.2f ops/s",
+		results.WithLeaderOptimization.ThroughputOpsPerSec,
+		results.WithoutLeaderOptimization.ThroughputOpsPerSec,
+	)
 	p("")
 }
 
 // printContentionResults prints performance data under contention scenarios.
-func (r *TextReporter) printContentionResults(p func(string, ...any), results *ContentionBenchmark) {
+func (r *TextReporter) printContentionResults(
+	p func(string, ...any),
+	results *ContentionBenchmark,
+) {
 	p("⚔️ CONTENTION PERFORMANCE ANALYSIS")
 	p("===================================")
 	p("Scalability Assessment:\t%s", results.ScalabilityAssessment)
@@ -148,12 +174,42 @@ func (r *TextReporter) printContentionResults(p func(string, ...any), results *C
 	p("Contention Level Comparison:")
 	p("Metric\tLow\tMedium\tHigh")
 	p("------\t---\t------\t----")
-	p("Workers\t%d\t%d\t%d", results.LowContention.Workers, results.MediumContention.Workers, results.HighContention.Workers)
-	p("Resources\t%d\t%d\t%d", results.LowContention.Resources, results.MediumContention.Resources, results.HighContention.Resources)
-	p("Throughput (ops/s)\t%.2f\t%.2f\t%.2f", results.LowContention.Throughput, results.MediumContention.Throughput, results.HighContention.Throughput)
-	p("Success Rate\t%.2f%%\t%.2f%%\t%.2f%%", results.LowContention.SuccessRate, results.MediumContention.SuccessRate, results.HighContention.SuccessRate)
-	p("Avg Retries\t%.2f\t%.2f\t%.2f", results.LowContention.AverageRetries, results.MediumContention.AverageRetries, results.HighContention.AverageRetries)
-	p("Efficiency\t%s\t%s\t%s", results.LowContention.EfficiencyRating, results.MediumContention.EfficiencyRating, results.HighContention.EfficiencyRating)
+	p(
+		"Workers\t%d\t%d\t%d",
+		results.LowContention.Workers,
+		results.MediumContention.Workers,
+		results.HighContention.Workers,
+	)
+	p(
+		"Resources\t%d\t%d\t%d",
+		results.LowContention.Resources,
+		results.MediumContention.Resources,
+		results.HighContention.Resources,
+	)
+	p(
+		"Throughput (ops/s)\t%.2f\t%.2f\t%.2f",
+		results.LowContention.Throughput,
+		results.MediumContention.Throughput,
+		results.HighContention.Throughput,
+	)
+	p(
+		"Success Rate\t%.2f%%\t%.2f%%\t%.2f%%",
+		results.LowContention.SuccessRate,
+		results.MediumContention.SuccessRate,
+		results.HighContention.SuccessRate,
+	)
+	p(
+		"Avg Retries\t%.2f\t%.2f\t%.2f",
+		results.LowContention.AverageRetries,
+		results.MediumContention.AverageRetries,
+		results.HighContention.AverageRetries,
+	)
+	p(
+		"Efficiency\t%s\t%s\t%s",
+		results.LowContention.EfficiencyRating,
+		results.MediumContention.EfficiencyRating,
+		results.HighContention.EfficiencyRating,
+	)
 	p("")
 
 	p("Contention Model Analysis:")
@@ -165,22 +221,44 @@ func (r *TextReporter) printContentionResults(p func(string, ...any), results *C
 }
 
 // printFaultToleranceResults prints results related to system resilience.
-func (r *TextReporter) printFaultToleranceResults(p func(string, ...any), results *FaultToleranceBenchmark) {
+func (r *TextReporter) printFaultToleranceResults(
+	p func(string, ...any),
+	results *FaultToleranceBenchmark,
+) {
 	p("🛡️ FAULT TOLERANCE & RESILIENCE")
 	p("================================")
 	p("Resilience Grade:\t%s", results.ResilienceGrade)
 	p("System Availability:\t%.4f%%", results.SystemAvailability)
 	p("Leader Election Time:\t%s", results.LeaderElectionTime)
 	p("Recovery Time:\t%s", results.RecoveryTime)
-	p("Data Consistency:\t%.4f%% (%s)", results.DataConsistency.ConsistencyRate, results.DataConsistency.ConsistencyGrade)
+	p(
+		"Data Consistency:\t%.4f%% (%s)",
+		results.DataConsistency.ConsistencyRate,
+		results.DataConsistency.ConsistencyGrade,
+	)
 	p("")
 
 	p("Operational Performance by Phase:")
 	p("Phase\tThroughput (ops/s)\tError Rate\tAvg Response Time")
 	p("-----\t------------------\t----------\t-----------------")
-	p("Baseline\t%.2f\t%.2f%%\t%s", results.BeforeFailure.Throughput, results.BeforeFailure.ErrorRate, results.BeforeFailure.AvgResponseTime)
-	p("During Failure\t%.2f\t%.2f%%\t%s", results.DuringFailure.Throughput, results.DuringFailure.ErrorRate, results.DuringFailure.AvgResponseTime)
-	p("After Recovery\t%.2f\t%.2f%%\t%s", results.AfterRecovery.Throughput, results.AfterRecovery.ErrorRate, results.AfterRecovery.AvgResponseTime)
+	p(
+		"Baseline\t%.2f\t%.2f%%\t%s",
+		results.BeforeFailure.Throughput,
+		results.BeforeFailure.ErrorRate,
+		results.BeforeFailure.AvgResponseTime,
+	)
+	p(
+		"During Failure\t%.2f\t%.2f%%\t%s",
+		results.DuringFailure.Throughput,
+		results.DuringFailure.ErrorRate,
+		results.DuringFailure.AvgResponseTime,
+	)
+	p(
+		"After Recovery\t%.2f\t%.2f%%\t%s",
+		results.AfterRecovery.Throughput,
+		results.AfterRecovery.ErrorRate,
+		results.AfterRecovery.AvgResponseTime,
+	)
 	p("")
 }
 
