@@ -1033,11 +1033,15 @@ type mockStateManager struct {
 	becomeFollowerFunc          func(ctx context.Context, term types.Term, leaderID types.NodeID)
 	becomeLeaderFunc            func(ctx context.Context) bool
 	becomeCandidateFunc         func(ctx context.Context, reason ElectionReason) bool
+	becomeCandidateForTermFunc  func(ctx context.Context, term types.Term) bool
 	grantVoteFunc               func(ctx context.Context, candidateID types.NodeID, term types.Term) bool
 	updateCommitIndexFunc       func(newCommitIndex types.Index) bool
 	updateCommitIndexUnsafeFunc func(newCommitIndex types.Index) bool
 	updateLastAppliedFunc       func(newLastApplied types.Index) bool
 	getLastAppliedFunc          func() types.Index
+	isInLeadershipGracePeriod   func() bool
+	setLeaderGracePeriod        func(gracePeriod time.Duration)
+	setLeaderStabilityMinimum   func(stabilityMin time.Duration)
 }
 
 func newMockStateManager() *mockStateManager {
@@ -1103,6 +1107,33 @@ func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
 	}
 	m.currentRole = types.RoleLeader
 	m.leaderID = "node1" // Self ID
+	return true
+}
+
+func (m *mockStateManager) IsInLeadershipGracePeriod() bool {
+	if m.isInLeadershipGracePeriod != nil {
+		return m.isInLeadershipGracePeriod()
+	}
+
+	return true
+}
+
+func (m *mockStateManager) SetLeaderGracePeriod(gracePeriod time.Duration) {
+	if m.setLeaderGracePeriod != nil {
+		m.setLeaderGracePeriod(gracePeriod)
+	}
+}
+
+func (m *mockStateManager) SetLeaderStabilityMinimum(stabilityMin time.Duration) {
+	if m.setLeaderStabilityMinimum != nil {
+		m.setLeaderStabilityMinimum(stabilityMin)
+	}
+}
+
+func (m *mockStateManager) BecomeCandidateForTerm(ctx context.Context, term types.Term) bool {
+	if m.becomeCandidateForTermFunc != nil {
+		return m.becomeCandidateForTermFunc(ctx, term)
+	}
 	return true
 }
 
@@ -1250,10 +1281,15 @@ type mockLogManager struct {
 	getTermUnsafeFunc               func(ctx context.Context, index types.Index) (types.Term, error)
 	getEntriesFunc                  func(ctx context.Context, start, end types.Index) ([]types.LogEntry, error)
 	appendEntriesFunc               func(ctx context.Context, entries []types.LogEntry) error
+	appendEntriesUnsafeFunc         func(ctx context.Context, entries []types.LogEntry) error
 	truncatePrefixFunc              func(ctx context.Context, newFirstIndex types.Index) error
 	truncateSuffixFunc              func(ctx context.Context, newLastIndexPlusOne types.Index) error
+	truncatePrefixUnsafeFunc        func(ctx context.Context, newFirstIndex types.Index) error
+	truncateSuffixUnsafeFunc        func(ctx context.Context, newLastIndexPlusOne types.Index) error
 	findFirstIndexInTermUnsafeFunc  func(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error)
 	findLastEntryWithTermUnsafeFunc func(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error)
+	restoreFromSnapshotFunc         func(meta types.SnapshotMetadata)
+	getLogStateForDebugging         func() (firstIndex, lastIndex types.Index, lastTerm types.Term)
 }
 
 func newMockLogManager() *mockLogManager {
@@ -1375,6 +1411,14 @@ func (m *mockLogManager) GetEntries(
 	return entries, nil
 }
 
+func (m *mockLogManager) AppendEntriesUnsafe(ctx context.Context, entries []types.LogEntry) error {
+	if m.appendEntriesUnsafeFunc != nil {
+		return m.appendEntriesUnsafeFunc(ctx, entries)
+	}
+
+	return nil
+}
+
 func (m *mockLogManager) AppendEntries(ctx context.Context, entries []types.LogEntry) error {
 	if m.appendEntriesFunc != nil {
 		err := m.appendEntriesFunc(ctx, entries)
@@ -1432,6 +1476,17 @@ func (m *mockLogManager) AppendEntries(ctx context.Context, entries []types.LogE
 	return nil
 }
 
+func (m *mockLogManager) TruncatePrefixUnsafe(
+	ctx context.Context,
+	newFirstIndex types.Index,
+) error {
+	if m.truncatePrefixUnsafeFunc != nil {
+		return m.truncatePrefixUnsafeFunc(ctx, newFirstIndex)
+	}
+
+	return nil
+}
+
 func (m *mockLogManager) TruncatePrefix(ctx context.Context, newFirstIndex types.Index) error {
 	if m.truncatePrefixFunc != nil {
 		return m.truncatePrefixFunc(ctx, newFirstIndex)
@@ -1461,6 +1516,17 @@ func (m *mockLogManager) TruncatePrefix(ctx context.Context, newFirstIndex types
 		m.lastIndex = 0
 		m.lastTerm = 0
 		m.firstIndex = 0
+	}
+
+	return nil
+}
+
+func (m *mockLogManager) TruncateSuffixUnsafe(
+	ctx context.Context,
+	newLastIndexPlusOne types.Index,
+) error {
+	if m.truncateSuffixUnsafeFunc != nil {
+		return m.truncateSuffixFunc(ctx, newLastIndexPlusOne)
 	}
 
 	return nil
@@ -1590,6 +1656,20 @@ func (m *mockLogManager) FindFirstIndexInTermUnsafe(
 		return firstIndexOfTerm, nil
 	}
 	return 0, ErrNotFound
+}
+
+func (m *mockLogManager) RestoreFromSnapshot(meta types.SnapshotMetadata) {
+	if m.restoreFromSnapshotFunc != nil {
+		m.restoreFromSnapshotFunc(meta)
+	}
+}
+
+func (m *mockLogManager) GetLogStateForDebugging() (firstIndex, lastIndex types.Index, lastTerm types.Term) {
+	if m.getLogStateForDebugging != nil {
+		m.getLogStateForDebugging()
+	}
+
+	return 0, 0, 0
 }
 
 func (m *mockLogManager) Stop() {}

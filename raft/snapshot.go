@@ -674,7 +674,7 @@ func (sm *snapshotManager) GetSnapshotMetadataUnsafe() types.SnapshotMetadata {
 func (sm *snapshotManager) HandleInstallSnapshot(
 	ctx context.Context,
 	args *types.InstallSnapshotArgs,
-) (*types.InstallSnapshotReply, error) { //
+) (*types.InstallSnapshotReply, error) {
 	if sm.isShutdownOrContextDone(ctx, "HandleInstallSnapshot") {
 		return nil, ErrShuttingDown
 	}
@@ -779,8 +779,9 @@ func (sm *snapshotManager) processInstallSnapshot(
 		return nil, fmt.Errorf("failed to restore state machine from incoming snapshot: %w", err)
 	}
 
+	sm.logMgr.RestoreFromSnapshot(incomingMeta)
+
 	sm.updateSnapshotMetadata(incomingMeta)
-	sm.truncateLogAfterSnapshot(ctx, incomingMeta.LastIncludedIndex)
 
 	return reply, nil
 }

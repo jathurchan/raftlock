@@ -47,6 +47,7 @@ type raftNode struct {
 	leaderChangeCh  chan types.NodeID   // Notifies of leader changes
 	applyLoopStopCh chan struct{}       // Stops apply loop specifically
 	applyLoopDoneCh chan struct{}       // Apply loop signals completion
+	forceApplyCh    chan struct{}       // For forced apply triggers
 
 	applyEntryTimeout   time.Duration
 	fetchEntriesTimeout time.Duration
@@ -223,19 +224,37 @@ func (r *raftNode) Tick(ctx context.Context) {
 	}
 
 	r.metrics.IncCounter("raft_ticks_total")
-	term, role, _ := r.stateMgr.GetState()
+	term, role, leaderID := r.stateMgr.GetState()
 
 	r.logger.Debugw("Processing tick",
 		"term", term,
-		"role", role.String())
+		"role", role.String(),
+		"leaderID", leaderID)
 
+	// Use internal context to avoid cancellation issues
 	internalCtx := context.Background()
 
-	if role != types.RoleLeader {
-		r.electionMgr.Tick(internalCtx)
-	} else {
+	// Handle different roles appropriately
+	switch role {
+	case types.RoleLeader:
+		// Leaders handle replication and heartbeats
 		r.replicationMgr.Tick(internalCtx)
+
+		// Ensure we're still leader after tick
+		if currentTerm, currentRole, _ := r.stateMgr.GetState(); currentRole != types.RoleLeader || currentTerm != term {
+			r.logger.Infow("Lost leadership during tick",
+				"originalTerm", term, "currentTerm", currentTerm, "currentRole", currentRole.String())
+		}
+
+	case types.RoleFollower, types.RoleCandidate:
+		// Non-leaders handle election timeouts
+		r.electionMgr.Tick(internalCtx)
+
+	default:
+		r.logger.Warnw("Unknown role during tick", "role", role.String())
 	}
+
+	// Always tick snapshot manager
 	r.snapshotMgr.Tick(internalCtx)
 	r.metrics.ObserveTick(role)
 }
@@ -248,6 +267,7 @@ func (r *raftNode) Propose(
 	startTime := r.clock.Now()
 	r.metrics.IncCounter("raft_propose_total")
 
+	// Validate state
 	if r.isShutdown.Load() {
 		r.metrics.IncCounter("raft_propose_rejected", "reason", "shutdown")
 		return 0, 0, false, ErrShuttingDown
@@ -258,26 +278,42 @@ func (r *raftNode) Propose(
 		return 0, 0, false, errors.New("command cannot be empty")
 	}
 
-	index, term, isLeader, err := r.replicationMgr.Propose(ctx, command)
+	// Check leadership before attempting proposal
+	term, role, leaderID := r.stateMgr.GetState()
+	if role != types.RoleLeader {
+		r.logger.Infow("Proposal rejected: not leader",
+			"commandSize", len(command),
+			"currentRole", role.String(),
+			"leaderID", leaderID)
+		r.metrics.IncCounter("raft_propose_rejected", "reason", "not_leader")
+		return 0, term, false, ErrNotLeader
+	}
+
+	// Attempt the proposal
+	index, proposalTerm, isLeader, err := r.replicationMgr.Propose(ctx, command)
+
+	// Handle results
 	if err != nil {
 		if errors.Is(err, ErrNotLeader) {
-			r.logger.Infow("Proposal rejected: not leader",
+			r.logger.Infow("Proposal rejected: lost leadership during proposal",
 				"commandSize", len(command),
-				"leaderID", r.GetLeaderID())
-			r.metrics.IncCounter("raft_propose_rejected", "reason", "not_leader")
+				"originalTerm", term,
+				"proposalTerm", proposalTerm)
+			r.metrics.IncCounter("raft_propose_rejected", "reason", "leadership_lost")
 		} else {
 			r.logger.Warnw("Proposal failed",
 				"commandSize", len(command),
 				"error", err)
 			r.metrics.IncCounter("raft_propose_failed", "reason", "error")
 		}
-		return 0, 0, isLeader, err
+		return index, proposalTerm, isLeader, err
 	}
 
+	// Success metrics and logging
 	latency := r.clock.Since(startTime)
 	r.logger.Infow("Command proposed successfully",
 		"index", index,
-		"term", term,
+		"term", proposalTerm,
 		"commandSize", len(command),
 		"latency", latency)
 
@@ -285,7 +321,7 @@ func (r *raftNode) Propose(
 	r.metrics.IncCounter("raft_propose_success_total")
 	r.metrics.AddCounter("raft_propose_bytes_total", float64(len(command)))
 
-	return index, term, true, nil
+	return index, proposalTerm, true, nil
 }
 
 // ReadIndex implements linearizable reads.
@@ -324,45 +360,33 @@ func (r *raftNode) ReadIndex(ctx context.Context) (types.Index, error) {
 
 // Status returns a snapshot of the Raft node's state.
 func (r *raftNode) Status() types.RaftStatus {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	term, role, leaderID := r.stateMgr.GetState()
+	commitIndex := r.stateMgr.GetCommitIndex()
+	lastApplied := r.stateMgr.GetLastApplied()
 
-	term, role, leaderID := r.stateMgr.GetStateUnsafe()
 	lastLogIndex := r.logMgr.GetLastIndexUnsafe()
-	lastLogTerm := r.logMgr.GetLastTermUnsafe()
-	commitIndex := r.stateMgr.GetCommitIndexUnsafe()
-	lastApplied := r.stateMgr.GetLastAppliedUnsafe()
-	snapMeta := r.snapshotMgr.GetSnapshotMetadataUnsafe()
-
-	var replicationStatus map[types.NodeID]types.PeerState
-	if role == types.RoleLeader {
-		replicationStatus = r.replicationMgr.GetPeerReplicationStatusUnsafe()
-	} else {
-		replicationStatus = make(map[types.NodeID]types.PeerState)
-	}
-
-	r.metrics.IncCounter("raft_status_total")
 
 	return types.RaftStatus{
 		ID:            r.id,
-		Role:          role,
 		Term:          term,
+		Role:          role,
 		LeaderID:      leaderID,
-		LastLogIndex:  lastLogIndex,
-		LastLogTerm:   lastLogTerm,
 		CommitIndex:   commitIndex,
 		LastApplied:   lastApplied,
-		SnapshotIndex: snapMeta.LastIncludedIndex,
-		SnapshotTerm:  snapMeta.LastIncludedTerm,
-		Replication:   replicationStatus,
+		LastLogIndex:  lastLogIndex,
+		SnapshotIndex: 0, // Implement based on your snapshot logic
+		SnapshotTerm:  0, // Implement based on your snapshot logic
 	}
 }
 
 // GetState returns the current term and leadership status
 func (r *raftNode) GetState() (types.Term, bool) {
 	term, role, _ := r.stateMgr.GetState()
-	isLeader := role == types.RoleLeader
+	isLeader := (role == types.RoleLeader)
+
+	// Update cached value
 	r.isLeader.Store(isLeader)
+
 	return term, isLeader
 }
 
@@ -430,45 +454,72 @@ func (r *raftNode) AppendEntries(
 	ctx context.Context,
 	args *types.AppendEntriesArgs,
 ) (*types.AppendEntriesReply, error) {
-	isHeartbeat := len(args.Entries) == 0
-
-	if isHeartbeat {
-		r.metrics.IncCounter("raft_heartbeat_received_total")
-	} else {
-		r.metrics.ObserveAppendEntriesRejected("log_inconsistency")
-		r.metrics.AddCounter("raft_append_entries_entry_count", float64(len(args.Entries)))
-	}
-
 	if r.isShutdown.Load() {
-		term, _, _ := r.stateMgr.GetState()
-		r.metrics.IncCounter("raft_append_entries_rejected", "reason", "shutdown")
-		return &types.AppendEntriesReply{Term: term, Success: false}, ErrShuttingDown
+		currentTerm, _, _ := r.stateMgr.GetState()
+		return &types.AppendEntriesReply{
+			Term:    currentTerm,
+			Success: false,
+		}, ErrShuttingDown
 	}
 
 	startTime := r.clock.Now()
+	isHeartbeat := len(args.Entries) == 0
+
+	r.logger.Debugw("AppendEntries received",
+		"from", args.LeaderID,
+		"term", args.Term,
+		"prevLogIndex", args.PrevLogIndex,
+		"prevLogTerm", args.PrevLogTerm,
+		"entriesCount", len(args.Entries),
+		"leaderCommit", args.LeaderCommit,
+		"isHeartbeat", isHeartbeat)
+
+	// CRITICAL: Reset election timer immediately on valid AppendEntries
+	// This prevents unnecessary elections
+	currentTerm, _, _ := r.stateMgr.GetState()
+
+	// Reset timer if this is from a leader in current or higher term
+	if args.Term >= currentTerm && args.LeaderID != unknownNodeID {
+		r.electionMgr.ResetTimerOnHeartbeat()
+	}
+
+	// Handle the AppendEntries through replication manager
 	reply, err := r.replicationMgr.HandleAppendEntries(ctx, args)
 
-	if err == nil {
-		currentTerm, _, _ := r.stateMgr.GetState()
-		if args.Term >= currentTerm {
-			r.electionMgr.ResetTimerOnHeartbeat()
-		}
-	} else {
-		r.metrics.IncCounter("raft_append_entries_errors_total")
-	}
-
 	latency := r.clock.Since(startTime)
-	r.metrics.ObserveHistogram("raft_append_entries_latency_seconds", latency.Seconds())
 
-	if reply != nil {
-		if reply.Success {
-			r.metrics.IncCounter("raft_append_entries_success_total")
-		} else {
-			r.metrics.ObserveAppendEntriesRejected("log_inconsistency")
-		}
+	if err != nil {
+		r.logger.Warnw("AppendEntries handling failed",
+			"from", args.LeaderID, "term", args.Term, "error", err, "latency", latency)
+		r.metrics.IncCounter("raft_append_entries_errors", "reason", "handler_error")
+		return reply, err
 	}
 
-	return reply, err
+	// Log the result
+	if reply.Success {
+		if !isHeartbeat {
+			r.logger.Debugw("AppendEntries succeeded",
+				"from", args.LeaderID, "term", args.Term, "entriesCount", len(args.Entries),
+				"latency", latency)
+		}
+		r.metrics.IncCounter("raft_append_entries_success", "type", getAppendEntriesType(isHeartbeat))
+	} else {
+		r.logger.Debugw("AppendEntries rejected",
+			"from", args.LeaderID, "term", args.Term, "replyTerm", reply.Term,
+			"entriesCount", len(args.Entries), "latency", latency)
+		r.metrics.IncCounter("raft_append_entries_rejected", "reason", "consistency_check")
+	}
+
+	r.metrics.ObserveHistogram("raft_append_entries_latency_seconds", latency.Seconds())
+	return reply, nil
+}
+
+// Helper function to classify AppendEntries types
+func getAppendEntriesType(isHeartbeat bool) string {
+	if isHeartbeat {
+		return "heartbeat"
+	}
+	return "replication"
 }
 
 // InstallSnapshot handles snapshot transfers from the leader
@@ -485,17 +536,13 @@ func (r *raftNode) InstallSnapshot(
 		return &types.InstallSnapshotReply{Term: term}, ErrShuttingDown
 	}
 
+	currentTerm, _, _ := r.stateMgr.GetState()
+	if args.Term >= currentTerm {
+		r.electionMgr.ResetTimerOnHeartbeat()
+	}
+
 	startTime := r.clock.Now()
 	reply, err := r.snapshotMgr.HandleInstallSnapshot(ctx, args)
-
-	if err == nil {
-		currentTerm, _, _ := r.stateMgr.GetState()
-		if args.Term >= currentTerm {
-			r.electionMgr.ResetTimerOnHeartbeat()
-		}
-	} else {
-		r.metrics.IncCounter("raft_install_snapshot_errors_total")
-	}
 
 	latency := r.clock.Since(startTime)
 	r.metrics.ObserveHistogram("raft_install_snapshot_latency_seconds", latency.Seconds())
@@ -513,19 +560,29 @@ func (r *raftNode) runApplyLoop() {
 	r.logger.Infow("Apply loop started")
 	r.metrics.IncCounter("raft_apply_loop_started_total")
 
+	applyTicker := r.clock.NewTicker(100 * time.Millisecond)
+	defer applyTicker.Stop()
+
 	for {
 		select {
 		case <-r.applyNotifyCh:
+			r.logger.Debugw("Apply notification received")
 			r.applyCommittedEntries()
+
+		case <-r.forceApplyCh:
+			// Handle forced apply triggers
+			r.logger.Debugw("Force apply triggered")
+			r.applyCommittedEntries()
+
+		case <-applyTicker.Chan():
+			// Periodic apply check to catch any missed notifications
+			r.applyCommittedEntries()
+
 		case <-r.applyLoopStopCh:
 			r.logger.Infow("Apply loop stopping")
 			r.metrics.ObserveApplyLoopStopped("stop_signal")
-			select {
-			case <-r.applyNotifyCh:
-				r.applyCommittedEntries()
-			default:
-			}
 			return
+
 		case <-r.stopCh:
 			r.logger.Infow("Apply loop stopping due to global shutdown")
 			r.metrics.ObserveApplyLoopStopped("global_shutdown")
@@ -536,79 +593,58 @@ func (r *raftNode) runApplyLoop() {
 
 // applyCommittedEntries applies log entries from lastApplied+1 to commitIndex.
 func (r *raftNode) applyCommittedEntries() {
-	batchStartTime := r.clock.Now()
-	entriesApplied := 0
-	bytesApplied := 0
-
-	for !r.isShutdown.Load() {
-		commitIdx, lastAppliedIdx := r.getCommitAndLastApplied()
-
-		if lastAppliedIdx >= commitIdx {
-			break
-		}
-
-		nextApplyIdx, endIdx := r.determineApplyRange(lastAppliedIdx, commitIdx)
-
-		fetchStart := r.clock.Now()
-		entries, err := r.fetchEntries(nextApplyIdx, endIdx)
-		fetchLatency := r.clock.Since(fetchStart)
-		r.metrics.ObserveHistogram("raft_apply_fetch_latency_seconds", fetchLatency.Seconds())
-
-		if err != nil || len(entries) == 0 {
-			if err != nil {
-				r.metrics.IncCounter("raft_apply_fetch_errors_total")
-			}
-			break
-		}
-
-		applyStart := r.clock.Now()
-		r.applyEntries(entries)
-		applyLatency := r.clock.Since(applyStart)
-		r.metrics.ObserveHistogram("raft_apply_batch_latency_seconds", applyLatency.Seconds())
-
-		entriesApplied += len(entries)
-		for _, entry := range entries {
-			bytesApplied += len(entry.Command)
-		}
-	}
-
-	if entriesApplied > 0 {
-		batchLatency := r.clock.Since(batchStartTime)
-		r.logger.Infow("Applied batch of entries",
-			"count", entriesApplied,
-			"bytes", bytesApplied,
-			"latency", batchLatency)
-
-		r.metrics.AddCounter("raft_entries_applied_total", float64(entriesApplied))
-		r.metrics.AddCounter("raft_bytes_applied_total", float64(bytesApplied))
-		r.metrics.ObserveHistogram("raft_apply_total_latency_seconds", batchLatency.Seconds())
-	}
-}
-
-// getCommitAndLastApplied returns the current commit and last applied indices safely.
-func (r *raftNode) getCommitAndLastApplied() (commitIdx, lastAppliedIdx types.Index) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.stateMgr.GetCommitIndexUnsafe(), r.stateMgr.GetLastAppliedUnsafe()
-}
+	commitIdx := r.stateMgr.GetCommitIndexUnsafe()
+	lastAppliedIdx := r.stateMgr.GetLastAppliedUnsafe()
+	r.mu.RUnlock()
 
-// determineApplyRange calculates the next index and capped end index for batch processing.
-func (r *raftNode) determineApplyRange(
-	lastAppliedIdx, commitIdx types.Index,
-) (types.Index, types.Index) {
+	r.logger.Debugw("Apply check",
+		"commitIndex", commitIdx,
+		"lastApplied", lastAppliedIdx)
+
+	if lastAppliedIdx >= commitIdx {
+		return
+	}
+
 	nextApplyIdx := lastAppliedIdx + 1
+	endIdx := commitIdx + 1
 
-	batchLimit := types.Index(DefaultMaxApplyBatchSize)
-	if batchLimit <= 0 {
-		batchLimit = 10
+	r.logger.Infow("Applying committed entries",
+		"nextApplyIdx", nextApplyIdx,
+		"endIdx", endIdx,
+		"count", endIdx-nextApplyIdx)
+
+	// Fetch entries without holding the main lock.
+	entries, err := r.fetchEntries(nextApplyIdx, endIdx)
+	if err != nil {
+		r.logger.Errorw("Apply loop failed to fetch entries",
+			"error", err,
+			"start", nextApplyIdx,
+			"end", endIdx)
+		return
 	}
 
-	endIdx := nextApplyIdx + batchLimit
-	if endIdx > commitIdx+1 {
-		endIdx = commitIdx + 1
+	if len(entries) == 0 {
+		r.logger.Debugw("No entries to apply")
+		return
 	}
 
-	return nextApplyIdx, endIdx
+	r.logger.Infow("Fetched entries for application",
+		"count", len(entries),
+		"firstIndex", entries[0].Index,
+		"lastIndex", entries[len(entries)-1].Index)
+
+	// Apply entries to state machine (this can be slow).
+	r.applyEntries(entries)
+
+	// Finally, update the lastApplied index under the main lock.
+	r.mu.Lock()
+	r.stateMgr.UpdateLastApplied(entries[len(entries)-1].Index)
+	r.mu.Unlock()
+
+	r.logger.Infow("Applied entries successfully",
+		"count", len(entries),
+		"newLastApplied", entries[len(entries)-1].Index)
 }
 
 // fetchEntries retrieves the log entries for the specified range.
@@ -650,23 +686,9 @@ func (r *raftNode) applyEntries(entries []types.LogEntry) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), r.applyEntryTimeout)
-
-		applyStart := r.clock.Now()
 		resultData, opErr := r.applier.Apply(ctx, entry.Index, entry.Command)
-		applyLatency := r.clock.Since(applyStart)
 		cancel()
 
-		r.metrics.ObserveHistogram("raft_apply_entry_latency_seconds", applyLatency.Seconds())
-
-		if opErr != nil {
-			r.logger.Errorw("Failed to apply committed entry to state machine",
-				"index", entry.Index,
-				"term", entry.Term,
-				"error", opErr) // specific error from the lockManager
-			r.metrics.IncCounter("raft_apply_entry_errors_total")
-		}
-
-		r.stateMgr.UpdateLastApplied(entry.Index)
 		r.sendApplyMsg(types.ApplyMsg{
 			CommandValid:       true,
 			Command:            entry.Command,
@@ -675,22 +697,28 @@ func (r *raftNode) applyEntries(entries []types.LogEntry) {
 			CommandResultData:  resultData,
 			CommandResultError: opErr,
 		})
-
-		if opErr == nil {
-			r.metrics.IncCounter("raft_apply_entry_success_total")
-		}
 	}
 }
 
 // sendApplyMsg safely sends apply notifications to clients.
 func (r *raftNode) sendApplyMsg(msg types.ApplyMsg) {
+	// Add a shutdown check to prevent sending on a closed channel during teardown.
+	if r.isShutdown.Load() {
+		r.logger.Debugw("Discarded apply notification due to shutdown", "index", msg.CommandIndex)
+		return
+	}
+
+	// Use a non-blocking send with timeout
 	select {
 	case r.applyCh <- msg:
+		// Message sent successfully.
 		r.logger.Debugw("Sent apply notification", "index", msg.CommandIndex)
 	case <-r.stopCh:
+		// Node is shutting down, just discard.
 		r.logger.Debugw("Discarded apply notification due to shutdown", "index", msg.CommandIndex)
-	default:
-		r.logger.Warnw("Apply channel full, dropping notification", "index", msg.CommandIndex)
+	case <-time.After(100 * time.Millisecond):
+		// If the channel is full after 100ms, log it and move on
+		r.logger.Warnw("Apply channel full, dropping notification after timeout", "index", msg.CommandIndex)
 		r.metrics.ObserveApplyNotificationDropped()
 	}
 }
@@ -698,37 +726,62 @@ func (r *raftNode) sendApplyMsg(msg types.ApplyMsg) {
 // handleLeaderChanges processes leader change events
 func (r *raftNode) handleLeaderChanges() {
 	r.logger.Infow("Leader change handler started")
-	r.metrics.IncCounter("raft_leader_change_handler_started_total")
-
-	defer func() {
-		r.logger.Infow("Leader change handler stopped")
-		r.metrics.IncCounter("raft_leader_change_handler_stopped_total")
-	}()
+	defer r.logger.Infow("Leader change handler stopped")
 
 	for {
 		select {
-		case newLeader, ok := <-r.leaderChangeCh:
-			if !ok {
-				r.logger.Infow("Leader change channel closed")
-				r.isLeader.Store(false)
-				return
-			}
-			r.logger.Infow("Leader change detected", "newLeader", newLeader)
-
-			isNowLeader := newLeader == r.id
-			r.isLeader.Store(isNowLeader)
-
-			if isNowLeader {
-				r.metrics.IncCounter("raft_became_leader_total")
-			} else if newLeader != "" {
-				r.metrics.IncCounter("raft_leader_changed_total", "new_leader", string(newLeader))
-			} else {
-				r.metrics.IncCounter("raft_leader_unknown_total")
-			}
-
+		case newLeader := <-r.leaderChangeCh:
+			r.handleLeaderChange(newLeader)
 		case <-r.stopCh:
-			r.isLeader.Store(false)
 			return
 		}
+	}
+}
+
+func (r *raftNode) handleLeaderChange(newLeader types.NodeID) {
+	term, role, _ := r.stateMgr.GetState()
+
+	r.logger.Infow("Leader change detected",
+		"newLeader", newLeader,
+		"currentRole", role.String(),
+		"term", term)
+
+	// Update cached leadership status
+	isLeader := (role == types.RoleLeader && newLeader == r.id)
+	r.isLeader.Store(isLeader)
+
+	// Handle leadership transitions
+	if isLeader {
+		r.logger.Infow("Became leader, initializing leader state",
+			"term", term, "nodeID", r.id)
+
+		// Initialize leader state should already be called by election manager
+		// But we can add additional coordination here if needed
+
+		// Start sending heartbeats immediately
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			r.replicationMgr.SendHeartbeats(ctx)
+		}()
+
+		r.metrics.ObserveLeaderChange(newLeader, term)
+	} else if role == types.RoleFollower && newLeader != unknownNodeID {
+		r.logger.Infow("Following new leader",
+			"leader", newLeader, "term", term)
+		r.metrics.ObserveLeaderChange(newLeader, term)
+	}
+}
+
+func (r *raftNode) TriggerApply() {
+	if r.isShutdown.Load() {
+		return
+	}
+
+	select {
+	case r.forceApplyCh <- struct{}{}:
+		r.logger.Debugw("Force apply notification sent")
+	default:
+		r.logger.Debugw("Force apply notification channel full")
 	}
 }

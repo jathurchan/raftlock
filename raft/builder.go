@@ -110,10 +110,11 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		metrics:             b.metrics,
 		stopCh:              make(chan struct{}),
 		applyCh:             make(chan types.ApplyMsg, maxApplyBatchSize*2),
-		applyNotifyCh:       make(chan struct{}, 1),
+		applyNotifyCh:       make(chan struct{}, 10),
 		leaderChangeCh:      make(chan types.NodeID, 1), // Buffered to prevent blocking
 		applyLoopStopCh:     make(chan struct{}),
 		applyLoopDoneCh:     make(chan struct{}),
+		forceApplyCh:        make(chan struct{}, 1), // Buffered force apply channel
 		applyEntryTimeout:   applyTimeout,
 		fetchEntriesTimeout: fetchTimeout,
 	}

@@ -35,8 +35,6 @@ func setupTestReplicationManager(
 	stateMgr.leaderID = "node1"
 	stateMgr.mu.Unlock()
 
-	applyCh := make(chan struct{}, 10)
-
 	config := Config{
 		ID: "node1",
 		Peers: map[types.NodeID]PeerConfig{
@@ -69,7 +67,6 @@ func setupTestReplicationManager(
 		Logger:         logger.NewNoOpLogger(),
 		Clock:          clock,
 		IsShutdownFlag: isShutdown,
-		ApplyNotifyCh:  applyCh,
 	}
 
 	rm, err := NewReplicationManager(deps)
@@ -86,7 +83,6 @@ func TestRaftReplication_NewReplicationManager(t *testing.T) {
 	var (
 		mu         = &sync.RWMutex{}
 		isShutdown = &atomic.Bool{}
-		applyCh    = make(chan struct{}, 10)
 	)
 
 	config := Config{
@@ -119,7 +115,6 @@ func TestRaftReplication_NewReplicationManager(t *testing.T) {
 		Logger:         logger.NewNoOpLogger(),
 		Clock:          newMockClock(),
 		IsShutdownFlag: isShutdown,
-		ApplyNotifyCh:  applyCh,
 	}
 
 	t.Run("valid initialization", func(t *testing.T) {
@@ -159,7 +154,6 @@ func TestRaftReplication_ValidateReplicationManagerDeps(t *testing.T) {
 		Logger:         logger.NewNoOpLogger(),
 		Clock:          newMockClock(),
 		IsShutdownFlag: &atomic.Bool{},
-		ApplyNotifyCh:  make(chan struct{}, 1),
 	}
 
 	tests := []struct {
@@ -207,11 +201,6 @@ func TestRaftReplication_ValidateReplicationManagerDeps(t *testing.T) {
 			d.Clock = nil
 			return d
 		}, true, "Clock"},
-
-		{"missing ApplyNotifyCh", func(d ReplicationManagerDeps) ReplicationManagerDeps {
-			d.ApplyNotifyCh = nil
-			return d
-		}, true, "ApplyNotifyCh"},
 
 		{"missing IsShutdownFlag", func(d ReplicationManagerDeps) ReplicationManagerDeps {
 			d.IsShutdownFlag = nil

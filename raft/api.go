@@ -94,6 +94,10 @@ type Raft interface {
 	//
 	// The channel remains open during normal operation and is closed after Stop() completes.
 	LeaderChangeChannel() <-chan types.NodeID
+
+	// TriggerApply forces the apply loop to check for and apply any committed entries
+	// This is useful for testing and ensuring entries get applied promptly
+	TriggerApply()
 }
 
 // RPCHandler defines how a Raft node processes incoming RPCs from peers.

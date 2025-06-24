@@ -100,7 +100,7 @@ type ReplicationManagerDeps struct {
 	Logger         logger.Logger
 	Clock          Clock
 	IsShutdownFlag *atomic.Bool
-	ApplyNotifyCh  chan<- struct{} // Channel to notify the core Raft loop to apply entries
+	ApplyNotifyCh  chan struct{}
 }
 
 // validateReplicationManagerDeps checks that all required dependencies are set.
@@ -114,15 +114,8 @@ func validateReplicationManagerDeps(deps ReplicationManagerDeps) error {
 	}
 	checkPtr := func(ptr any, fieldName string) error {
 		v := reflect.ValueOf(ptr)
-		switch v.Kind() {
-		case reflect.Chan, reflect.Func, reflect.Map, reflect.Ptr, reflect.Interface, reflect.Slice:
-			if v.IsNil() {
-				return fmt.Errorf("ReplicationManagerDeps: %s is required", fieldName)
-			}
-		default:
-			if ptr == nil {
-				return fmt.Errorf("ReplicationManagerDeps: %s is required", fieldName)
-			}
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			return fmt.Errorf("ReplicationManagerDeps: %s is required", fieldName)
 		}
 		return nil
 	}
@@ -197,8 +190,8 @@ type replicationManager struct {
 
 	// Signaling pipeline:
 	// replication → notifyCommitCh → commit check → applyNotifyCh → state machine
-	applyNotifyCh  chan<- struct{} // Signals Raft core to apply newly committed log entries
-	notifyCommitCh chan struct{}   // Triggers commit index evaluation after replication events
+	applyNotifyCh  chan struct{} // Signals Raft core to apply newly committed log entries
+	notifyCommitCh chan struct{} // Triggers commit index evaluation after replication events
 }
 
 // NewReplicationManager constructs and initializes a new ReplicationManager instance.
@@ -224,7 +217,7 @@ func NewReplicationManager(deps ReplicationManagerDeps) (ReplicationManager, err
 		logger:             log,
 		clock:              deps.Clock,
 		applyNotifyCh:      deps.ApplyNotifyCh,
-		notifyCommitCh:     make(chan struct{}, 1),
+		notifyCommitCh:     make(chan struct{}, 5),
 		peerStates:         make(map[types.NodeID]*types.PeerState),
 		leaderLeaseEnabled: deps.Cfg.FeatureFlags.EnableLeaderLease,
 	}
@@ -256,7 +249,7 @@ func NewReplicationManager(deps ReplicationManagerDeps) (ReplicationManager, err
 	}
 
 	log.Infow("Replication manager initialized",
-		"peerCount", len(rm.peers)-1, // Exclude self
+		"peerCount", len(rm.peers)-1,
 		"quorumSize", rm.quorumSize,
 		"leaderLease", rm.leaderLeaseEnabled)
 
@@ -276,15 +269,29 @@ func (rm *replicationManager) Tick(ctx context.Context) {
 
 	term, role, _ := rm.stateMgr.GetState()
 	if role != types.RoleLeader {
-		return // Only leaders perform replication tasks.
+		return
 	}
 
-	select {
-	case <-rm.notifyCommitCh:
+	// Check for commit advancement first (this might spawn heartbeats)
+	rm.MaybeAdvanceCommitIndex()
+
+	// Drain any pending commit notifications
+	commitCheckNeeded := false
+	for {
+		select {
+		case <-rm.notifyCommitCh:
+			commitCheckNeeded = true
+		default:
+			goto drainComplete
+		}
+	}
+
+drainComplete:
+	if commitCheckNeeded {
 		rm.MaybeAdvanceCommitIndex()
-	default:
 	}
 
+	// Handle regular heartbeat timing
 	rm.mu.Lock()
 	rm.heartbeatElapsed++
 	elapsed := rm.heartbeatElapsed
@@ -292,7 +299,7 @@ func (rm *replicationManager) Tick(ctx context.Context) {
 
 	shouldSendHeartbeats := elapsed >= interval
 	if shouldSendHeartbeats {
-		rm.heartbeatElapsed = 0 // Reset timer
+		rm.heartbeatElapsed = 0
 	}
 	rm.mu.Unlock()
 
@@ -316,29 +323,35 @@ func (rm *replicationManager) getHeartbeatInterval() int {
 
 // InitializeLeaderState resets peer replication state when this node becomes leader.
 func (rm *replicationManager) InitializeLeaderState() {
-	term, role, _ := rm.stateMgr.GetState()
-	if role != types.RoleLeader {
+	term, role, leaderID := rm.stateMgr.GetState()
+
+	if role != types.RoleLeader || leaderID != rm.id {
 		rm.logger.Warnw("InitializeLeaderState called but node is not leader",
 			"currentRole", role.String(), "term", term)
 		return
 	}
 
-	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
-
 	rm.mu.Lock()
-	defer rm.mu.Unlock()
 
+	// Reset peer tracking
+	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
 	rm.initializeAllPeerStatesLocked(lastLogIndex)
-	rm.heartbeatElapsed = 0 // Reset heartbeat timer
 
+	// Initialize leader lease if enabled
 	if rm.leaderLeaseEnabled {
-		rm.initializeLeaderLeaseLocked(term)
+		rm.leaseExpiry = rm.clock.Now().Add(rm.leaseDuration)
+		rm.logger.Infow("Leader lease initialized",
+			"term", term, "expiresAt", rm.leaseExpiry.Format(time.RFC3339Nano),
+			"duration", rm.leaseDuration)
 	}
 
+	rm.mu.Unlock()
+
 	rm.logger.Infow("Leader state initialized",
-		"term", term,
-		"lastLogIndex", lastLogIndex,
-		"peerCount", len(rm.peerStates)) // peerStates map excludes self
+		"term", term, "lastLogIndex", lastLogIndex, "peerCount", len(rm.peers)-1)
+
+	// CRITICAL: Send immediate heartbeats to assert leadership
+	go rm.sendImmediateLeadershipHeartbeats(term)
 }
 
 // initializeAllPeerStatesLocked sets initial next/match indices for all followers.
@@ -361,6 +374,50 @@ func (rm *replicationManager) initializeAllPeerStatesLocked(lastLogIndex types.I
 	}
 }
 
+func (rm *replicationManager) sendImmediateLeadershipHeartbeats(term types.Term) {
+	// Validate we're still leader
+	currentTerm, role, leaderID := rm.stateMgr.GetState()
+	if role != types.RoleLeader || leaderID != rm.id || currentTerm != term {
+		rm.logger.Warnw("Cannot send leadership heartbeats - lost leadership",
+			"originalTerm", term, "currentTerm", currentTerm,
+			"role", role.String())
+		return
+	}
+
+	rm.logger.Infow("Sending immediate leadership assertion heartbeats",
+		"term", term, "leaderID", rm.id)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	commitIndex := rm.stateMgr.GetCommitIndex()
+	var wg sync.WaitGroup
+
+	// Send heartbeats to all peers concurrently
+	for peerID := range rm.peers {
+		if peerID == rm.id {
+			continue
+		}
+
+		wg.Add(1)
+		go func(peer types.NodeID) {
+			defer wg.Done()
+
+			heartbeatCtx, heartbeatCancel := context.WithTimeout(ctx, 1*time.Second)
+			defer heartbeatCancel()
+
+			rm.logger.Infow("Sending leadership assertion heartbeat",
+				"peer", peer, "term", term, "commitIndex", commitIndex)
+
+			rm.replicateToPeerInternal(heartbeatCtx, peer, term, commitIndex, true)
+		}(peerID)
+	}
+
+	// Wait for all heartbeats to complete
+	wg.Wait()
+	rm.logger.Infow("Leadership assertion heartbeats completed", "term", term)
+}
+
 // initializeLeaderLeaseLocked sets the lease expiry and marks the start of the lease period.
 // Assumes rm.mu Lock is held.
 func (rm *replicationManager) initializeLeaderLeaseLocked(term types.Term) {
@@ -377,33 +434,34 @@ func (rm *replicationManager) initializeLeaderLeaseLocked(term types.Term) {
 // SendHeartbeats broadcasts heartbeat AppendEntries RPCs to all peers.
 // It is a no-op if the node is not the current leader.
 func (rm *replicationManager) SendHeartbeats(ctx context.Context) {
-	if rm.isShutdown.Load() || ctx.Err() != nil {
+	if rm.isShutdown.Load() {
 		return
 	}
 
 	term, role, leaderID := rm.stateMgr.GetState()
-	commitIndex := rm.stateMgr.GetCommitIndex()
-
 	if role != types.RoleLeader || leaderID != rm.id {
-		rm.logger.Debugw("SendHeartbeats skipped: node is not leader",
-			"term", term, "role", role.String(), "leaderID", leaderID)
+		rm.logger.Debugw("Cannot send heartbeats - not leader",
+			"role", role.String(), "leaderID", leaderID)
 		return
 	}
 
-	rm.logger.Debugw("Broadcasting heartbeats",
-		"term", term,
-		"commitIndex", commitIndex,
-		"peerCount", len(rm.peers)-1)
-	rm.metrics.ObserveHeartbeatSent()
+	commitIndex := rm.stateMgr.GetCommitIndex()
 
+	rm.logger.Debugw("Sending heartbeats to all peers",
+		"term", term, "commitIndex", commitIndex, "peerCount", len(rm.peers)-1)
+
+	// Send heartbeats concurrently to all peers
 	for peerID := range rm.peers {
 		if peerID == rm.id {
-			continue // Skip self
+			continue
 		}
 
-		// Using context.Background() here to prevent cancellation if the original Tick context expires,
-		// allowing heartbeats to potentially complete.
-		go rm.replicateToPeerInternal(context.Background(), peerID, term, commitIndex, true)
+		go func(peer types.NodeID) {
+			heartbeatCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+
+			rm.replicateToPeerInternal(heartbeatCtx, peer, term, commitIndex, true)
+		}(peerID)
 	}
 }
 
@@ -416,82 +474,291 @@ func (rm *replicationManager) replicateToPeerInternal(
 	commitIndex types.Index,
 	isHeartbeat bool,
 ) {
-	if rm.isShutdown.Load() || ctx.Err() != nil {
+	if rm.isShutdown.Load() {
+		rm.logger.Debugw("replicateToPeerInternal aborted: shutdown",
+			"peer", peerID, "term", term, "isHeartbeat", isHeartbeat)
 		return
 	}
 
-	nextIndex, snapshotInProgress, ok := rm.getPeerReplicationState(peerID)
-	if !ok {
-		rm.logger.Errorw("Cannot replicate: peer state not found", "peerID", peerID)
-		return // Should not happen
+	if ctx.Err() != nil {
+		rm.logger.Debugw("replicateToPeerInternal aborted: context cancelled",
+			"peer", peerID, "term", term, "isHeartbeat", isHeartbeat, "contextErr", ctx.Err())
+		return
 	}
 
+	rm.logger.Infow("replicateToPeerInternal starting",
+		"peer", peerID, "term", term, "commitIndex", commitIndex, "isHeartbeat", isHeartbeat)
+
+	// Verify we're still the leader for this term
+	currentTerm, role, leaderID := rm.stateMgr.GetState()
+	if role != types.RoleLeader || leaderID != rm.id || currentTerm != term {
+		rm.logger.Warnw("replicateToPeerInternal aborted: leadership lost or term changed",
+			"peer", peerID, "originalTerm", term, "currentTerm", currentTerm,
+			"role", role.String(), "leaderID", leaderID, "expectedLeaderID", rm.id)
+		return
+	}
+
+	// Get peer state safely with minimal lock scope
+	nextIndex, snapshotInProgress := rm.getPeerNextIndexAndSnapshotStatus(peerID)
+	if nextIndex == 0 {
+		rm.logger.Errorw("Cannot replicate: peer state not found", "peerID", peerID)
+		return
+	}
+
+	// Get log state (thread-safe operations)
+	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
 	firstLogIndex := rm.logMgr.GetFirstIndex()
+
+	rm.logger.Infow("Got replication info",
+		"peer", peerID, "nextIndex", nextIndex, "snapshotInProgress", snapshotInProgress,
+		"lastLogIndex", lastLogIndex, "firstLogIndex", firstLogIndex, "isHeartbeat", isHeartbeat)
+
+	// Check if snapshot is needed
 	if nextIndex < firstLogIndex {
 		if snapshotInProgress {
-			rm.logger.Debugw(
-				"Snapshot send already in progress for peer",
-				"peerID",
-				peerID,
-				"nextIndex",
-				nextIndex,
-			)
+			rm.logger.Debugw("Snapshot send already in progress for peer",
+				"peerID", peerID, "nextIndex", nextIndex, "firstLogIndex", firstLogIndex)
 			return
 		}
-		rm.initiateSnapshotIfNeeded(peerID, nextIndex, term, firstLogIndex)
-		return // subsequent replication handled after snapshot completion
+		rm.logger.Infow("Snapshot needed for peer",
+			"peerID", peerID, "nextIndex", nextIndex, "firstLogIndex", firstLogIndex)
+		rm.initiateSnapshotIfNeeded(peerID, term)
+		return
 	}
 
-	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
-
+	// For non-heartbeat calls, check if we actually need to replicate
 	if !isHeartbeat && nextIndex > lastLogIndex {
-		rm.logger.Debugw(
-			"Peer is up-to-date, no replication needed",
-			"peerID",
-			peerID,
-			"nextIndex",
-			nextIndex,
-			"lastLogIndex",
-			lastLogIndex,
-		)
+		rm.logger.Infow("Peer is up-to-date, no replication needed",
+			"peerID", peerID, "nextIndex", nextIndex, "lastLogIndex", lastLogIndex)
 		return
 	}
 
-	prevLogIndex, prevLogTerm, ok := rm.getPrevLogInfo(ctx, peerID, nextIndex, term)
-	if !ok {
+	// Get previous log info for consistency check
+	prevLogIndex, prevLogTerm, prevLogOk := rm.getPrevLogInfoSafe(ctx, peerID, nextIndex, term)
+	if !prevLogOk {
+		rm.logger.Warnw("Failed to get prev log info, aborting replication",
+			"peer", peerID, "nextIndex", nextIndex, "term", term)
 		return
 	}
 
+	rm.logger.Debugw("Got prev log info",
+		"peer", peerID, "prevLogIndex", prevLogIndex, "prevLogTerm", prevLogTerm, "nextIndex", nextIndex)
+
+	// Get entries to send (if not a heartbeat)
 	var entries []types.LogEntry
+	var entriesErr error
+
 	if !isHeartbeat && nextIndex <= lastLogIndex {
-		entries = rm.getEntriesForPeer(ctx, peerID, nextIndex, lastLogIndex, term)
-		if entries == nil && nextIndex <= lastLogIndex {
-			rm.logger.Debugw(
-				"Failed to get entries, possibly due to compaction triggering snapshot",
-				"peerID",
-				peerID,
-				"nextIndex",
-				nextIndex,
-			)
+		rm.logger.Infow("Getting entries for peer",
+			"peer", peerID, "nextIndex", nextIndex, "lastLogIndex", lastLogIndex,
+			"expectedEntries", lastLogIndex-nextIndex+1)
+
+		entries, entriesErr = rm.getEntriesForPeerSafe(ctx, peerID, nextIndex, lastLogIndex, term)
+		if entriesErr != nil {
+			rm.logger.Warnw("Failed to get entries for peer",
+				"peer", peerID, "nextIndex", nextIndex, "lastLogIndex", lastLogIndex, "error", entriesErr)
 			return
 		}
+
+		if entries != nil && len(entries) > 0 {
+			rm.logger.Infow("Successfully got entries for peer",
+				"peer", peerID, "entriesCount", len(entries), "nextIndex", nextIndex,
+				"lastLogIndex", lastLogIndex, "firstEntryIndex", entries[0].Index,
+				"lastEntryIndex", entries[len(entries)-1].Index)
+		}
+	} else {
+		rm.logger.Debugw("No entries needed for this replication",
+			"peer", peerID, "isHeartbeat", isHeartbeat, "nextIndex", nextIndex, "lastLogIndex", lastLogIndex)
 	}
 
+	// Build AppendEntries RPC arguments
 	args := rm.buildAppendEntriesArgs(term, commitIndex, prevLogIndex, prevLogTerm, entries)
-	rm.logReplicationAttempt(peerID, isHeartbeat, entries, prevLogIndex)
 
-	rpcCtx, cancel := context.WithTimeout(ctx, defaultAppendEntriesTimeout)
+	// Log the replication attempt
+	if len(entries) > 0 {
+		rm.logger.Infow("Sending AppendEntries with entries to peer",
+			"peer", peerID, "entriesCount", len(entries), "firstEntry", entries[0].Index,
+			"lastEntry", entries[len(entries)-1].Index, "prevLogIndex", prevLogIndex,
+			"prevLogTerm", prevLogTerm, "commitIndex", commitIndex, "term", term)
+	} else {
+		rm.logger.Debugw("Sending heartbeat to peer",
+			"peer", peerID, "prevLogIndex", prevLogIndex, "prevLogTerm", prevLogTerm,
+			"commitIndex", commitIndex, "term", term)
+	}
+
+	// Send the RPC with timeout
+	rpcCtx, cancel := context.WithTimeout(ctx, rm.getAppendEntriesTimeout(isHeartbeat))
 	defer cancel()
 
 	startTime := rm.clock.Now()
 	reply, err := rm.networkMgr.SendAppendEntries(rpcCtx, peerID, args)
-	rpcLatency := rm.clock.Now().Sub(startTime)
+	rpcLatency := rm.clock.Since(startTime)
 
+	// Handle the response
 	if err != nil {
+		rm.logger.Warnw("AppendEntries RPC failed",
+			"peer", peerID, "error", err, "isHeartbeat", isHeartbeat,
+			"entriesCount", len(entries), "latency", rpcLatency)
 		rm.handleAppendError(peerID, term, err, isHeartbeat, rpcLatency)
 	} else {
+		rm.logger.Infow("AppendEntries RPC succeeded",
+			"peer", peerID, "success", reply.Success, "replyTerm", reply.Term,
+			"isHeartbeat", isHeartbeat, "entriesCount", len(entries), "latency", rpcLatency)
 		rm.handleAppendReply(peerID, term, args, reply, isHeartbeat, rpcLatency)
 	}
+
+	rm.logger.Infow("replicateToPeerInternal completed",
+		"peer", peerID, "term", term, "isHeartbeat", isHeartbeat,
+		"entriesCount", len(entries), "success", err == nil && reply != nil && reply.Success)
+}
+
+// getPeerNextIndexAndSnapshotStatus safely gets peer replication state with minimal lock scope
+func (rm *replicationManager) getPeerNextIndexAndSnapshotStatus(peerID types.NodeID) (nextIndex types.Index, snapshotInProgress bool) {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	state, exists := rm.peerStates[peerID]
+	if !exists {
+		return 0, false
+	}
+	return state.NextIndex, state.SnapshotInProgress
+}
+
+// getReplicationInfo safely gets all replication info needed without holding locks for too long
+func (rm *replicationManager) getReplicationInfo(peerID types.NodeID) (nextIndex types.Index, snapshotInProgress bool, lastLogIndex, firstLogIndex types.Index) {
+	// Get peer state
+	rm.mu.RLock()
+	state, exists := rm.peerStates[peerID]
+	if !exists {
+		rm.mu.RUnlock()
+		return 0, false, 0, 0
+	}
+	nextIndex = state.NextIndex
+	snapshotInProgress = state.SnapshotInProgress
+	rm.mu.RUnlock()
+
+	// Get log indices (these methods are thread-safe)
+	lastLogIndex = rm.logMgr.GetLastIndexUnsafe()
+	firstLogIndex = rm.logMgr.GetFirstIndex()
+
+	return nextIndex, snapshotInProgress, lastLogIndex, firstLogIndex
+}
+
+// getEntriesForPeerSafe retrieves entries without holding locks for too long
+func (rm *replicationManager) getEntriesForPeerSafe(
+	ctx context.Context,
+	peerID types.NodeID,
+	nextIndex, lastLogIndex types.Index,
+	term types.Term,
+) ([]types.LogEntry, error) {
+	rm.logger.Infow("getEntriesForPeerSafeNew called",
+		"peer", peerID, "nextIndex", nextIndex, "lastLogIndex", lastLogIndex, "term", term)
+
+	// Determine batch size
+	maxEntries := rm.cfg.Options.MaxLogEntriesPerRequest
+	if maxEntries <= 0 {
+		maxEntries = 100 // Default reasonable batch size
+	}
+
+	endIndex := min(nextIndex+types.Index(maxEntries), lastLogIndex+1)
+
+	rm.logger.Infow("getEntriesForPeerSafeNew range calculated",
+		"peer", peerID, "nextIndex", nextIndex, "endIndex", endIndex,
+		"maxEntries", maxEntries, "lastLogIndex", lastLogIndex, "requestedRange", endIndex-nextIndex)
+
+	if nextIndex >= endIndex {
+		rm.logger.Infow("getEntriesForPeerSafeNew: no entries needed (nextIndex >= endIndex)",
+			"peer", peerID, "nextIndex", nextIndex, "endIndex", endIndex)
+		return []types.LogEntry{}, nil // Return empty slice, not nil
+	}
+
+	// Use a reasonable timeout for fetching entries
+	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	rm.logger.Infow("getEntriesForPeerSafeNew: calling logMgr.GetEntries",
+		"peer", peerID, "start", nextIndex, "end", endIndex, "expectedCount", endIndex-nextIndex)
+
+	entries, err := rm.logMgr.GetEntries(fetchCtx, nextIndex, endIndex)
+
+	rm.logger.Infow("getEntriesForPeerSafeNew: logMgr.GetEntries returned",
+		"peer", peerID, "entriesCount", len(entries), "error", err,
+		"requestedStart", nextIndex, "requestedEnd", endIndex)
+
+	if err != nil {
+		if errors.Is(err, ErrCompacted) {
+			rm.logger.Infow("Required log entries compacted, initiating snapshot",
+				"peerID", peerID, "requestedStart", nextIndex, "requestedEnd", endIndex)
+			rm.startSnapshotForPeer(peerID, term)
+			return nil, fmt.Errorf("log entries compacted: %w", err)
+		}
+
+		rm.logger.Warnw("Failed to get log entries for peer",
+			"peerID", peerID, "start", nextIndex, "end", endIndex, "error", err)
+		rm.metrics.ObservePeerReplication(peerID, false, ReplicationResultFailed)
+		return nil, fmt.Errorf("failed to get log entries: %w", err)
+	}
+
+	if len(entries) == 0 && endIndex > nextIndex {
+		rm.logger.Warnw("LogManager.GetEntries returned empty slice for non-empty range",
+			"peerID", peerID, "nextIndex", nextIndex, "endIndex", endIndex, "expectedCount", endIndex-nextIndex)
+		return nil, fmt.Errorf("log manager returned empty entries for range [%d, %d)", nextIndex, endIndex)
+	}
+
+	// Validate the returned entries
+	if len(entries) > 0 {
+		expectedFirstIndex := nextIndex
+		actualFirstIndex := entries[0].Index
+		actualLastIndex := entries[len(entries)-1].Index
+
+		if actualFirstIndex != expectedFirstIndex {
+			rm.logger.Errorw("GetEntries returned entries with wrong starting index",
+				"peerID", peerID, "expectedFirstIndex", expectedFirstIndex,
+				"actualFirstIndex", actualFirstIndex, "entriesCount", len(entries))
+			return nil, fmt.Errorf("entries validation failed: expected first index %d, got %d",
+				expectedFirstIndex, actualFirstIndex)
+		}
+
+		// Check that entries are contiguous
+		for i := 1; i < len(entries); i++ {
+			if entries[i].Index != entries[i-1].Index+1 {
+				rm.logger.Errorw("GetEntries returned non-contiguous entries",
+					"peerID", peerID, "entryAt", i-1, "index", entries[i-1].Index,
+					"nextEntryAt", i, "index", entries[i].Index)
+				return nil, fmt.Errorf("non-contiguous entries: index %d followed by %d",
+					entries[i-1].Index, entries[i].Index)
+			}
+		}
+
+		rm.logger.Infow("getEntriesForPeerSafeNew: entries validated successfully",
+			"peer", peerID, "entriesCount", len(entries), "firstIndex", actualFirstIndex,
+			"lastIndex", actualLastIndex, "expectedFirstIndex", expectedFirstIndex)
+	}
+
+	rm.logger.Infow("getEntriesForPeerSafeNew: returning entries",
+		"peer", peerID, "entriesCount", len(entries),
+		"firstIndex", func() types.Index {
+			if len(entries) > 0 {
+				return entries[0].Index
+			}
+			return 0
+		}(),
+		"lastIndex", func() types.Index {
+			if len(entries) > 0 {
+				return entries[len(entries)-1].Index
+			}
+			return 0
+		}())
+
+	return entries, nil
+}
+
+// getAppendEntriesTimeout returns appropriate timeout based on operation type
+func (rm *replicationManager) getAppendEntriesTimeout(isHeartbeat bool) time.Duration {
+	if isHeartbeat {
+		return 1 * time.Second // Short timeout for heartbeats
+	}
+	return 3 * time.Second // Longer timeout for actual replication
 }
 
 // getPeerReplicationState safely returns the peer's nextIndex and snapshotInProgress status.
@@ -510,21 +777,17 @@ func (rm *replicationManager) getPeerReplicationState(
 // initiateSnapshotIfNeeded attempts to start a snapshot transfer if one isn't already running.
 func (rm *replicationManager) initiateSnapshotIfNeeded(
 	peerID types.NodeID,
-	peerNextIndex types.Index,
 	term types.Term,
-	localFirstIndex types.Index,
 ) {
 	if rm.startSnapshotIfNotInProgress(peerID, term) {
 		rm.logger.Infow("Initiating snapshot transfer due to log gap",
-			"peerID", peerID,
-			"peerNextIndex", peerNextIndex,
-			"localFirstIndex", localFirstIndex)
+			"peerID", peerID)
 	}
 }
 
 // getPrevLogInfo returns the index and term of the entry preceding nextIndex.
 // Returns ok=false if info cannot be retrieved (e.g., compacted).
-func (rm *replicationManager) getPrevLogInfo(
+func (rm *replicationManager) getPrevLogInfoSafe(
 	ctx context.Context,
 	peerID types.NodeID,
 	nextIndex types.Index,
@@ -535,26 +798,30 @@ func (rm *replicationManager) getPrevLogInfo(
 	}
 
 	prevLogIndex = nextIndex - 1
-	fetchCtx, cancel := context.WithTimeout(ctx, defaultTermFetchTimeout)
+
+	// Use a short timeout for getting the term
+	fetchCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
+
+	rm.logger.Debugw("getPrevLogInfoSafe: fetching term for prevLogIndex",
+		"peer", peerID, "prevLogIndex", prevLogIndex)
 
 	prevLogTerm, err := rm.logMgr.GetTerm(fetchCtx, prevLogIndex)
 	if err != nil {
 		if errors.Is(err, ErrCompacted) {
 			rm.logger.Infow("Previous log entry compacted, initiating snapshot",
-				"peerID", peerID,
-				"prevLogIndex", prevLogIndex,
-				"nextIndex", nextIndex)
-
+				"peerID", peerID, "prevLogIndex", prevLogIndex, "nextIndex", nextIndex)
 			rm.startSnapshotForPeer(peerID, term)
 		} else {
 			rm.logger.Warnw("Failed to get term for prevLogIndex",
-				"peerID", peerID,
-				"prevLogIndex", prevLogIndex,
-				"error", err)
+				"peerID", peerID, "prevLogIndex", prevLogIndex, "error", err)
 		}
 		return 0, 0, false
 	}
+
+	rm.logger.Debugw("getPrevLogInfoSafe: successfully got prevLog info",
+		"peer", peerID, "prevLogIndex", prevLogIndex, "prevLogTerm", prevLogTerm)
+
 	return prevLogIndex, prevLogTerm, true
 }
 
@@ -566,33 +833,49 @@ func (rm *replicationManager) getEntriesForPeer(
 	nextIndex, lastLogIndex types.Index,
 	term types.Term,
 ) []types.LogEntry {
+	rm.logger.Infow("getEntriesForPeer called",
+		"peer", peerID,
+		"nextIndex", nextIndex,
+		"lastLogIndex", lastLogIndex,
+		"term", term)
+
 	maxEntries := rm.cfg.Options.MaxLogEntriesPerRequest
 	if maxEntries <= 0 {
 		maxEntries = DefaultMaxLogEntriesPerRequest
 	}
 
-	endIndex := nextIndex + types.Index(maxEntries)
-	if endIndex > lastLogIndex+1 {
-		endIndex = lastLogIndex + 1
-	}
+	endIndex := min(nextIndex+types.Index(maxEntries), lastLogIndex+1)
+
+	rm.logger.Infow("getEntriesForPeer range calculated",
+		"peer", peerID,
+		"nextIndex", nextIndex,
+		"endIndex", endIndex,
+		"maxEntries", maxEntries,
+		"lastLogIndex", lastLogIndex)
 
 	if nextIndex >= endIndex {
-		rm.logger.Warnw(
-			"Calculated empty range for getEntriesForPeer",
-			"peerID",
-			peerID,
-			"nextIndex",
-			nextIndex,
-			"endIndex",
-			endIndex,
-		)
-		return nil // Should not happen
+		rm.logger.Infow("getEntriesForPeer: no entries needed (nextIndex >= endIndex)",
+			"peer", peerID,
+			"nextIndex", nextIndex,
+			"endIndex", endIndex)
+		return nil
 	}
 
 	fetchCtx, cancel := context.WithTimeout(ctx, defaultLogFetchTimeout)
 	defer cancel()
 
+	rm.logger.Infow("getEntriesForPeer: about to call logMgr.GetEntries",
+		"peer", peerID,
+		"start", nextIndex,
+		"end", endIndex)
+
 	entries, err := rm.logMgr.GetEntries(fetchCtx, nextIndex, endIndex)
+
+	rm.logger.Infow("getEntriesForPeer: logMgr.GetEntries returned",
+		"peer", peerID,
+		"entriesCount", len(entries),
+		"error", err)
+
 	if err != nil {
 		if errors.Is(err, ErrCompacted) {
 			rm.logger.Infow("Required log entries compacted, initiating snapshot",
@@ -620,6 +903,10 @@ func (rm *replicationManager) getEntriesForPeer(
 		rm.metrics.ObservePeerReplication(peerID, false, ReplicationResultFailed)
 		return nil
 	}
+
+	rm.logger.Infow("getEntriesForPeer: returning entries",
+		"peer", peerID,
+		"entriesCount", len(entries))
 
 	return entries
 }
@@ -657,7 +944,6 @@ func (rm *replicationManager) startSnapshotIfNotInProgress(
 	peerState.SnapshotInProgress = true
 	rm.mu.Unlock()
 
-	// Run snapshot send in a separate goroutine with Background context.
 	go rm.snapshotMgr.SendSnapshot(context.Background(), peerID, term)
 	return true
 }
@@ -674,7 +960,7 @@ func (rm *replicationManager) buildAppendEntriesArgs(
 		LeaderID:     rm.id,
 		PrevLogIndex: prevLogIndex,
 		PrevLogTerm:  prevLogTerm,
-		Entries:      entries, // empty for heartbeats
+		Entries:      entries,
 		LeaderCommit: commitIndex,
 	}
 }
@@ -706,27 +992,15 @@ func (rm *replicationManager) handleAppendError(
 	isHeartbeat bool,
 	latency time.Duration,
 ) {
-	errType := "unknown"
 	level := rm.logger.Warnw
-
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		errType = "timeout"
-	case errors.Is(err, context.Canceled):
-		errType = "canceled"
+	if errors.Is(err, context.Canceled) {
 		level = rm.logger.Debugw
-	case errors.Is(err, ErrPeerNotFound):
-		errType = "peer_not_found"
-		level = rm.logger.Errorw
-	default:
-		level = rm.logger.Errorw // Treat unexpected errors more seriously
 	}
 
 	level("AppendEntries RPC failed",
 		"peerID", peerID,
 		"term", term,
 		"error", err,
-		"errorType", errType,
 		"isHeartbeat", isHeartbeat,
 		"latency", latency)
 
@@ -752,10 +1026,21 @@ func (rm *replicationManager) handleAppendReply(
 	isHeartbeat bool,
 	rpcLatency time.Duration,
 ) {
+	rm.logger.Debugw("Received AppendEntries reply",
+		"peer", peerID,
+		"term", term,
+		"success", reply.Success,
+		"replyTerm", reply.Term,
+		"isHeartbeat", isHeartbeat,
+		"latency", rpcLatency)
+
+	// Pass an empty NodeID as the leader hint, because a reply from a follower
+	// does not signify a new leader. This prevents the state manager from getting
+	// confused and logging misleading warnings.
 	steppedDown, previousLocalTerm := rm.stateMgr.CheckTermAndStepDown(
 		context.Background(),
 		reply.Term,
-		peerID,
+		"",
 	)
 
 	if steppedDown {
@@ -763,7 +1048,6 @@ func (rm *replicationManager) handleAppendReply(
 			"peerID", peerID,
 			"replyTerm", reply.Term,
 			"previousLocalTerm", previousLocalTerm)
-
 		if isHeartbeat {
 			rm.metrics.ObserveHeartbeat(peerID, false, rpcLatency)
 		} else {
@@ -783,75 +1067,105 @@ func (rm *replicationManager) handleAppendReply(
 
 	if reply.Success {
 		rm.mu.Lock()
-		peerState, exists := rm.peerStates[peerID]
-		if exists {
-			now := rm.clock.Now()
-			peerState.IsActive = true
-			peerState.LastActive = now
-
-			if len(sentArgs.Entries) > 0 {
-				lastIndexSent := sentArgs.Entries[len(sentArgs.Entries)-1].Index
-				if lastIndexSent > peerState.MatchIndex {
-					peerState.MatchIndex = lastIndexSent
-				}
-				peerState.NextIndex = peerState.MatchIndex + 1
-			} else { // successful heartbeat
-				expectedNext := sentArgs.PrevLogIndex + 1
-				if expectedNext > peerState.NextIndex {
-					// Avoid regressing nextIndex if other entries were replicated between heartbeats
-					peerState.NextIndex = expectedNext
-				}
-				// Can happen if heartbeats succeed while entries fail/are slow
-				if sentArgs.PrevLogIndex > peerState.MatchIndex {
-					peerState.MatchIndex = sentArgs.PrevLogIndex
-				}
-			}
-			rm.logger.Debugw(
-				"AppendEntries success: updated peer state",
-				"peerID",
-				peerID,
-				"matchIndex",
-				peerState.MatchIndex,
-				"nextIndex",
-				peerState.NextIndex,
-			)
-		} else {
-			rm.logger.Errorw("Peer state not found during successful append reply handling", "peerID", peerID)
-		}
+		updated := rm.updatePeerStateOnSuccessLocked(peerID, sentArgs, isHeartbeat, rpcLatency)
 		rm.mu.Unlock()
 
-		if isHeartbeat && rm.leaderLeaseEnabled {
-			rm.updateLeaderLeaseOnQuorum()
+		if updated {
+			// Trigger commit check asynchronously to avoid blocking
+			go rm.MaybeAdvanceCommitIndex()
 		}
-
-		if isHeartbeat {
-			rm.metrics.ObserveHeartbeat(peerID, true, rpcLatency)
-		} else if len(sentArgs.Entries) > 0 {
-			rm.metrics.ObservePeerReplication(peerID, true, ReplicationResultSuccess)
-		}
-
-		rm.triggerCommitCheck()
 	} else {
 		rm.handleLogInconsistency(peerID, term, reply, isHeartbeat, rpcLatency)
 	}
 }
 
+// / updatePeerStateOnSuccessLocked updates peer state assuming the caller holds the lock.
+// It returns true if the peer's matchIndex was advanced.
+func (rm *replicationManager) updatePeerStateOnSuccessLocked(
+	peerID types.NodeID,
+	sentArgs *types.AppendEntriesArgs,
+	isHeartbeat bool,
+	rpcLatency time.Duration,
+) bool {
+	peerState, exists := rm.peerStates[peerID]
+	if !exists {
+		rm.logger.Errorw("Peer state not found during successful append handling", "peerID", peerID)
+		return false
+	}
+
+	peerState.IsActive = true
+	peerState.LastActive = rm.clock.Now()
+
+	var matchIndexAdvanced bool
+
+	// If entries were sent, success means the peer's log now matches up to the last new entry.
+	if len(sentArgs.Entries) > 0 {
+		newMatchIndex := sentArgs.Entries[len(sentArgs.Entries)-1].Index
+		if newMatchIndex > peerState.MatchIndex {
+			peerState.MatchIndex = newMatchIndex
+			peerState.NextIndex = newMatchIndex + 1
+			matchIndexAdvanced = true
+		}
+	} else {
+		// If it was a heartbeat, success means the peer's log is consistent up to PrevLogIndex.
+		// The leader's view of the follower's state should reflect this.
+		if sentArgs.PrevLogIndex > peerState.MatchIndex {
+			peerState.MatchIndex = sentArgs.PrevLogIndex
+			matchIndexAdvanced = true
+		}
+
+		// Also ensure nextIndex is at least one greater than the now-confirmed matchIndex.
+		if peerState.NextIndex <= peerState.MatchIndex {
+			peerState.NextIndex = peerState.MatchIndex + 1
+		}
+	}
+
+	if matchIndexAdvanced {
+		rm.logger.Debugw("Updated peer replication state",
+			"peerID", peerID,
+			"newMatchIndex", peerState.MatchIndex,
+			"newNextIndex", peerState.NextIndex)
+	}
+
+	if isHeartbeat {
+		rm.metrics.ObserveHeartbeat(peerID, true, rpcLatency)
+		rm.updateLeaderLeaseOnQuorum()
+	} else {
+		rm.metrics.ObservePeerReplication(peerID, true, ReplicationResultSuccess)
+	}
+
+	return matchIndexAdvanced
+}
+
 // updateLeaderLeaseOnQuorum checks if a quorum of heartbeats has been received recently
 // and updates the lease expiry if so. This is a more robust way than updating on every single heartbeat ack.
 func (rm *replicationManager) updateLeaderLeaseOnQuorum() {
-	// TODO: Implement updateLeaderLeaseOnQuorum
-	// The Raft paper suggests confirming with a quorum within the election timeout.
-	// Keeping the simpler version for now: updating leaseExpiry on every successful
-	// heartbeat response from a peer.
-	rm.updateLeaderLease()
+	if !rm.leaderLeaseEnabled {
+		return
+	}
+
+	now := rm.clock.Now()
+	activeCount := 1 // Leader is always active
+
+	for _, state := range rm.peerStates {
+		if state.IsActive && now.Sub(state.LastActive) < rm.leaseDuration {
+			activeCount++
+		}
+	}
+
+	if activeCount >= rm.quorumSize {
+		rm.leaseExpiry = now.Add(rm.leaseDuration)
+		rm.lastQuorumHeartbeat = now
+		rm.logger.Debugw("Leader lease renewed by quorum",
+			"activeCount", activeCount,
+			"quorumSize", rm.quorumSize,
+			"newExpiry", rm.leaseExpiry.Format(time.RFC3339Nano))
+	}
 }
 
 // updateLeaderLease refreshes the leader lease based on the current time.
 // Called after confirming activity (e.g., successful heartbeat reply).
 func (rm *replicationManager) updateLeaderLease() {
-	rm.mu.Lock()
-	defer rm.mu.Unlock()
-
 	if !rm.leaderLeaseEnabled {
 		return
 	}
@@ -888,17 +1202,11 @@ func (rm *replicationManager) triggerCommitCheck() {
 		return
 	}
 
-	rm.mu.RLock()
-	defer rm.mu.RUnlock()
-
-	select {
-	case rm.notifyCommitCh <- struct{}{}:
-		rm.logger.Debugw("Commit check triggered")
-		rm.metrics.ObserveCommitCheckTriggered()
-	default:
-		rm.logger.Debugw("Commit check already pending (notification channel full)")
-		rm.metrics.ObserveCommitCheckPending()
-	}
+	go func() {
+		// Small delay to let replication settle
+		time.Sleep(10 * time.Millisecond)
+		rm.MaybeAdvanceCommitIndex()
+	}()
 }
 
 // handleLogInconsistency adjusts a peer's nextIndex in response to a failed AppendEntries reply.
@@ -930,44 +1238,19 @@ func (rm *replicationManager) handleLogInconsistency(
 
 	if reply.ConflictTerm > 0 {
 		conflictTermIndex, findErr := rm.findLastLogEntryWithTerm(reply.ConflictTerm)
-		if findErr == nil {
-			if conflictTermIndex >= peerState.NextIndex {
-				rm.logger.Debugw(
-					"Conflict term optimization skipped: found index not less than nextIndex",
-					"peerID",
-					peerID,
-					"foundIndex",
-					conflictTermIndex,
-					"nextIndex",
-					peerState.NextIndex,
-				)
-				peerState.NextIndex = max(1, reply.ConflictIndex)
-			} else {
-				peerState.NextIndex = max(1, conflictTermIndex+1)
-				rm.logger.Infow("Log inconsistency: Rolling back using ConflictTerm", "peerID", peerID, "conflictTerm", reply.ConflictTerm, "setNextIndex", peerState.NextIndex)
-			}
+		if findErr == nil && conflictTermIndex < peerState.NextIndex {
+			peerState.NextIndex = max(1, conflictTermIndex+1)
 		} else {
 			peerState.NextIndex = max(1, reply.ConflictIndex)
-			rm.logger.Infow("Log inconsistency: Rolling back using ConflictIndex (ConflictTerm not found locally)", "peerID", peerID, "conflictIndex", reply.ConflictIndex, "setNextIndex", peerState.NextIndex)
 		}
 	} else if reply.ConflictIndex > 0 {
 		peerState.NextIndex = max(1, reply.ConflictIndex)
-		rm.logger.Infow("Log inconsistency: Rolling back using ConflictIndex", "peerID", peerID, "conflictIndex", reply.ConflictIndex, "setNextIndex", peerState.NextIndex)
 	} else {
 		peerState.NextIndex = max(1, peerState.NextIndex-1)
-		rm.logger.Infow("Log inconsistency: No conflict info, decrementing nextIndex", "peerID", peerID, "setNextIndex", peerState.NextIndex)
 	}
 
-	// Can happen if the inconsistency reply also carries info about the last matching entry.
 	if reply.MatchIndex > 0 && reply.MatchIndex > peerState.MatchIndex {
 		peerState.MatchIndex = reply.MatchIndex
-		rm.logger.Debugw(
-			"Updated peer MatchIndex based on hint in failed reply",
-			"peerID",
-			peerID,
-			"newMatchIndex",
-			peerState.MatchIndex,
-		)
 	}
 
 	rm.logger.Debugw("Adjusted peer state due to log inconsistency",
@@ -985,19 +1268,11 @@ func (rm *replicationManager) handleLogInconsistency(
 // findLastLogEntryWithTerm searches the leader's log backwards for the last entry matching the given term.
 // Used in the log rollback optimization. Returns the index if found, or an error.
 func (rm *replicationManager) findLastLogEntryWithTerm(term types.Term) (types.Index, error) {
-	searchHint := types.Index(0) // Start search from the very end
-
 	ctx, cancel := context.WithTimeout(context.Background(), defaultLogFetchTimeout)
 	defer cancel()
 
-	index, err := rm.logMgr.FindLastEntryWithTermUnsafe(ctx, term, searchHint)
+	index, err := rm.logMgr.FindLastEntryWithTermUnsafe(ctx, term, 0)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			rm.logger.Debugw("LogManager could not find last entry for term", "term", term)
-			return 0, fmt.Errorf("term %d not found in local log: %w", term, err)
-		}
-
-		rm.logger.Warnw("Error searching log for last entry with term", "term", term, "error", err)
 		return 0, fmt.Errorf("failed searching log for term %d: %w", term, err)
 	}
 
@@ -1009,86 +1284,85 @@ func (rm *replicationManager) MaybeAdvanceCommitIndex() {
 	if rm.isShutdown.Load() {
 		return
 	}
+	rm.mu.Lock()
+	shouldSendHeartbeats := rm.maybeAdvanceCommitIndexLocked()
+	rm.mu.Unlock()
 
-	currentTerm, role, _ := rm.stateMgr.GetState()
-	if role != types.RoleLeader {
-		return // Only leaders advance commit index this way
-	}
-
-	oldCommitIndex := rm.stateMgr.GetCommitIndex()
-	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
-
-	if oldCommitIndex == lastLogIndex {
-		return
-	}
-
-	matchIndices := rm.collectMatchIndices(lastLogIndex)
-	potentialCommitIndex := rm.calculateQuorumMatchIndex(matchIndices)
-
-	if potentialCommitIndex <= oldCommitIndex {
-		return
-	}
-
-	if ok, err := rm.isEntryFromCurrentTerm(potentialCommitIndex, currentTerm); !ok {
-		if err != nil {
-			rm.logger.Warnw("Failed to check term for potential commit index",
-				"index", potentialCommitIndex, "term", currentTerm, "error", err)
-		}
-		return
-	}
-
-	if rm.stateMgr.UpdateCommitIndex(potentialCommitIndex) {
-		rm.logger.Infow("Commit index advanced",
-			"oldCommitIndex", oldCommitIndex,
-			"newCommitIndex", potentialCommitIndex,
-			"term", currentTerm)
-
-		rm.triggerApplyNotify()
+	if shouldSendHeartbeats {
+		go rm.SendHeartbeats(context.Background())
 	}
 }
 
-// collectMatchIndices gathers match indices from all peers plus the leader's own last index.
-func (rm *replicationManager) collectMatchIndices(leaderLastIndex types.Index) []types.Index {
+// maybeAdvanceCommitIndexLocked is the internal implementation that assumes the caller holds the lock.
+func (rm *replicationManager) maybeAdvanceCommitIndexLocked() bool {
+	currentTerm, role, leaderID := rm.stateMgr.GetStateUnsafe()
+	if role != types.RoleLeader || leaderID != rm.id {
+		return false
+	}
+
+	oldCommitIndex := rm.stateMgr.GetCommitIndexUnsafe()
+	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
+
+	if oldCommitIndex >= lastLogIndex {
+		return false
+	}
+
+	matchIndices := rm.collectMatchIndicesLocked(lastLogIndex)
+	potentialCommitIndex := rm.calculateQuorumMatchIndex(matchIndices)
+
+	if potentialCommitIndex <= oldCommitIndex {
+		return false
+	}
+
+	ok, err := rm.isEntryFromCurrentTerm(potentialCommitIndex, currentTerm)
+	if err != nil {
+		rm.logger.Warnw("Failed to check term for potential commit index",
+			"index", potentialCommitIndex, "term", currentTerm, "error", err)
+		return false
+	}
+
+	if !ok {
+		return false
+	}
+
+	if rm.stateMgr.UpdateCommitIndexUnsafe(potentialCommitIndex) {
+		rm.logger.Infow("Commit index advanced",
+			"oldCommitIndex", oldCommitIndex,
+			"newCommitIndex", potentialCommitIndex,
+			"term", currentTerm,
+			"matchIndices", matchIndices)
+
+		rm.triggerApplyNotify()
+		return true
+	}
+
+	return false
+}
+
+// collectMatchIndicesLocked gathers match indices from all peers plus the leader's own last index.
+func (rm *replicationManager) collectMatchIndicesLocked(leaderLastIndex types.Index) []types.Index {
 	matchIndices := make([]types.Index, 0, len(rm.peers))
 
+	// The leader's own log is always considered matched up to its last index.
 	matchIndices = append(matchIndices, leaderLastIndex)
 
-	rm.mu.RLock()
-	for peerID, state := range rm.peerStates {
-		if peerID != rm.id {
-			matchIndices = append(matchIndices, state.MatchIndex)
-		}
+	// Correctly append the MatchIndex from each peer's state.
+	for _, peerState := range rm.peerStates {
+		matchIndices = append(matchIndices, peerState.MatchIndex)
 	}
-	rm.mu.RUnlock()
 
 	return matchIndices
 }
 
 // calculateQuorumMatchIndex finds the highest index replicated on a quorum of nodes.
 func (rm *replicationManager) calculateQuorumMatchIndex(matchIndices []types.Index) types.Index {
-	if len(matchIndices) == 0 {
+	if len(matchIndices) < rm.quorumSize {
 		return 0
 	}
-
-	sort.Slice(matchIndices, func(i, j int) bool { // Sort in ascending order
-		return matchIndices[i] < matchIndices[j]
+	sort.Slice(matchIndices, func(i, j int) bool {
+		return matchIndices[i] > matchIndices[j]
 	})
-
-	// The index at position `len(matchIndices) - quorumSize` (0-based)
-	// is the highest index replicated on at least `quorumSize` nodes.
-	quorumPos := len(matchIndices) - rm.quorumSize
-	if quorumPos < 0 {
-		rm.logger.Errorw(
-			"Invalid quorum calculation",
-			"matchIndicesCount",
-			len(matchIndices),
-			"quorumSize",
-			rm.quorumSize,
-		)
-		return 0
-	}
-
-	return matchIndices[quorumPos]
+	return matchIndices[rm.quorumSize-1]
 }
 
 // isEntryFromCurrentTerm checks if the log entry at the given index was created in the current leader term.
@@ -1118,14 +1392,20 @@ func (rm *replicationManager) isEntryFromCurrentTerm(
 
 // triggerApplyNotify attempts to notify the apply loop non-blockingly.
 func (rm *replicationManager) triggerApplyNotify() {
-	select {
-	case rm.applyNotifyCh <- struct{}{}:
-		rm.logger.Debugw("Apply notification sent")
-	default:
-		// Apply loop slow or blocked?
-		rm.logger.Warnw("Apply notification channel full; apply task potentially delayed")
-		rm.metrics.ObserveApplyNotificationDropped()
+	if rm.isShutdown.Load() {
+		return
 	}
+
+	// Send notification asynchronously to avoid blocking the caller while holding locks
+	go func() {
+		select {
+		case rm.applyNotifyCh <- struct{}{}:
+			rm.logger.Debugw("Apply notification sent")
+		case <-time.After(100 * time.Millisecond):
+			rm.logger.Warnw("Apply notification timeout, potentially delayed")
+			rm.metrics.ObserveApplyNotificationDropped()
+		}
+	}()
 }
 
 // Propose appends a command to the log if leader and starts replication.
@@ -1137,23 +1417,35 @@ func (rm *replicationManager) Propose(
 		return 0, 0, false, ErrShuttingDown
 	}
 
+	// STEP 1: Validate leadership immediately
 	term, role, leaderID := rm.stateMgr.GetState()
-
-	if role != types.RoleLeader || leaderID != rm.id { // Only leaders can propose
+	if role != types.RoleLeader || leaderID != rm.id {
 		rm.metrics.ObserveProposal(false, ProposalResultNotLeader)
 		return 0, 0, false, ErrNotLeader
 	}
 
+	rm.logger.Infow("Starting proposal process",
+		"term", term,
+		"commandSize", len(command),
+		"role", role.String(),
+		"leaderID", leaderID)
+
+	// STEP 2: Prepare log entry
 	lastIndex := rm.logMgr.GetLastIndexUnsafe()
 	newIndex := lastIndex + 1
+
 	entry := types.LogEntry{
 		Term:    term,
 		Index:   newIndex,
 		Command: command,
 	}
 
-	appendCtx, cancel := context.WithTimeout(ctx, defaultLogFetchTimeout)
+	// STEP 3: Append to local log with leadership re-validation
+	appendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+
+	rm.logger.Debugw("Appending entry to local log",
+		"index", newIndex, "term", term, "commandSize", len(command))
 
 	if err = rm.logMgr.AppendEntries(appendCtx, []types.LogEntry{entry}); err != nil {
 		rm.logger.Errorw("Failed to append proposed entry to local log",
@@ -1162,40 +1454,216 @@ func (rm *replicationManager) Propose(
 		return 0, term, true, fmt.Errorf("local log append failed: %w", err)
 	}
 
-	rm.logger.Debugw("Appended proposed command to local log",
+	// STEP 4: Re-validate leadership after log append
+	currentTerm, currentRole, currentLeaderID := rm.stateMgr.GetState()
+	if currentRole != types.RoleLeader || currentLeaderID != rm.id || currentTerm != term {
+		rm.logger.Warnw("Lost leadership during proposal, but entry was appended",
+			"originalTerm", term, "currentTerm", currentTerm,
+			"originalRole", role.String(), "currentRole", currentRole.String(),
+			"index", newIndex)
+
+		// Entry was appended but we lost leadership - still return success
+		// The new leader will handle replication
+		rm.metrics.ObserveProposal(true, ProposalResultNotLeader)
+		return newIndex, term, false, nil
+	}
+
+	// STEP 5: Verify append was successful
+	verifyLastIndex := rm.logMgr.GetLastIndexUnsafe()
+	if verifyLastIndex != newIndex {
+		rm.logger.Errorw("Log append verification failed",
+			"expectedIndex", newIndex, "actualIndex", verifyLastIndex)
+		rm.metrics.ObserveProposal(false, ProposalResultLogAppendFailed)
+		return 0, term, true, fmt.Errorf("log append verification failed: expected %d, got %d",
+			newIndex, verifyLastIndex)
+	}
+
+	rm.logger.Infow("Proposed command appended to local log successfully",
 		"term", term, "index", newIndex, "commandSize", len(command))
+
 	rm.metrics.ObserveProposal(true, ProposalResultSuccess)
 
-	// Using context.Background() so replication continues even if proposer context cancels.
-	go rm.replicateToAllPeers(context.Background(), term)
+	// STEP 6: Start immediate replication with leadership assertion
+	go rm.startImmediateReplication(term, newIndex)
 
 	return newIndex, term, true, nil
+}
+
+func (rm *replicationManager) startImmediateReplication(term types.Term, newIndex types.Index) {
+	// Validate we're still leader
+	currentTerm, role, leaderID := rm.stateMgr.GetState()
+	if role != types.RoleLeader || leaderID != rm.id || currentTerm != term {
+		rm.logger.Warnw("Cannot start replication - lost leadership",
+			"originalTerm", term, "currentTerm", currentTerm,
+			"role", role.String(), "leaderID", leaderID)
+		return
+	}
+
+	rm.logger.Infow("Starting immediate replication after proposal",
+		"term", term, "index", newIndex)
+
+	// Create replication context
+	replicationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Replicate to all peers immediately
+	rm.replicateToAllPeersImmediate(replicationCtx, term)
+
+	// Trigger commit check after a brief delay for replication to start
+	time.Sleep(50 * time.Millisecond)
+	rm.triggerCommitCheck()
 }
 
 // replicateToAllPeers initiates replication to all known peers.
 // Called after a leader appends a new entry.
 func (rm *replicationManager) replicateToAllPeers(ctx context.Context, term types.Term) {
 	if rm.isShutdown.Load() || ctx.Err() != nil {
+		rm.logger.Warnw("replicateToAllPeers aborted: shutdown or context cancelled",
+			"term", term,
+			"shutdown", rm.isShutdown.Load(),
+			"contextErr", ctx.Err())
 		return
 	}
 
-	currentTerm, role, leaderID := rm.stateMgr.GetState() // Might have changed since Propose started
+	currentTerm, role, leaderID := rm.stateMgr.GetState()
 	if role != types.RoleLeader || leaderID != rm.id || currentTerm != term {
-		rm.logger.Debugw("replicateToAllPeers aborted: leadership lost or term changed",
-			"originalTerm", term, "currentTerm", currentTerm, "role", role.String())
+		rm.logger.Warnw("replicateToAllPeers aborted: leadership lost or term changed",
+			"originalTerm", term,
+			"currentTerm", currentTerm,
+			"role", role.String(),
+			"leaderID", leaderID,
+			"expectedLeaderID", rm.id)
 		return
 	}
 
 	commitIndex := rm.stateMgr.GetCommitIndex()
-	rm.logger.Debugw("Initiating replication to all peers",
-		"term", term, "commitIndex", commitIndex)
+	peerCount := len(rm.peers) - 1
+
+	firstIndex, lastIndex, lastTerm := rm.logMgr.GetLogStateForDebugging()
+
+	rm.logger.Infow("Starting replication to all peers",
+		"term", term,
+		"commitIndex", commitIndex,
+		"peerCount", peerCount,
+		"logFirstIndex", firstIndex,
+		"logLastIndex", lastIndex,
+		"logLastTerm", lastTerm,
+		"peers", rm.getAllPeerIDs())
+
+	if lastIndex == 0 {
+		rm.logger.Warnw("No entries to replicate - log is empty",
+			"term", term,
+			"lastIndex", lastIndex)
+		return
+	}
+
+	replicationCount := 0
 
 	for peerID := range rm.peers {
 		if peerID == rm.id {
-			continue // Skip self
+			continue
 		}
-		go rm.replicateToPeerInternal(ctx, peerID, term, commitIndex, false)
+
+		replicationCount++
+		rm.logger.Infow("Launching replication goroutine for peer",
+			"peer", peerID,
+			"term", term,
+			"commitIndex", commitIndex,
+			"lastLogIndex", lastIndex,
+			"replicationAttempt", replicationCount)
+
+		go func(peer types.NodeID, attemptNum int) {
+			replicationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			rm.logger.Infow("Starting replication goroutine",
+				"peer", peer,
+				"term", term,
+				"attemptNum", attemptNum,
+				"lastLogIndex", lastIndex)
+
+			rm.replicateToPeerInternal(replicationCtx, peer, term, commitIndex, false)
+
+			rm.logger.Infow("Completed replication goroutine",
+				"peer", peer,
+				"term", term,
+				"attemptNum", attemptNum)
+		}(peerID, replicationCount)
 	}
+
+	rm.logger.Infow("All replication goroutines launched",
+		"term", term,
+		"totalAttempts", replicationCount,
+		"logLastIndex", lastIndex)
+}
+
+func (rm *replicationManager) replicateToAllPeersImmediate(ctx context.Context, term types.Term) {
+	if rm.isShutdown.Load() || ctx.Err() != nil {
+		return
+	}
+
+	// Validate leadership
+	currentTerm, role, leaderID := rm.stateMgr.GetState()
+	if role != types.RoleLeader || leaderID != rm.id || currentTerm != term {
+		rm.logger.Warnw("Cannot replicate - lost leadership",
+			"originalTerm", term, "currentTerm", currentTerm,
+			"role", role.String())
+		return
+	}
+
+	commitIndex := rm.stateMgr.GetCommitIndex()
+	lastLogIndex := rm.logMgr.GetLastIndexUnsafe()
+
+	if lastLogIndex == 0 {
+		rm.logger.Debugw("No entries to replicate - log is empty", "term", term)
+		return
+	}
+
+	rm.logger.Infow("Starting immediate replication to all peers",
+		"term", term, "commitIndex", commitIndex, "lastLogIndex", lastLogIndex,
+		"peerCount", len(rm.peers)-1)
+
+	var wg sync.WaitGroup
+
+	// Start replication to all peers
+	for peerID := range rm.peers {
+		if peerID == rm.id {
+			continue
+		}
+
+		wg.Add(1)
+		go func(peer types.NodeID) {
+			defer wg.Done()
+
+			replicationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			rm.logger.Debugw("Starting immediate replication to peer",
+				"peer", peer, "term", term, "lastLogIndex", lastLogIndex)
+
+			rm.replicateToPeerInternal(replicationCtx, peer, term, commitIndex, false)
+
+			rm.logger.Debugw("Immediate replication completed",
+				"peer", peer, "term", term)
+		}(peerID)
+	}
+
+	// Don't wait for all replications - return immediately for responsiveness
+	go func() {
+		wg.Wait()
+		rm.logger.Infow("All immediate replications completed", "term", term)
+	}()
+}
+
+// Helper method to get all peer IDs for logging
+func (rm *replicationManager) getAllPeerIDs() []types.NodeID {
+	var peerIDs []types.NodeID
+	for peerID := range rm.peers {
+		if peerID != rm.id {
+			peerIDs = append(peerIDs, peerID)
+		}
+	}
+	return peerIDs
 }
 
 // HasValidLease checks if the leader lease is currently valid.
@@ -1220,10 +1688,6 @@ func (rm *replicationManager) HasValidLease(ctx context.Context) bool {
 		rm.logger.Debugw("Leader lease check failed: lease expired",
 			"now", now.Format(time.RFC3339Nano),
 			"leaseExpiry", expiry.Format(time.RFC3339Nano))
-	} else {
-		rm.logger.Debugw("Leader lease check success: lease valid",
-			"now", now.Format(time.RFC3339Nano),
-			"leaseExpiry", expiry.Format(time.RFC3339Nano))
 	}
 
 	return isValid
@@ -1242,18 +1706,15 @@ func (rm *replicationManager) VerifyLeadershipAndGetCommitIndex(
 		return 0, ErrNotLeader
 	}
 
-	if rm.leaderLeaseEnabled && rm.HasValidLease(ctx) { // Fast path: Leader Lease
+	if rm.leaderLeaseEnabled && rm.HasValidLease(ctx) {
 		commitIndex := rm.stateMgr.GetCommitIndex()
-
 		rm.logger.Debugw("ReadIndex served via leader lease",
 			"term", term, "commitIndex", commitIndex)
 		rm.metrics.ObserveReadIndex(true, "lease")
-
 		return commitIndex, nil
 	}
 
-	// Slow path: Quorum Check
-	rm.logger.Debugw("ReadIndex requires quorum check (lease disabled or expired)", "term", term)
+	rm.logger.Debugw("ReadIndex requires quorum check", "term", term)
 	quorumCtx, cancel := context.WithTimeout(ctx, defaultReadIndexTimeout)
 	defer cancel()
 
@@ -1261,7 +1722,6 @@ func (rm *replicationManager) VerifyLeadershipAndGetCommitIndex(
 		rm.logger.Warnw("ReadIndex quorum check failed",
 			"term", term, "quorumSize", rm.quorumSize)
 		rm.metrics.ObserveReadIndex(false, "quorum_check")
-
 		if quorumCtx.Err() == context.DeadlineExceeded {
 			return 0, fmt.Errorf("read index quorum check timed out: %w", ErrTimeout)
 		}
@@ -1272,16 +1732,15 @@ func (rm *replicationManager) VerifyLeadershipAndGetCommitIndex(
 	rm.logger.Debugw("ReadIndex quorum check successful",
 		"term", term, "commitIndex", commitIndex)
 	rm.metrics.ObserveReadIndex(true, "quorum_check")
-
 	return commitIndex, nil
 }
 
 // verifyLeadershipViaQuorum performs a quorum check using lightweight heartbeats.
 func (rm *replicationManager) verifyLeadershipViaQuorum(ctx context.Context, term types.Term) bool {
-	responseCh := make(chan bool, len(rm.peers)-1) // number of peers (excluding self)
+	responseCh := make(chan bool, len(rm.peers)-1)
 	var wg sync.WaitGroup
 
-	successCount := 1 // Leader counts as one success vote for itself
+	successCount := 1
 
 	for peerID := range rm.peers {
 		if peerID == rm.id {
@@ -1295,43 +1754,21 @@ func (rm *replicationManager) verifyLeadershipViaQuorum(ctx context.Context, ter
 	go func() {
 		wg.Wait()
 		close(responseCh)
-		rm.logger.Debugw("ReadIndex quorum check: all heartbeats completed or timed out")
 	}()
 
 	for {
 		select {
 		case ok, chanOpen := <-responseCh:
 			if !chanOpen {
-				rm.logger.Debugw(
-					"ReadIndex quorum check: response channel closed",
-					"successCount",
-					successCount,
-					"quorumSize",
-					rm.quorumSize,
-				)
 				return successCount >= rm.quorumSize
 			}
 			if ok {
 				successCount++
-				rm.logger.Debugw(
-					"ReadIndex quorum check: received successful heartbeat ack",
-					"successCount",
-					successCount,
-				)
 				if successCount >= rm.quorumSize {
-					rm.logger.Debugw(
-						"ReadIndex quorum check: quorum reached",
-						"successCount",
-						successCount,
-						"quorumSize",
-						rm.quorumSize,
-					)
 					return true
 				}
 			}
 		case <-ctx.Done():
-			rm.logger.Warnw("ReadIndex quorum check aborted due to context error",
-				"error", ctx.Err(), "successCount", successCount, "quorumSize", rm.quorumSize)
 			return false
 		}
 	}
@@ -1351,44 +1788,18 @@ func (rm *replicationManager) sendReadIndexHeartbeat(
 		Term:         term,
 		LeaderID:     rm.id,
 		LeaderCommit: rm.stateMgr.GetCommitIndex(),
-		// PrevLogIndex, PrevLogTerm, Entries are zero/nil
 	}
 
 	reply, err := rm.networkMgr.SendAppendEntries(ctx, peerID, args)
 
 	select {
 	case <-ctx.Done():
-		rm.logger.Debugw(
-			"ReadIndex heartbeat context done before sending result",
-			"peerID",
-			peerID,
-			"error",
-			ctx.Err(),
-		)
 		responseCh <- false
 	default:
-		if err != nil {
-			rm.logger.Debugw(
-				"ReadIndex heartbeat RPC failed",
-				"peerID",
-				peerID,
-				"term",
-				term,
-				"error",
-				err,
-			)
+		if err != nil || reply.Term > term {
 			responseCh <- false
 			return
 		}
-
-		if reply.Term > term {
-			rm.logger.Infow("ReadIndex heartbeat rejected: peer has higher term",
-				"peerID", peerID, "localTerm", term, "replyTerm", reply.Term)
-			responseCh <- false
-			// Note: CheckTermAndStepDown will handle leader stepping down if needed.
-			return
-		}
-
 		responseCh <- true
 	}
 }
@@ -1402,102 +1813,88 @@ func (rm *replicationManager) HandleAppendEntries(
 		return nil, ErrShuttingDown
 	}
 
-	// Using context.Background() for state persistence during step down
+	// Check for context cancellation early
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	rm.logger.Debugw("HandleAppendEntries called",
+		"from", args.LeaderID,
+		"term", args.Term,
+		"prevLogIndex", args.PrevLogIndex,
+		"prevLogTerm", args.PrevLogTerm,
+		"entriesCount", len(args.Entries),
+		"leaderCommit", args.LeaderCommit)
+
+	// Step down if we see a higher term
 	steppedDown, _ := rm.stateMgr.CheckTermAndStepDown(
-		context.Background(),
+		ctx, // Use the provided context
 		args.Term,
 		args.LeaderID,
 	)
 
-	currentTerm, currentRole, _ := rm.stateMgr.GetState() // Get potentially updated state
+	currentTerm, currentRole, _ := rm.stateMgr.GetState()
 	reply := &types.AppendEntriesReply{Term: currentTerm, Success: false}
 
-	// 1. Reply false if term < currentTerm (§5.1)
+	// Reject if term is too old
 	if args.Term < currentTerm {
-		rm.logger.Debugw("Rejected AppendEntries: Stale term",
-			"rpcTerm", args.Term, "currentTerm", currentTerm, "fromLeader", args.LeaderID)
+		rm.logger.Debugw("Rejecting AppendEntries: term too old",
+			"argsTerm", args.Term, "currentTerm", currentTerm)
 		return reply, nil
 	}
 
-	// If we stepped down, ensure we are now a follower. Reset leader hint.
-	if steppedDown {
-		rm.logger.Infow(
-			"Stepped down to follower due to AppendEntries RPC",
-			"newTerm",
-			currentTerm,
-			"leaderHint",
-			args.LeaderID,
-		)
-	} else if currentRole != types.RoleFollower && args.Term == currentTerm {
-		rm.logger.Infow("Received AppendEntries for current term while not Follower; becoming Follower",
-			"term", currentTerm, "previousRole", currentRole, "leaderHint", args.LeaderID)
-
-		rm.stateMgr.BecomeFollower(context.Background(), currentTerm, args.LeaderID) // Using background context for internal state change
+	// Become follower if we stepped down or need to
+	if steppedDown || (currentRole != types.RoleFollower && args.Term == currentTerm) {
+		rm.stateMgr.BecomeFollower(ctx, currentTerm, args.LeaderID)
 	}
 
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	lockedCurrentTerm, _, _ := rm.stateMgr.GetStateUnsafe() // Re-check term under lock, might have changed again
+	// Double-check term after acquiring lock
+	lockedCurrentTerm, _, _ := rm.stateMgr.GetStateUnsafe()
 	if args.Term < lockedCurrentTerm {
-		rm.logger.Debugw(
-			"Rejected AppendEntries under lock: Stale term discovered after lock acquisition",
-			"rpcTerm",
-			args.Term,
-			"currentTerm",
-			lockedCurrentTerm,
-			"fromLeader",
-			args.LeaderID,
-		)
-
-		reply.Term = lockedCurrentTerm // Update reply term
+		reply.Term = lockedCurrentTerm
+		rm.logger.Debugw("Rejecting AppendEntries after lock: term too old",
+			"argsTerm", args.Term, "lockedCurrentTerm", lockedCurrentTerm)
 		return reply, nil
 	}
-	reply.Term = lockedCurrentTerm // Ensure reply term is the latest
+	reply.Term = lockedCurrentTerm
 
-	// 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
+	// Check log consistency
 	consistent, conflictIndex, conflictTerm := rm.checkLogConsistencyLocked(
-		ctx,
+		ctx, // Use provided context instead of background
 		args.PrevLogIndex,
 		args.PrevLogTerm,
 	)
+
 	if !consistent {
 		reply.Success = false
 		reply.ConflictIndex = conflictIndex
 		reply.ConflictTerm = conflictTerm
-		rm.logger.Warnw("Rejected AppendEntries: Log inconsistency detected",
-			"prevLogIndex", args.PrevLogIndex, "prevLogTerm", args.PrevLogTerm,
-			"conflictIndex", conflictIndex, "conflictTerm", conflictTerm,
-			"fromLeader", args.LeaderID)
+		rm.logger.Debugw("AppendEntries rejected: log inconsistency",
+			"conflictIndex", conflictIndex, "conflictTerm", conflictTerm)
 		return reply, nil
 	}
 
-	// 3. If existing entry conflicts with new one (same index, different terms), delete existing entry and all that follow it (§5.3)
-	// 4. Append any new entries not already in the log
+	// Process entries
 	lastNewIndex, err := rm.processEntriesLocked(ctx, args.Entries, args.PrevLogIndex)
 	if err != nil {
-		rm.logger.Errorw(
-			"Failed to process log entries from leader",
-			"term",
-			args.Term,
-			"leaderID",
-			args.LeaderID,
-			"prevLogIndex",
-			args.PrevLogIndex,
-			"error",
-			err,
-		)
 		reply.Success = false
-
-		return reply, fmt.Errorf("failed to process/append entries: %w", err)
+		rm.logger.Warnw("AppendEntries failed: error processing entries",
+			"error", err, "prevLogIndex", args.PrevLogIndex)
+		return reply, fmt.Errorf("failed to process entries: %w", err)
 	}
 
-	// 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+	// Update commit index
 	rm.updateFollowerCommitIndexLocked(args.LeaderCommit, lastNewIndex)
-
 	rm.recordAppendEntriesMetrics(args.Entries)
+
 	reply.Success = true
 	reply.MatchIndex = lastNewIndex
+
+	rm.logger.Debugw("AppendEntries succeeded",
+		"lastNewIndex", lastNewIndex, "leaderCommit", args.LeaderCommit)
 
 	return reply, nil
 }
@@ -1509,64 +1906,53 @@ func (rm *replicationManager) checkLogConsistencyLocked(
 	prevLogIndex types.Index,
 	prevLogTerm types.Term,
 ) (consistent bool, conflictIndex types.Index, conflictTerm types.Term) {
-	localLastIndex := rm.logMgr.GetLastIndexUnsafe()
-
-	if prevLogIndex == 0 { // Leader sends AppendEntries for index 0 (immediately after start or snapshot)
+	if prevLogIndex == 0 { // The base case
 		return true, 0, 0
 	}
 
+	localLastIndex := rm.logMgr.GetLastIndexUnsafe()
 	if prevLogIndex > localLastIndex {
-		rm.logger.Debugw("Log inconsistency: prevLogIndex exceeds local log",
+		// Our log is shorter than the leader's
+		rm.logger.Debugw("Log consistency check failed: prevLogIndex > localLastIndex",
 			"prevLogIndex", prevLogIndex, "localLastIndex", localLastIndex)
 		return false, localLastIndex + 1, 0
 	}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, defaultTermFetchTimeout)
+	// Use shorter timeout to avoid blocking
+	fetchCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 
 	localTermAtPrev, err := rm.logMgr.GetTermUnsafe(fetchCtx, prevLogIndex)
 	if err != nil {
 		if errors.Is(err, ErrCompacted) {
-			firstIndex := rm.logMgr.GetFirstIndex()
-			rm.logger.Infow("Log inconsistency: prevLogIndex has been compacted locally",
-				"prevLogIndex", prevLogIndex, "firstAvailableIndex", firstIndex)
-
-			return false, firstIndex, 0
+			// The entry was compacted. Tell the leader our first index.
+			return false, rm.logMgr.GetFirstIndex(), 0
 		}
-
-		rm.logger.Errorw("Failed to fetch local term at prevLogIndex",
+		// For any other error, report a conflict at that index
+		rm.logger.Warnw("Log consistency check failed: could not get term for prevLogIndex",
 			"prevLogIndex", prevLogIndex, "error", err)
-
 		return false, prevLogIndex, 0
 	}
 
 	if localTermAtPrev != prevLogTerm {
-		rm.logger.Warnw("Log inconsistency: term mismatch at prevLogIndex",
-			"prevLogIndex", prevLogIndex,
-			"localTerm", localTermAtPrev,
-			"leaderTerm", prevLogTerm)
+		// The terms don't match. This is a definitive conflict.
+		rm.logger.Debugw("Log consistency check failed: term mismatch",
+			"prevLogIndex", prevLogIndex, "localTerm", localTermAtPrev, "leaderTerm", prevLogTerm)
 
+		// Try to find the first index of the conflicting term
 		firstIdxInConflictTerm, findErr := rm.logMgr.FindFirstIndexInTermUnsafe(
-			ctx,
+			fetchCtx, // Use the same short timeout
 			localTermAtPrev,
 			prevLogIndex,
 		)
 		if findErr != nil {
-			rm.logger.Warnw(
-				"Failed to find first index in conflicting term, using simpler hint",
-				"conflictingTerm",
-				localTermAtPrev,
-				"searchUpToIndex",
-				prevLogIndex,
-				"error",
-				findErr,
-			)
+			// If we can't find the start of the conflicting term, fall back
 			return false, prevLogIndex, localTermAtPrev
 		}
-
 		return false, firstIdxInConflictTerm, localTermAtPrev
 	}
 
+	// If we get here, the log is consistent up to prevLogIndex
 	return true, 0, 0
 }
 
@@ -1578,63 +1964,52 @@ func (rm *replicationManager) processEntriesLocked(
 	entries []types.LogEntry,
 	prevLogIndex types.Index,
 ) (types.Index, error) {
-	localLastIndex := rm.logMgr.GetLastIndexUnsafe()
-
-	if len(entries) == 0 { // heartbeat?
+	if len(entries) == 0 {
 		return prevLogIndex, nil
 	}
 
-	firstNewEntryIndex := entries[0].Index
+	localLastIndex := rm.logMgr.GetLastIndexUnsafe()
 
-	conflictIndex := types.Index(0) // 0 means no conflict found yet
-	for _, entry := range entries {
-		localIndex := entry.Index
-		if localIndex > localLastIndex {
-			break
+	// Use a reasonable timeout for processing
+	rm.logger.Infow("DEBUG: Creating process context",
+		"timeout", 5*time.Second, "entriesCount", len(entries))
+	processCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Find the first non-matching entry
+	for i, entry := range entries {
+		// Check for context cancellation
+		if processCtx.Err() != nil {
+			return rm.logMgr.GetLastIndexUnsafe(), processCtx.Err()
 		}
 
-		fetchCtx, cancel := context.WithTimeout(ctx, defaultTermFetchTimeout)
-		localTerm, err := rm.logMgr.GetTermUnsafe(fetchCtx, localIndex)
-		cancel()
-
-		if err != nil {
-			rm.logger.Warnw("Error checking local term during entry processing, assuming conflict",
-				"index", localIndex, "error", err)
-			conflictIndex = localIndex
-			break
+		// If the entry index is past our log, append from here
+		if entry.Index > localLastIndex {
+			if err := rm.appendNewEntriesLocked(processCtx, entries[i:]); err != nil {
+				return rm.logMgr.GetLastIndexUnsafe(), err
+			}
+			return rm.logMgr.GetLastIndexUnsafe(), nil
 		}
 
-		if localTerm != entry.Term {
-			conflictIndex = localIndex
-			rm.logger.Infow("Log conflict detected during entry processing",
-				"index", conflictIndex, "localTerm", localTerm, "leaderTerm", entry.Term)
-			break
-		}
+		localTerm, err := rm.logMgr.GetTermUnsafe(processCtx, entry.Index)
+		// If term lookup fails or terms mismatch, we must truncate from this index
+		if err != nil || localTerm != entry.Term {
+			rm.logger.Infow("Log conflict detected, truncating suffix", "from_index", entry.Index)
 
-		firstNewEntryIndex = entry.Index + 1
+			if err := rm.truncateLogSuffixLocked(processCtx, entry.Index); err != nil {
+				return 0, err
+			}
+
+			// After truncation, append all the new entries
+			if err := rm.appendNewEntriesLocked(processCtx, entries[i:]); err != nil {
+				return rm.logMgr.GetLastIndexUnsafe(), err
+			}
+			return rm.logMgr.GetLastIndexUnsafe(), nil
+		}
 	}
 
-	if conflictIndex > 0 {
-		if err := rm.truncateLogSuffixLocked(ctx, conflictIndex); err != nil {
-			return 0, fmt.Errorf(
-				"failed to truncate conflicting suffix at index %d: %w",
-				conflictIndex,
-				err,
-			)
-		}
-		localLastIndex = conflictIndex - 1
-	}
-
-	entriesToAppend := rm.filterEntriesToAppend(entries, firstNewEntryIndex)
-
-	if len(entriesToAppend) > 0 {
-		if err := rm.appendNewEntriesLocked(ctx, entriesToAppend); err != nil {
-			return localLastIndex, fmt.Errorf("failed to append new entries: %w", err)
-		}
-		localLastIndex = entriesToAppend[len(entriesToAppend)-1].Index
-	}
-
-	return localLastIndex, nil
+	// If the loop completes, all incoming entries matched existing ones
+	return entries[len(entries)-1].Index, nil
 }
 
 // filterEntriesToAppend returns the sub-slice of entries starting from startIndex.
@@ -1656,22 +2031,7 @@ func (rm *replicationManager) truncateLogSuffixLocked(
 	ctx context.Context,
 	fromIndex types.Index,
 ) error {
-	truncateCtx, cancel := context.WithTimeout(ctx, defaultLogFetchTimeout)
-	defer cancel()
-
-	rm.logger.Infow("Truncating local log suffix due to conflict", "fromIndex", fromIndex)
-
-	if err := rm.logMgr.TruncateSuffix(truncateCtx, fromIndex); err != nil {
-		rm.logger.Errorw(
-			"Failed to truncate local log suffix",
-			"fromIndex",
-			fromIndex,
-			"error",
-			err,
-		)
-		return fmt.Errorf("logMgr.TruncateSuffix failed: %w", err)
-	}
-	return nil
+	return rm.logMgr.TruncateSuffixUnsafe(ctx, fromIndex)
 }
 
 // appendNewEntriesLocked appends the given entries to the local log.
@@ -1680,19 +2040,7 @@ func (rm *replicationManager) appendNewEntriesLocked(
 	ctx context.Context,
 	entries []types.LogEntry,
 ) error {
-	appendCtx, cancel := context.WithTimeout(ctx, defaultLogFetchTimeout)
-	defer cancel()
-
-	rm.logger.Infow("Appending entries received from leader",
-		"count", len(entries),
-		"firstIndex", entries[0].Index,
-		"lastIndex", entries[len(entries)-1].Index)
-
-	if err := rm.logMgr.AppendEntries(appendCtx, entries); err != nil {
-		rm.logger.Errorw("Failed to append new entries", "count", len(entries), "error", err)
-		return fmt.Errorf("logMgr.AppendEntries failed: %w", err)
-	}
-	return nil
+	return rm.logMgr.AppendEntriesUnsafe(ctx, entries)
 }
 
 // updateFollowerCommitIndexLocked updates the follower's commit index based on the leader's commit.
@@ -1701,16 +2049,19 @@ func (rm *replicationManager) updateFollowerCommitIndexLocked(
 	leaderCommit, lastProcessedIndex types.Index,
 ) {
 	oldCommitIndex := rm.stateMgr.GetCommitIndexUnsafe()
-
 	newCommitIndex := min(leaderCommit, lastProcessedIndex)
+
+	rm.logger.Debugw("Follower commit index update",
+		"leaderCommit", leaderCommit,
+		"lastProcessedIndex", lastProcessedIndex,
+		"oldCommitIndex", oldCommitIndex,
+		"newCommitIndex", newCommitIndex)
 
 	if newCommitIndex > oldCommitIndex {
 		if rm.stateMgr.UpdateCommitIndexUnsafe(newCommitIndex) {
-			rm.logger.Debugw("Follower commit index advanced",
+			rm.logger.Infow("Follower commit index advanced",
 				"oldCommitIndex", oldCommitIndex,
-				"newCommitIndex", newCommitIndex,
-				"leaderCommit", leaderCommit,
-				"lastProcessedIndex", lastProcessedIndex)
+				"newCommitIndex", newCommitIndex)
 
 			rm.triggerApplyNotify()
 		}
@@ -1724,7 +2075,6 @@ func (rm *replicationManager) recordAppendEntriesMetrics(entries []types.LogEntr
 	} else {
 		rm.metrics.ObserveAppendEntriesReplication()
 		rm.metrics.ObserveEntriesReceived(len(entries))
-
 		var totalBytes int
 		for _, e := range entries {
 			totalBytes += len(e.Command)
@@ -1738,31 +2088,25 @@ func (rm *replicationManager) recordAppendEntriesMetrics(entries []types.LogEntr
 // Caller must hold rm.mu.
 func (rm *replicationManager) GetPeerReplicationStatusUnsafe() map[types.NodeID]types.PeerState {
 	statusMap := make(map[types.NodeID]types.PeerState)
-
 	if rm.isShutdown.Load() {
 		return statusMap
 	}
 
 	_, role, _ := rm.stateMgr.GetStateUnsafe()
 	if role != types.RoleLeader {
-		return statusMap // Only leader tracks peer status
+		return statusMap
 	}
 
 	leaderLastIndex := rm.logMgr.GetLastIndexUnsafe()
 
 	for peerID, pState := range rm.peerStates {
-		var lag types.Index
-		if leaderLastIndex > pState.MatchIndex {
-			lag = leaderLastIndex - pState.MatchIndex
-		}
-
 		statusMap[peerID] = types.PeerState{
 			NextIndex:          pState.NextIndex,
 			MatchIndex:         pState.MatchIndex,
 			IsActive:           pState.IsActive,
 			LastActive:         pState.LastActive,
 			SnapshotInProgress: pState.SnapshotInProgress,
-			ReplicationLag:     lag,
+			ReplicationLag:     leaderLastIndex - pState.MatchIndex,
 		}
 	}
 
@@ -1781,13 +2125,10 @@ func (rm *replicationManager) ReplicateToPeer(
 
 	term, role, leaderID := rm.stateMgr.GetState()
 	if role != types.RoleLeader || leaderID != rm.id {
-		rm.logger.Debugw("ReplicateToPeer skipped: not leader",
-			"peerID", peerID, "role", role.String(), "term", term)
 		return
 	}
 
 	commitIndex := rm.stateMgr.GetCommitIndex()
-
 	go rm.replicateToPeerInternal(ctx, peerID, term, commitIndex, isHeartbeat)
 }
 
@@ -1805,24 +2146,16 @@ func (rm *replicationManager) UpdatePeerAfterSnapshotSend(
 
 	peerState, exists := rm.peerStates[peerID]
 	if !exists {
-		rm.logger.Warnw("Cannot update peer after snapshot: peer state not found", "peerID", peerID)
 		return
 	}
 
 	if snapshotIndex > peerState.MatchIndex {
 		peerState.MatchIndex = snapshotIndex
 	}
-
 	peerState.NextIndex = snapshotIndex + 1
 	peerState.SnapshotInProgress = false
 	peerState.IsActive = true
 	peerState.LastActive = rm.clock.Now()
-
-	rm.logger.Infow("Updated peer state after successful snapshot send",
-		"peerID", peerID,
-		"snapshotIndex", snapshotIndex,
-		"newMatchIndex", peerState.MatchIndex,
-		"newNextIndex", peerState.NextIndex)
 
 	go rm.triggerCommitCheck()
 }
@@ -1836,31 +2169,8 @@ func (rm *replicationManager) SetPeerSnapshotInProgress(peerID types.NodeID, inP
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	rm.setPeerSnapshotInProgressLocked(peerID, inProgress)
-}
-
-// setPeerSnapshotInProgressLocked sets the flag, assuming caller holds write lock.
-func (rm *replicationManager) setPeerSnapshotInProgressLocked(
-	peerID types.NodeID,
-	inProgress bool,
-) {
-	peerState, exists := rm.peerStates[peerID]
-	if !exists {
-		rm.logger.Warnw(
-			"Peer state not found while setting snapshot in progress flag",
-			"peerID",
-			peerID,
-		)
-		return
-	}
-
-	if peerState.SnapshotInProgress != inProgress {
-		previousState := peerState.SnapshotInProgress
+	if peerState, exists := rm.peerStates[peerID]; exists {
 		peerState.SnapshotInProgress = inProgress
-		rm.logger.Debugw("Updated snapshot in progress flag for peer",
-			"peerID", peerID,
-			"newValue", inProgress,
-			"previousValue", previousState)
 	}
 }
 
@@ -1868,15 +2178,9 @@ func (rm *replicationManager) setPeerSnapshotInProgressLocked(
 func (rm *replicationManager) Stop() {
 	rm.logger.Infow("Stopping replication manager...")
 
-	rm.mu.Lock()
-	defer rm.mu.Unlock()
-
 	if !rm.isShutdown.Swap(true) {
 		close(rm.notifyCommitCh)
 	}
-
-	rm.peerStates = make(map[types.NodeID]*types.PeerState)
-	rm.leaseExpiry = time.Time{}
 
 	rm.logger.Infow("Replication manager stopped")
 }

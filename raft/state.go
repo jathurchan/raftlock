@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/storage"
@@ -37,6 +38,12 @@ type StateManager interface {
 	// Increments the term, votes for self, and persists the state.
 	// Returns true if the transition was successful (including persistence).
 	BecomeCandidate(ctx context.Context, reason ElectionReason) bool
+
+	BecomeCandidateForTerm(ctx context.Context, term types.Term) bool
+
+	IsInLeadershipGracePeriod() bool
+	SetLeaderGracePeriod(gracePeriod time.Duration)
+	SetLeaderStabilityMinimum(stabilityMin time.Duration)
 
 	// BecomeLeader transitions the node to leader state after winning an election.
 	// Persists the current state (which should reflect the election term and self-vote).
@@ -101,25 +108,30 @@ type StateManager interface {
 // like commit/applied indices.
 // It ensures that state changes are persisted before they are acted upon.
 type stateManager struct {
-	mu         *sync.RWMutex // Raft's mutex protecting state fields
-	isShutdown *atomic.Bool  // Shared flag indicating Raft shutdown
+	id types.NodeID // ID of the local Raft node.
 
-	id             types.NodeID        // ID of the local Raft node.
+	isShutdown *atomic.Bool // Shared flag indicating Raft shutdown
+
+	mu          *sync.RWMutex  // Raft's mutex protecting state fields
+	currentTerm types.Term     // Latest term server has seen
+	votedFor    types.NodeID   // CandidateID that received vote in current term
+	role        types.NodeRole // Current role (Follower, Candidate, or Leader)
+	leaderID    types.NodeID   // Node ID of the current known leader, "" if unknown.
+	commitIndex types.Index    // Index of highest log entry known to be committed
+	lastApplied types.Index    // Index of highest log entry applied (applier)
+
 	leaderChangeCh chan<- types.NodeID // Channel to notify leader changes
 
 	logger  logger.Logger
 	metrics Metrics
 	storage storage.Storage
+	clock   Clock
 
-	currentTerm types.Term   // Latest term server has seen
-	votedFor    types.NodeID // CandidateID that received vote in current term
+	becameLeaderAt     time.Time     // When this node became leader
+	lastKnownLeaderID  types.NodeID  // Stores the ID of the last known leader, persists even if leader becomes unknown.
+	leaderGracePeriod  time.Duration // Grace period for new leaders
+	leaderStabilityMin time.Duration // Minimum time before considering leadership challenges
 
-	role              types.NodeRole // Current role (Follower, Candidate, or Leader)
-	leaderID          types.NodeID   // Node ID of the current known leader, "" if unknown.
-	lastKnownLeaderID types.NodeID   // Stores the ID of the last known leader, persists even if leader becomes unknown.
-
-	commitIndex types.Index // Index of highest log entry known to be committed
-	lastApplied types.Index // Index of highest log entry applied (applier)
 }
 
 // NewStateManager creates and initializes a new state manager.
@@ -133,16 +145,19 @@ func NewStateManager(mu *sync.RWMutex, shutdownFlag *atomic.Bool, deps Dependenc
 		panic("raft: invalid arguments provided to NewStateManager")
 	}
 	return &stateManager{
-		mu:             mu,
-		isShutdown:     shutdownFlag,
-		storage:        deps.Storage,
-		metrics:        deps.Metrics,
-		logger:         deps.Logger.WithComponent("state"),
-		id:             nodeID,
-		leaderChangeCh: leaderChangeCh,
-		role:           types.RoleFollower,
-		commitIndex:    0,
-		lastApplied:    0,
+		mu:                 mu,
+		isShutdown:         shutdownFlag,
+		storage:            deps.Storage,
+		clock:              deps.Clock,
+		metrics:            deps.Metrics,
+		logger:             deps.Logger.WithComponent("state"),
+		id:                 nodeID,
+		leaderChangeCh:     leaderChangeCh,
+		role:               types.RoleFollower,
+		commitIndex:        0,
+		lastApplied:        0,
+		leaderGracePeriod:  500 * time.Millisecond, // Grace period for new leaders
+		leaderStabilityMin: 200 * time.Millisecond, // Minimum leadership duration before challenges
 	}
 }
 
@@ -273,6 +288,60 @@ func (sm *stateManager) BecomeCandidate(ctx context.Context, reason ElectionReas
 	return true
 }
 
+func (sm *stateManager) BecomeCandidateForTerm(ctx context.Context, term types.Term) bool {
+	if sm.isShutdown.Load() {
+		sm.logger.Warnw("Attempted BecomeCandidateForTerm on shutdown node")
+		return false
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Validate the term transition
+	if term <= sm.currentTerm {
+		sm.logger.Warnw("Cannot become candidate: term not higher than current",
+			"requestedTerm", term, "currentTerm", sm.currentTerm)
+		return false
+	}
+
+	// Validate role transition
+	if !sm.role.CanTransitionTo(types.RoleCandidate) {
+		sm.logger.Warnw("Cannot become candidate: invalid role transition",
+			"currentRole", sm.role.String(), "currentTerm", sm.currentTerm)
+		return false
+	}
+
+	previousTerm := sm.currentTerm
+	previousVotedFor := sm.votedFor
+	previousRole := sm.role
+
+	// Update state atomically
+	sm.currentTerm = term
+	sm.votedFor = sm.id // Vote for self
+
+	// Persist the new state
+	if err := sm.persistState(ctx, sm.currentTerm, sm.votedFor); err != nil {
+		sm.logger.Errorw("Failed to persist candidate state, rolling back",
+			"newTerm", sm.currentTerm, "error", err)
+
+		// Rollback on persistence failure
+		sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
+		sm.setRoleAndLeaderLocked(previousRole, unknownNodeID, previousTerm)
+		return false
+	}
+
+	// Update role and metrics
+	sm.setRoleAndLeaderLocked(types.RoleCandidate, unknownNodeID, sm.currentTerm)
+	sm.metrics.ObserveTerm(sm.currentTerm)
+
+	sm.logger.Infow("Became candidate",
+		"term", sm.currentTerm,
+		"previousTerm", previousTerm,
+		"previousRole", previousRole.String())
+
+	return true
+}
+
 // BecomeLeader transitions the node to leader state, typically after winning an election.
 // Assumes the node is currently a Candidate in the correct term.
 func (sm *stateManager) BecomeLeader(ctx context.Context) bool {
@@ -284,19 +353,31 @@ func (sm *stateManager) BecomeLeader(ctx context.Context) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	if !sm.role.CanTransitionTo(types.RoleLeader) {
-		sm.logger.Warnw("Cannot become leader: invalid role transition",
-			"current_role", sm.role.String(),
-			"current_term", sm.currentTerm)
+	// Validate current state
+	if sm.role != types.RoleCandidate {
+		sm.logger.Warnw("Cannot become leader: not a candidate",
+			"currentRole", sm.role.String(), "currentTerm", sm.currentTerm)
+		return false
+	}
+
+	// Ensure we voted for ourselves
+	if sm.votedFor != sm.id {
+		sm.logger.Warnw("Cannot become leader: did not vote for self",
+			"votedFor", sm.votedFor, "selfID", sm.id)
 		return false
 	}
 
 	currentTerm := sm.currentTerm
-	leaderID := sm.id // Leader is self
+	sm.becameLeaderAt = sm.clock.Now()
 
-	sm.setRoleAndLeaderLocked(types.RoleLeader, leaderID, currentTerm)
+	// Transition to leader
+	sm.setRoleAndLeaderLocked(types.RoleLeader, sm.id, currentTerm)
 
-	sm.logger.Infow("Transitioned to Leader", "term", currentTerm, "leader", leaderID)
+	sm.logger.Infow("Transitioned to Leader",
+		"term", currentTerm,
+		"leader", sm.id,
+		"became_leader_at", sm.becameLeaderAt.Format(time.RFC3339Nano))
+
 	return true
 }
 
@@ -316,37 +397,51 @@ func (sm *stateManager) BecomeFollower(
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	// Reject lower terms
 	if term < sm.currentTerm {
-		sm.logger.Errorw("BecomeFollower called with lower term than current",
+		sm.logger.Warnw("BecomeFollower called with lower term than current",
 			"current_term", sm.currentTerm,
 			"received_term", term,
 			"current_role", sm.role.String())
 		return
 	}
 
+	// Check if this is a no-op
 	if sm.role == types.RoleFollower && sm.currentTerm == term && sm.leaderID == leaderID {
 		return
 	}
 
 	previousTerm := sm.currentTerm
 	previousVotedFor := sm.votedFor
+	previousRole := sm.role
 
+	// Reset leadership tracking if stepping down from leader
+	if previousRole == types.RoleLeader {
+		sm.becameLeaderAt = time.Time{}
+		sm.logger.Infow("Leadership tracking reset - stepping down from leader",
+			"previous_term", previousTerm,
+			"new_term", term,
+			"new_leader", leaderID)
+	}
+
+	// Handle term change
 	termChanged := false
 	if term > sm.currentTerm {
 		sm.logger.Infow("Becoming follower due to higher term",
 			"current_term", previousTerm, "new_term", term, "new_leader", leaderID)
+
 		sm.currentTerm = term
 		sm.votedFor = unknownNodeID
 		termChanged = true
 
+		// Persist the state change
 		if err := sm.persistState(ctx, sm.currentTerm, sm.votedFor); err != nil {
 			sm.logger.Errorw(
-				"Failed to persist state change in BecomeFollower, rolling back term/vote",
-				"new_term",
-				sm.currentTerm,
-				"error",
-				err,
-			)
+				"Failed to persist state change in BecomeFollower, rolling back",
+				"new_term", sm.currentTerm,
+				"error", err)
+
+			// Rollback on failure
 			sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
 			sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, previousTerm)
 			return
@@ -354,12 +449,55 @@ func (sm *stateManager) BecomeFollower(
 		sm.metrics.ObserveTerm(sm.currentTerm)
 	}
 
+	// Update role and leader
 	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, sm.currentTerm)
 
 	if !termChanged {
 		sm.logger.Infow("Becoming follower in same term",
-			"term", sm.currentTerm, "new_leader", leaderID, "previous_role", sm.role.String())
+			"term", sm.currentTerm, "new_leader", leaderID,
+			"previous_role", previousRole.String())
 	}
+}
+
+// ENHANCED: Additional method to get leadership duration (useful for debugging)
+func (sm *stateManager) GetLeadershipDuration() time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.role != types.RoleLeader || sm.becameLeaderAt.IsZero() {
+		return 0
+	}
+
+	return sm.clock.Since(sm.becameLeaderAt)
+}
+
+func (sm *stateManager) IsInLeadershipGracePeriod() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.role != types.RoleLeader || sm.becameLeaderAt.IsZero() {
+		return false
+	}
+
+	return sm.clock.Since(sm.becameLeaderAt) < sm.leaderGracePeriod
+}
+
+func (sm *stateManager) SetLeaderGracePeriod(gracePeriod time.Duration) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.leaderGracePeriod = gracePeriod
+	sm.logger.Infow("Leadership grace period updated",
+		"new_grace_period", gracePeriod)
+}
+
+func (sm *stateManager) SetLeaderStabilityMinimum(stabilityMin time.Duration) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.leaderStabilityMin = stabilityMin
+	sm.logger.Infow("Leadership stability minimum updated",
+		"new_stability_min", stabilityMin)
 }
 
 // CheckTermAndStepDown compares an RPC term with the local term and potentially steps down.
@@ -379,50 +517,65 @@ func (sm *stateManager) CheckTermAndStepDown(
 	}
 
 	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	previousTerm = sm.currentTerm
 	currentRole := sm.role
-	currentLeader := sm.leaderID
 
+	// ONLY handle higher term RPCs - this prevents leadership thrashing
 	if rpcTerm > sm.currentTerm {
+		sm.logger.Errorw(">>> STEPPING DOWN",
+			"node", sm.id,
+			"oldTerm", sm.currentTerm,
+			"newTerm", rpcTerm,
+			"reason", "HIGHER_TERM_RPC")
+
 		sm.logger.Infow("Higher term received via RPC, stepping down",
 			"current_term", sm.currentTerm,
 			"rpc_term", rpcTerm,
 			"rpc_leader_hint", rpcLeader,
-			"current_role", currentRole.String(),
-		)
+			"current_role", currentRole.String())
 
 		if err := sm.stepDownToHigherTermLocked(ctx, rpcTerm, rpcLeader); err != nil {
 			sm.logger.Errorw("Persistence failed during step down", "error", err)
 		}
-		sm.mu.Unlock()
 		return true, previousTerm
 	}
 
-	if rpcTerm == sm.currentTerm {
-		if currentRole != types.RoleFollower ||
-			(rpcLeader != unknownNodeID && rpcLeader != currentLeader) {
-			if currentRole != types.RoleFollower {
-				sm.logger.Infow("Same term RPC received; stepping down from non-follower role",
-					"term", sm.currentTerm,
-					"current_role", currentRole.String(),
-					"rpc_leader_hint", rpcLeader,
-				)
-			} else {
-				sm.logger.Infow("Same term RPC with new leader hint; updating follower's known leader",
-					"term", sm.currentTerm,
-					"old_leader", currentLeader,
-					"new_leader_hint", rpcLeader,
-				)
-			}
+	// For same-term RPCs, only update leader hint if we're a follower and don't know the leader
+	if rpcTerm == sm.currentTerm && currentRole == types.RoleFollower {
+		if rpcLeader != unknownNodeID && (sm.leaderID == unknownNodeID || sm.leaderID != rpcLeader) {
+			sm.logger.Debugw("Updating follower's known leader from RPC hint",
+				"term", sm.currentTerm,
+				"old_leader", sm.leaderID,
+				"new_leader_hint", rpcLeader)
 			sm.setRoleAndLeaderLocked(types.RoleFollower, rpcLeader, sm.currentTerm)
-			sm.mu.Unlock()
-			return true, previousTerm
 		}
 	}
 
-	sm.mu.Unlock()
 	return false, previousTerm
+}
+
+func (sm *stateManager) isValidLeadershipChallenge(challengerID types.NodeID, leadershipDuration time.Duration) bool {
+	// 1. Leadership must be established for minimum duration
+	if leadershipDuration < sm.leaderStabilityMin {
+		return false
+	}
+
+	// 2. Challenger cannot be ourselves
+	if challengerID == sm.id {
+		sm.logger.Warnw("Received leadership challenge from self - this should not happen",
+			"challenger", challengerID,
+			"self", sm.id)
+		return false
+	}
+
+	// 3. Must be past grace period
+	if leadershipDuration < sm.leaderGracePeriod {
+		return false
+	}
+
+	return true
 }
 
 // stepDownToHigherTermLocked updates term, resets vote, becomes follower, and persists state.
@@ -430,27 +583,25 @@ func (sm *stateManager) CheckTermAndStepDown(
 func (sm *stateManager) stepDownToHigherTermLocked(
 	ctx context.Context,
 	newTerm types.Term,
-	leaderHint types.NodeID,
+	newLeader types.NodeID,
 ) error {
 	previousTerm := sm.currentTerm
 	previousVotedFor := sm.votedFor
 
-	sm.applyPersistentStateLocked(newTerm, unknownNodeID)
+	sm.currentTerm = newTerm
+	sm.votedFor = unknownNodeID
 
-	if err := sm.persistState(ctx, newTerm, unknownNodeID); err != nil {
-		sm.logger.Errorw("Failed to persist state after stepping down to higher term",
-			"new_term", newTerm,
-			"error", err,
-		)
-
+	// Persist the new state
+	if err := sm.persistState(ctx, sm.currentTerm, sm.votedFor); err != nil {
+		// Rollback on persistence failure
 		sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
-		sm.setRoleAndLeaderLocked(types.RoleFollower, leaderHint, previousTerm)
-
-		return err
+		return fmt.Errorf("failed to persist higher term step down: %w", err)
 	}
 
-	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderHint, newTerm)
-	sm.metrics.ObserveTerm(newTerm)
+	// Update role and metrics
+	sm.setRoleAndLeaderLocked(types.RoleFollower, newLeader, sm.currentTerm)
+	sm.metrics.ObserveTerm(sm.currentTerm)
+
 	return nil
 }
 
@@ -469,51 +620,53 @@ func (sm *stateManager) GrantVote(
 	}
 
 	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// If an RPC has a higher term, the recipient MUST update its term and step down.
+	if term > sm.currentTerm {
+		sm.logger.Infow("Stepping down to follower due to higher term in vote request",
+			"current_term", sm.currentTerm, "new_term", term)
+		sm.currentTerm = term
+		sm.votedFor = "" // Reset vote for the new term
+		sm.role = types.RoleFollower
+		sm.leaderID = "" // Leader is unknown in new term
+	}
 
 	if term < sm.currentTerm {
 		sm.logger.Debugw("Vote rejected: candidate term lower than current term",
 			"current_term", sm.currentTerm,
 			"candidate_term", term,
 			"candidate_id", candidateID)
-		sm.mu.Unlock()
 		return false
 	}
 
-	canVote := sm.votedFor == unknownNodeID || sm.votedFor == candidateID
+	// Check if we can grant the vote in the (possibly new) current term.
+	canVote := sm.votedFor == "" || sm.votedFor == candidateID
 	if !canVote {
 		sm.logger.Infow("Vote rejected: already voted for another candidate in this term",
 			"current_term", sm.currentTerm,
 			"voted_for", sm.votedFor,
 			"candidate_id", candidateID)
-		sm.mu.Unlock()
 		return false
 	}
 
-	previousVotedFor := sm.votedFor
-	currentTerm := sm.currentTerm
-
-	sm.votedFor = candidateID
-
-	sm.mu.Unlock()
-
-	if err := sm.persistState(ctx, currentTerm, candidateID); err != nil {
-		sm.logger.Errorw("Failed to persist vote, rolling back in-memory vote",
-			"term", currentTerm,
+	// We can vote. Persist the state BEFORE returning true.
+	// The lock is held throughout this operation.
+	if err := sm.persistState(ctx, sm.currentTerm, candidateID); err != nil {
+		sm.logger.Errorw("Failed to persist vote, vote not granted",
+			"term", sm.currentTerm,
 			"candidate_id", candidateID,
 			"error", err)
-		sm.mu.Lock()
-
-		if sm.currentTerm == currentTerm && sm.votedFor == candidateID {
-			sm.votedFor = previousVotedFor
-		}
-		sm.mu.Unlock()
+		// Do not change state if persistence fails. The `defer` will unlock.
 		return false
 	}
 
+	// Only update in-memory state after successful persistence.
+	sm.votedFor = candidateID
 	sm.logger.Infow("Vote granted",
-		"term", currentTerm,
+		"term", sm.currentTerm,
 		"candidate_id", candidateID)
-	sm.metrics.ObserveVoteGranted(currentTerm)
+	sm.metrics.ObserveVoteGranted(sm.currentTerm)
 	return true
 }
 
@@ -632,36 +785,48 @@ func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor typ
 // setRoleAndLeaderLocked updates the role and leaderID, logging the change and notifying listeners.
 // Must be called with sm.mu.Lock() held.
 func (sm *stateManager) setRoleAndLeaderLocked(
-	newRole types.NodeRole,
-	newLeader types.NodeID,
+	role types.NodeRole,
+	leaderID types.NodeID,
 	term types.Term,
 ) {
-	oldRole := sm.role
-	oldLeader := sm.leaderID
+	previousRole := sm.role
+	previousLeader := sm.leaderID
 
-	if oldRole == newRole && oldLeader == newLeader {
-		return
+	sm.role = role
+	sm.leaderID = leaderID
+
+	// Update last known leader for client forwarding
+	if leaderID != unknownNodeID {
+		sm.lastKnownLeaderID = leaderID
 	}
 
-	sm.role = newRole
-	sm.leaderID = newLeader
-
-	if newLeader != unknownNodeID {
-		sm.lastKnownLeaderID = newLeader
-	}
-
+	// Log the role change
 	sm.logger.Infow("Role changed",
-		"new_role", newRole.String(),
+		"new_role", role.String(),
 		"term", term,
-		"leader", newLeader,
-		"previous_role", oldRole.String(),
-		"previous_leader", oldLeader,
-	)
+		"leader", leaderID,
+		"previous_role", previousRole.String(),
+		"previous_leader", previousLeader)
 
-	sm.metrics.ObserveRoleChange(newRole, oldRole, term)
+	// Notify about leader changes
+	if leaderID != previousLeader {
+		sm.logger.Infow("Notified leader change",
+			"new_leader", leaderID,
+			"term", term)
 
-	if oldLeader != newLeader {
-		sm.notifyLeaderChangeNonBlocking(newLeader, term)
+		// Non-blocking notification
+		select {
+		case sm.leaderChangeCh <- leaderID:
+		default:
+			sm.logger.Warnw("Leader change notification channel full, notification dropped",
+				"new_leader", leaderID, "term", term)
+		}
+	}
+
+	// Update metrics
+	sm.metrics.ObserveRoleChange(role, previousRole, term)
+	if role == types.RoleLeader {
+		sm.metrics.ObserveLeaderChange(leaderID, term)
 	}
 }
 
@@ -671,28 +836,15 @@ func (sm *stateManager) persistState(
 	term types.Term,
 	votedFor types.NodeID,
 ) error {
+	persistCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+
 	state := types.PersistentState{
 		CurrentTerm: term,
 		VotedFor:    votedFor,
 	}
 
-	sm.logger.Debugw("Persisting state", "term", term, "voted_for", votedFor)
-	err := sm.storage.SaveState(ctx, state)
-	if err != nil {
-		sm.logger.Errorw("Failed to persist state",
-			"term", state.CurrentTerm,
-			"votedFor", state.VotedFor,
-			"error", err)
-
-		return fmt.Errorf(
-			"failed to save state (term: %d, votedFor: '%s'): %w",
-			state.CurrentTerm,
-			state.VotedFor,
-			err,
-		)
-	}
-	sm.logger.Debugw("State persisted successfully", "term", term, "voted_for", votedFor)
-	return nil
+	return sm.storage.SaveState(persistCtx, state)
 }
 
 // notifyLeaderChangeNonBlocking sends leader updates to the leader change channel without blocking.

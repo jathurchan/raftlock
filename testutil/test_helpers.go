@@ -43,6 +43,17 @@ func AssertEqual(t testing.TB, expected, actual any, msgAndArgs ...any) {
 	}
 }
 
+func AssertNotEqual(t testing.TB, notExpected, actual any, msgAndArgs ...any) {
+	t.Helper()
+	if reflect.DeepEqual(notExpected, actual) {
+		t.Errorf(
+			"Expected values to be not equal, but they are: \nvalue: %v\n%s",
+			actual,
+			FormatMsgAndArgs(msgAndArgs...),
+		)
+	}
+}
+
 func AssertNoError(t testing.TB, err error, msgAndArgs ...any) {
 	t.Helper()
 	if err != nil {

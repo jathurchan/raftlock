@@ -14,10 +14,10 @@ const (
 	DefaultHeartbeatTickCount = 1
 
 	// ElectionTickCount is the number of ticks a follower waits without hearing from the leader before starting an election.
-	DefaultElectionTickCount = 10
+	DefaultElectionTickCount = 100
 
 	// ElectionRandomizationFactor randomizes election timeouts to reduce split votes. Range: [0.0, 1.0].
-	DefaultElectionRandomizationFactor = 0.2
+	DefaultElectionRandomizationFactor = 0.6
 
 	// MaxLogEntriesPerRequest limits the number of log entries sent in one AppendEntries RPC.
 	DefaultMaxLogEntriesPerRequest = 100
@@ -74,7 +74,7 @@ const (
 	DefaultKeepaliveTime = 5 * time.Second
 
 	// DefaultKeepaliveTimeout is the default timeout waiting for a keepalive ping acknowledgement. (1 second)
-	DefaultKeepaliveTimeout = 1 * time.Second
+	DefaultKeepaliveTimeout = 3 * time.Second
 
 	// DefaultServerMaxConnectionIdle is the default maximum duration a server-side gRPC connection can be idle before being closed. (15 seconds)
 	DefaultServerMaxConnectionIdle = 15 * time.Second
@@ -97,7 +97,7 @@ const (
 
 	// electionManagerOpTimeout bounds the duration of electionManager operations
 	// such as requesting votes or updating election state, ensuring they complete promptly.
-	electionManagerOpTimeout = 1 * time.Second
+	electionManagerOpTimeout = 5 * time.Second
 
 	// defaultSnapshotCaptureTimeout is the timeout for capturing snapshot data from the applier.
 	defaultSnapshotCaptureTimeout = 30 * time.Second
@@ -128,10 +128,10 @@ const (
 	defaultAppendEntriesTimeout = 2 * time.Second
 
 	// defaultLogFetchTimeout bounds the time spent fetching log entries from storage or memory.
-	defaultLogFetchTimeout = 1 * time.Second
+	defaultLogFetchTimeout = 5 * time.Second
 
 	// defaultReadIndexTimeout is the timeout for waiting on quorum confirmation in a ReadIndex operation.
-	defaultReadIndexTimeout = 1 * time.Second
+	defaultReadIndexTimeout = 5 * time.Second
 
 	// defaultTermFetchTimeout limits the time allowed for retrieving the term of a specific log index,
 	defaultTermFetchTimeout = 500 * time.Millisecond

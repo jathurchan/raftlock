@@ -22,97 +22,76 @@ type LogManager interface {
 	Initialize(ctx context.Context) error
 
 	// GetLastIndexUnsafe returns the index of the last entry in the log.
-	// Returns 0 if the log is empty.
-	// Callers must ensure thread safety by acquiring the appropriate Raft read lock.
+	// It does not acquire locks and is safe for concurrent use due to atomics,
+	// but for a consistent view with last term, use GetConsistentLastState.
 	GetLastIndexUnsafe() types.Index
 
 	// GetLastTermUnsafe returns the term of the last entry in the log.
-	// Returns 0 if the log is empty.
-	// Callers must ensure thread safety by acquiring the appropriate Raft read lock.
+	// It does not acquire locks and is safe for concurrent use due to atomics,
+	// but for a consistent view with last index, use GetConsistentLastState.
 	GetLastTermUnsafe() types.Term
 
-	// GetConsistentLastState returns the last index and term as an atomic pair,
-	// protected by the Raft mutex. Avoids race conditions inherent in separate calls
-	// to GetLastIndex and GetLastTerm when concurrent writes might occur.
+	// GetConsistentLastState returns the last index and term as a synchronized pair,
+	// protected by the main Raft mutex.
 	GetConsistentLastState() (types.Index, types.Term)
 
 	// GetFirstIndex returns the index of the first available entry in the log.
-	// Returns 0 if the log is empty.
 	GetFirstIndex() types.Index
 
-	// GetTerm returns the term of the log entry at the given index.
-	// Returns an error if the entry is not found (ErrNotFound), has been compacted (ErrCompacted),
-	// or if the node is shutting down (ErrShuttingDown). Safe for concurrent use.
+	// GetTerm returns the term of the log entry at a given index.
+	// This method is thread-safe and acquires a read lock.
 	GetTerm(ctx context.Context, index types.Index) (types.Term, error)
 
-	// GetTermUnsafe returns the term of the log entry at the given index without synchronization.
-	// This method skips shutdown checks, metrics, and locking for performance.
-	// Callers must ensure thread safety and log bounds are respected.
+	// GetTermUnsafe returns the term of a log entry without acquiring locks.
+	// The caller is responsible for ensuring thread safety if consistency with other state is required.
 	GetTermUnsafe(ctx context.Context, index types.Index) (types.Term, error)
 
 	// GetEntries returns log entries in the range [startIndex, endIndex).
-	// Returns an empty slice if the range is empty or invalid.
-	// Returns an error if the range includes compacted entries (ErrCompacted),
-	// is out of bounds (ErrNotFound), or if the node is shutting down (ErrShuttingDown).
+	// This method is thread-safe.
 	GetEntries(ctx context.Context, startIndex, endIndex types.Index) ([]types.LogEntry, error)
 
-	// AppendEntries appends the given entries to the log.
-	// The entries must be contiguous with the existing log.
-	// Returns an error if the entries are not contiguous, if storage operations fail,
-	// or if the node is shutting down (ErrShuttingDown).
+	// AppendEntries appends entries to the log. It is thread-safe and acquires a write lock.
 	AppendEntries(ctx context.Context, entries []types.LogEntry) error
 
-	// TruncatePrefix removes log entries before the given index (exclusive).
-	// Used for log compaction after snapshots.
-	// Returns an error if the index is invalid, truncation fails,
-	// or if the node is shutting down (ErrShuttingDown).
+	// AppendEntriesUnsafe appends entries to the log without acquiring locks.
+	// The caller MUST hold the write lock to ensure data consistency.
+	AppendEntriesUnsafe(ctx context.Context, entries []types.LogEntry) error
+
+	// TruncatePrefix removes log entries before a given index. Safe for concurrent use.
 	TruncatePrefix(ctx context.Context, newFirstIndex types.Index) error
 
-	// TruncateSuffix removes log entries at or after the given index.
-	// Used during conflict resolution when appending entries.
-	// Returns an error if the index is invalid, truncation fails,
-	// or if the node is shutting down (ErrShuttingDown).
+	// TruncatePrefixUnsafe removes log entries before a given index without acquiring locks.
+	// The caller MUST hold the write lock.
+	TruncatePrefixUnsafe(ctx context.Context, newFirstIndex types.Index) error
+
+	// TruncateSuffix removes log entries from a given index to the end. Safe for concurrent use.
 	TruncateSuffix(ctx context.Context, newLastIndexPlusOne types.Index) error
 
-	// IsConsistentWithStorage checks if the in-memory cached log state (last index/term)
-	// matches the state persisted in storage. Returns false and an error if inconsistent
-	// or if the storage check fails.
+	// TruncateSuffixUnsafe removes log entries from a given index without acquiring locks.
+	// The caller MUST hold the write lock.
+	TruncateSuffixUnsafe(ctx context.Context, newLastIndexPlusOne types.Index) error
+
+	// IsConsistentWithStorage checks if the in-memory log state matches persistent storage.
 	IsConsistentWithStorage(ctx context.Context) (bool, error)
 
-	// RebuildInMemoryState reconstructs the cached in-memory state (last index/term)
-	// from the persistent storage. Used during recovery or when inconsistencies are detected.
+	// RebuildInMemoryState reconstructs cached state from persistent storage.
 	RebuildInMemoryState(ctx context.Context) error
 
-	// FindLastEntryWithTermUnsafe searches backward for the last log entry with the given term.
-	// If searchFromHint is non-zero and less than the current last index, the scan starts from that index;
-	// otherwise, it starts from the last index.
-	// Returns the index of the matching entry, or 0 and ErrNotFound if the term is not found
-	// or the scan encounters compacted log regions.
-	//
-	// This method does not perform locking. The caller must ensure thread safety.
-	FindLastEntryWithTermUnsafe(
-		ctx context.Context,
-		term types.Term,
-		searchFromHint types.Index,
-	) (types.Index, error)
+	// FindLastEntryWithTermUnsafe searches backward for the last entry with a given term.
+	// This method does not acquire locks; the caller must ensure thread safety.
+	FindLastEntryWithTermUnsafe(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error)
 
-	// FindFirstIndexInTermUnsafe scans backward from searchUpToIndex to find the first log index
-	// that belongs to the given term. It assumes that log entries for a term are contiguous.
-	// The scan stops at the first entry with a different term.
-	//
-	// Returns the index of the first entry in the term if found, or 0 and an error
-	// (e.g., ErrNotFound or ErrCompacted) if the term is not present or is in a compacted region.
-	//
-	// This method does not perform locking. The caller must ensure thread safety.
-	FindFirstIndexInTermUnsafe(
-		ctx context.Context,
-		term types.Term,
-		searchUpToIndex types.Index,
-	) (types.Index, error)
+	// FindFirstIndexInTermUnsafe scans backward to find the first entry in a given term.
+	// This method does not acquire locks; the caller must ensure thread safety.
+	FindFirstIndexInTermUnsafe(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error)
 
-	// Stop signals the log manager to shut down and release resources.
-	// Note: Actual shutdown logic (stopping operations) relies on checking the
-	// shared isShutdown flag.
+	// RestoreFromSnapshot updates the log's state to reflect a newly installed snapshot.
+	RestoreFromSnapshot(meta types.SnapshotMetadata)
+
+	// GetLogStateForDebugging returns the current log state for debugging purposes.
+	GetLogStateForDebugging() (firstIndex, lastIndex types.Index, lastTerm types.Term)
+
+	// Stop signals the log manager to shut down.
 	Stop()
 }
 
@@ -120,7 +99,7 @@ type LogManager interface {
 // It provides thread-safe access to log operations and maintains cached in-memory state
 // (lastIndex, lastTerm) for performance, synchronized with persistent storage.
 type logManager struct {
-	mu         *sync.RWMutex // Raft's mutex protecting state fields.
+	mu         *sync.RWMutex // Raft's main mutex, protecting state across all managers.
 	isShutdown *atomic.Bool  // Shared flag indicating Raft shutdown.
 
 	id types.NodeID // ID of the local Raft node.
@@ -129,8 +108,13 @@ type logManager struct {
 	metrics Metrics
 	storage storage.Storage
 
+	// Atomics for safe, fast, but potentially unsynchronized reads of log boundaries.
 	lastIndex atomic.Uint64 // Cached index of the latest log entry.
 	lastTerm  atomic.Uint64 // Cached term of the latest log entry.
+
+	// Snapshot metadata, protected by the main mutex.
+	snapshotIndex types.Index
+	snapshotTerm  types.Term
 }
 
 // NewLogManager creates and initializes a new LogManager instance.
@@ -170,44 +154,28 @@ func NewLogManager(
 }
 
 // Initialize loads the persisted last log index and term during system startup.
-// It sets up the cached in-memory state for log tracking and reports initial metrics.
 func (lm *logManager) Initialize(ctx context.Context) error {
-	lm.logger.Infow("Initializing log manager", "nodeID", lm.id)
+	lm.logger.Infow("Initializing log manager...", "nodeID", lm.id)
 
 	lastIdx := lm.storage.LastLogIndex()
 	firstIdx := lm.storage.FirstLogIndex()
 
 	if lastIdx == 0 {
 		lm.updateCachedState(0, 0)
-		lm.logger.Infow("Log is empty, initialized with zero index and term")
+		lm.logger.Infow("Log is empty, initialized with zero index and term.")
 		lm.metrics.ObserveLogState(0, 0, 0)
 		return nil
 	}
 
 	term, err := lm.fetchEntryTerm(ctx, lastIdx)
 	if err != nil {
-		lm.logger.Errorw(
-			"Failed to get term for last log index during initialization",
-			"lastIndex",
-			lastIdx,
-			"error",
-			err,
-		)
-		return fmt.Errorf(
-			"inconsistent storage: failed to fetch term for last index %d: %w",
-			lastIdx,
-			err,
-		)
+		return fmt.Errorf("inconsistent storage: failed to fetch term for last index %d: %w", lastIdx, err)
 	}
 
 	lm.updateCachedState(lastIdx, term)
 	lm.metrics.ObserveLogState(firstIdx, lastIdx, term)
 
-	lm.logger.Infow("Log manager initialized successfully",
-		"firstIndex", firstIdx,
-		"lastIndex", lastIdx,
-		"lastTerm", term)
-
+	lm.logger.Infow("Log manager initialized successfully.", "firstIndex", firstIdx, "lastIndex", lastIdx, "lastTerm", term)
 	return nil
 }
 
@@ -246,51 +214,31 @@ func (lm *logManager) GetFirstIndex() types.Index {
 // Safe for concurrent use.
 func (lm *logManager) GetTerm(ctx context.Context, index types.Index) (types.Term, error) {
 	startTime := time.Now()
-	success := false
-	defer func() {
-		lm.metrics.ObserveLogRead(LogReadTypeTerm, time.Since(startTime), success)
-	}()
-
 	if lm.isShutdown.Load() {
 		return 0, ErrShuttingDown
 	}
 
-	term, err := lm.getTermInternal(ctx, index, false)
-	if err == nil {
-		success = true
-	}
+	lm.mu.RLock()
+	term, err := lm.GetTermUnsafe(ctx, index)
+	lm.mu.RUnlock()
+
+	lm.metrics.ObserveLogRead(LogReadTypeTerm, time.Since(startTime), err == nil)
 	return term, err
 }
 
 // GetTermUnsafe returns the term of the log entry at the given index without locking or metrics.
-// The caller must ensure thread safety.
+// It assumes the caller holds the read lock.
 func (lm *logManager) GetTermUnsafe(ctx context.Context, index types.Index) (types.Term, error) {
-	return lm.getTermInternal(ctx, index, true)
-}
-
-// getTermInternal returns the term of the log entry at the specified index.
-// It first attempts to serve the request from a cached last index/term if applicable.
-// If not cached, it verifies the index is within valid bounds and fetches the term from storage.
-// If useUnlockedCache is true, it assumes the caller already holds lm.mu and accesses cache without locks.
-func (lm *logManager) getTermInternal(
-	ctx context.Context,
-	index types.Index,
-	useUnlockedCache bool,
-) (types.Term, error) {
 	if index == 0 {
 		return 0, nil
 	}
 
-	var cachedTerm types.Term
-	var ok bool
-
-	if useUnlockedCache {
-		cachedTerm, ok = lm.tryGetCachedTermUnlocked(index)
-	} else {
-		cachedTerm, ok = lm.tryGetCachedTerm(index)
+	if index == lm.snapshotIndex {
+		return lm.snapshotTerm, nil
 	}
-	if ok {
-		return cachedTerm, nil
+
+	if term, ok := lm.tryGetCachedTerm(index); ok {
+		return term, nil
 	}
 
 	if err := lm.checkLogBounds(index); err != nil {
@@ -315,15 +263,6 @@ func (lm *logManager) getTermInternal(
 // and returns the cached term if available and valid (term > 0).
 func (lm *logManager) tryGetCachedTerm(index types.Index) (types.Term, bool) {
 	lastIdx, lastTerm := lm.GetConsistentLastState()
-	return tryGetCachedTermCommon(index, lastIdx, lastTerm)
-}
-
-// tryGetCachedTermUnlocked checks if the requested index is the cached last index
-// and returns the cached term if available and valid (term > 0).
-// Assumes lm.mu.RLock() is held.
-func (lm *logManager) tryGetCachedTermUnlocked(index types.Index) (types.Term, bool) {
-	lastIdx := lm.GetLastIndexUnsafe()
-	lastTerm := lm.GetLastTermUnsafe()
 	return tryGetCachedTermCommon(index, lastIdx, lastTerm)
 }
 
@@ -370,49 +309,33 @@ func (lm *logManager) GetEntries(
 	startIndex, endIndex types.Index,
 ) ([]types.LogEntry, error) {
 	startTime := time.Now()
-	var entries []types.LogEntry
-	var err error
-	success := false
-
-	defer func() {
-		lm.metrics.ObserveLogRead(LogReadTypeEntries, time.Since(startTime), success)
-	}()
-
 	if lm.isShutdown.Load() {
 		return nil, ErrShuttingDown
 	}
-
-	if isEmptyRange(startIndex, endIndex) {
-		success = true
-		return nil, nil
-	}
-
-	effectiveEnd := lm.clampEndIndex(endIndex)
-	if isEmptyRange(startIndex, effectiveEnd) {
+	if startIndex >= endIndex {
 		lm.metrics.ObserveLogRead(LogReadTypeEntries, time.Since(startTime), true)
 		return nil, nil
 	}
 
-	entries, err = lm.storage.GetLogEntries(ctx, startIndex, effectiveEnd)
+	// Clamp the end index to what's available to prevent reading beyond the log.
+	effectiveEnd := lm.clampEndIndex(endIndex)
+	if startIndex >= effectiveEnd {
+		lm.metrics.ObserveLogRead(LogReadTypeEntries, time.Since(startTime), true)
+		return nil, nil
+	}
+
+	entries, err := lm.storage.GetLogEntries(ctx, startIndex, effectiveEnd)
 	if err != nil {
 		return nil, lm.mapStorageReadError(err, startIndex, effectiveEnd)
 	}
 
 	if err = validateEntryRange(entries, startIndex, effectiveEnd); err != nil {
-		lm.logger.Errorw(
-			"Storage returned inconsistent log entry range",
-			"error",
-			err,
-			"requestedStart",
-			startIndex,
-			"requestedEnd",
-			effectiveEnd,
-		)
+		lm.logger.Errorw("Storage returned inconsistent log entry range", "error", err, "requestedStart", startIndex, "requestedEnd", effectiveEnd)
 		lm.metrics.ObserveLogConsistencyError()
 		return nil, fmt.Errorf("internal storage error: %w", err)
 	}
 
-	success = true
+	lm.metrics.ObserveLogRead(LogReadTypeEntries, time.Since(startTime), true)
 	return entries, nil
 }
 
@@ -474,173 +397,135 @@ func validateEntryRange(entries []types.LogEntry, expectedStart, expectedEnd typ
 	return nil
 }
 
-// AppendEntries appends a batch of log entries to storage and updates cached state.
+// AppendEntries is the thread-safe wrapper for AppendEntriesUnsafe.
 func (lm *logManager) AppendEntries(ctx context.Context, entries []types.LogEntry) error {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	return lm.AppendEntriesUnsafe(ctx, entries)
+}
+
+// AppendEntriesUnsafe appends entries, assuming the caller holds the lock.
+func (lm *logManager) AppendEntriesUnsafe(ctx context.Context, entries []types.LogEntry) error {
 	startTime := time.Now()
 	entryCount := len(entries)
-	success := false
 	var err error
 
 	defer func() {
-		lm.metrics.ObserveLogAppend(entryCount, time.Since(startTime), success)
+		lm.metrics.ObserveLogAppend(entryCount, time.Since(startTime), err == nil)
 	}()
 
 	if lm.isShutdown.Load() {
 		return ErrShuttingDown
 	}
-
 	if entryCount == 0 {
-		success = true
 		return nil
 	}
 
-	err = lm.storage.AppendLogEntries(ctx, entries)
-	if err != nil {
-		lm.logger.Errorw(
-			"Storage rejected AppendLogEntries",
-			"error",
-			err,
-			"entryCount",
-			entryCount,
-			"firstIndex",
-			entries[0].Index,
-		)
-		return fmt.Errorf("log append failed: %w", err)
+	if err = lm.validateEntriesForAppend(entries); err != nil {
+		return fmt.Errorf("invalid entries for append: %w", err)
 	}
 
-	lastEntry := entries[entryCount-1]
-	firstIndexInStorage := lm.syncLogStateFromAppend(lastEntry)
+	currentLastIndex := lm.GetLastIndexUnsafe()
+	if entries[0].Index != currentLastIndex+1 {
+		err = fmt.Errorf("entries not contiguous: expected first index %d, got %d", currentLastIndex+1, entries[0].Index)
+		return err
+	}
 
-	lm.metrics.ObserveLogState(firstIndexInStorage, lastEntry.Index, lastEntry.Term)
+	if err = lm.storage.AppendLogEntries(ctx, entries); err != nil {
+		lm.logger.Errorw("Failed to append entries to storage", "error", err)
+		return fmt.Errorf("storage append failed: %w", err)
+	}
 
-	lm.logger.Debugw("Appended log entries successfully",
-		"count", entryCount,
-		"firstAppendedIndex", entries[0].Index,
-		"lastAppendedIndex", lastEntry.Index,
-		"lastAppendedTerm", lastEntry.Term,
-		"latencyMs", time.Since(startTime).Milliseconds())
-
-	success = true
+	lastEntry := entries[len(entries)-1]
+	lm.updateCachedState(lastEntry.Index, lastEntry.Term)
 	return nil
 }
 
-// syncLogStateFromAppend updates the cached last index and term after a successful append.
-// Requires holding the lm.mu write lock.
-// Returns the current first index from storage.
-func (lm *logManager) syncLogStateFromAppend(lastAppendedEntry types.LogEntry) types.Index {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
+// validateEntriesForAppend checks that entries are valid for appending
+func (lm *logManager) validateEntriesForAppend(entries []types.LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
 
-	lm.lastIndex.Store(uint64(lastAppendedEntry.Index))
-	lm.lastTerm.Store(uint64(lastAppendedEntry.Term))
+	// Check that entries are contiguous
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Index != entries[i-1].Index+1 {
+			return fmt.Errorf("entries not contiguous: entry %d has index %d, expected %d",
+				i, entries[i].Index, entries[i-1].Index+1)
+		}
+	}
 
-	return lm.storage.FirstLogIndex()
+	// Check that entries have valid indices (> 0)
+	for i, entry := range entries {
+		if entry.Index == 0 {
+			return fmt.Errorf("entry %d has invalid index 0", i)
+		}
+		if entry.Term == 0 {
+			return fmt.Errorf("entry %d has invalid term 0", i)
+		}
+	}
+
+	return nil
 }
 
-// TruncatePrefix removes all log entries before newFirstIndex (exclusive).
+// TruncatePrefix is the thread-safe wrapper for TruncatePrefixUnsafe.
 func (lm *logManager) TruncatePrefix(ctx context.Context, newFirstIndex types.Index) error {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	return lm.TruncatePrefixUnsafe(ctx, newFirstIndex)
+}
+
+// TruncatePrefixUnsafe truncates the log prefix, assuming the caller holds the lock.
+func (lm *logManager) TruncatePrefixUnsafe(ctx context.Context, newFirstIndex types.Index) error {
 	startTime := time.Now()
 	entriesRemoved := 0
-	success := false
 	var err error
-
 	defer func() {
-		lm.metrics.ObserveLogTruncate(
-			LogTruncateTypePrefix,
-			entriesRemoved,
-			time.Since(startTime),
-			success,
-		)
+		lm.metrics.ObserveLogTruncate(LogTruncateTypePrefix, entriesRemoved, time.Since(startTime), err == nil)
 	}()
 
 	if lm.isShutdown.Load() {
 		return ErrShuttingDown
 	}
-
 	if newFirstIndex == 0 {
-		err = fmt.Errorf("invalid truncation index: must be > 0")
-		return err
+		return fmt.Errorf("invalid truncation index: must be > 0")
 	}
 
 	oldFirstIndex := lm.GetFirstIndex()
-
 	if newFirstIndex <= oldFirstIndex {
-		lm.logger.Debugw(
-			"TruncatePrefix skipped: index less than or equal to current first index",
-			"newFirstIndex",
-			newFirstIndex,
-			"oldFirstIndex",
-			oldFirstIndex,
-		)
-		success = true
-		return nil
+		return nil // No-op
 	}
-
 	lastIndex := lm.GetLastIndexUnsafe()
 	if newFirstIndex > lastIndex+1 {
-		err = fmt.Errorf(
-			"invalid truncation index: %d is beyond last index %d",
-			newFirstIndex,
-			lastIndex,
-		)
-		return err
+		return fmt.Errorf("invalid truncation index: %d is beyond last index %d", newFirstIndex, lastIndex)
 	}
 
 	err = lm.storage.TruncateLogPrefix(ctx, newFirstIndex)
 	if err != nil {
-		lm.logger.Errorw(
-			"Failed to truncate log prefix in storage",
-			"newFirstIndex",
-			newFirstIndex,
-			"error",
-			err,
-		)
 		return fmt.Errorf("log prefix truncation to index %d failed: %w", newFirstIndex, err)
 	}
 
 	resultingFirstIndex := lm.storage.FirstLogIndex()
-	entriesRemoved = int(resultingFirstIndex - oldFirstIndex)
-
-	if entriesRemoved < 0 {
-		lm.logger.Warnw(
-			"First index decreased after TruncatePrefix, expected increase or no change",
-			"oldFirstIndex",
-			oldFirstIndex,
-			"newFirstIndex",
-			resultingFirstIndex,
-		)
-		entriesRemoved = 0 // To avoid negative count in metrics.
+	if resultingFirstIndex > oldFirstIndex {
+		entriesRemoved = int(resultingFirstIndex - oldFirstIndex)
 	}
-
-	currentLastIndex := lm.GetLastIndexUnsafe()
-	currentLastTerm := lm.GetLastTermUnsafe()
-	lm.metrics.ObserveLogState(resultingFirstIndex, currentLastIndex, currentLastTerm)
-
-	lm.logger.Infow("Log prefix truncated successfully",
-		"requestedIndex", newFirstIndex,
-		"oldFirstIndex", oldFirstIndex,
-		"newFirstIndex", resultingFirstIndex,
-		"entriesRemoved", entriesRemoved,
-		"latencyMs", time.Since(startTime).Milliseconds())
-
-	success = true
 	return nil
 }
 
-// TruncateSuffix removes log entries at or after newLastIndexPlusOne.
+// TruncateSuffix is the thread-safe wrapper for TruncateSuffixUnsafe.
 func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne types.Index) error {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	return lm.TruncateSuffixUnsafe(ctx, newLastIndexPlusOne)
+}
+
+// TruncateSuffixUnsafe truncates the log suffix, assuming the caller holds the lock.
+func (lm *logManager) TruncateSuffixUnsafe(ctx context.Context, newLastIndexPlusOne types.Index) error {
 	startTime := time.Now()
 	entriesRemoved := 0
-	success := false
 	var err error
-
 	defer func() {
-		lm.metrics.ObserveLogTruncate(
-			LogTruncateTypeSuffix,
-			entriesRemoved,
-			time.Since(startTime),
-			success,
-		)
+		lm.metrics.ObserveLogTruncate(LogTruncateTypeSuffix, entriesRemoved, time.Since(startTime), err == nil)
 	}()
 
 	if lm.isShutdown.Load() {
@@ -648,50 +533,27 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 	}
 
 	oldLastIndex := lm.GetLastIndexUnsafe()
-
 	if newLastIndexPlusOne > oldLastIndex {
-		lm.logger.Debugw("TruncateSuffix skipped: index is beyond last log index",
-			"index", newLastIndexPlusOne, "lastIndex", oldLastIndex)
-		success = true
-		return nil
+		return nil // No-op
 	}
 
-	if err := lm.storage.TruncateLogSuffix(ctx, newLastIndexPlusOne); err != nil {
-		lm.logger.Errorw("Failed to truncate log suffix in storage",
-			"newLastIndexPlusOne", newLastIndexPlusOne, "error", err)
-		return fmt.Errorf(
-			"log suffix truncation from index %d failed: %w",
-			newLastIndexPlusOne,
-			err,
-		)
+	if err = lm.storage.TruncateLogSuffix(ctx, newLastIndexPlusOne); err != nil {
+		return fmt.Errorf("log suffix truncation from index %d failed: %w", newLastIndexPlusOne, err)
 	}
 
 	newLastIndex := lm.storage.LastLogIndex()
-
 	if newLastIndex > oldLastIndex {
-		lm.logger.Errorw("Inconsistent state: lastIndex increased after suffix truncation",
-			"oldLast", oldLastIndex, "newLast", newLastIndex)
 		lm.metrics.ObserveLogConsistencyError()
-		return fmt.Errorf(
-			"suffix truncation led to inconsistent state: newLastIndex %d > oldLastIndex %d",
-			newLastIndex,
-			oldLastIndex,
-		)
+		return fmt.Errorf("inconsistent state: lastIndex increased after suffix truncation (%d > %d)", newLastIndex, oldLastIndex)
 	}
 
 	var newLastTerm types.Term
 	if newLastIndex > 0 {
 		newLastTerm, err = lm.fetchEntryTerm(ctx, newLastIndex)
 		if err != nil {
-			lm.logger.Errorw("Failed to get term for new last index after suffix truncation",
-				"index", newLastIndex, "error", err)
 			lm.metrics.ObserveLogConsistencyError()
-			_ = lm.RebuildInMemoryState(ctx)
-			return fmt.Errorf(
-				"suffix truncation succeeded but failed to fetch new last term for index %d: %w",
-				newLastIndex,
-				err,
-			)
+			_ = lm.RebuildInMemoryState(ctx) // Attempt to recover
+			return fmt.Errorf("suffix truncation succeeded but failed to fetch new last term for index %d: %w", newLastIndex, err)
 		}
 	}
 
@@ -699,18 +561,7 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 		entriesRemoved = int(oldLastIndex - newLastIndex)
 	}
 
-	firstIndex := lm.updateCachedStateAndGetFirst(newLastIndex, newLastTerm)
-	lm.metrics.ObserveLogState(firstIndex, newLastIndex, newLastTerm)
-
-	lm.logger.Infow("Log suffix truncated successfully",
-		"requestedIndexPlusOne", newLastIndexPlusOne,
-		"oldLastIndex", oldLastIndex,
-		"newLastIndex", newLastIndex,
-		"newLastTerm", newLastTerm,
-		"entriesRemoved", entriesRemoved,
-		"latencyMs", time.Since(startTime).Milliseconds())
-
-	success = true
+	lm.updateCachedState(newLastIndex, newLastTerm)
 	return nil
 }
 
@@ -719,79 +570,23 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 func (lm *logManager) IsConsistentWithStorage(ctx context.Context) (bool, error) {
 	memLastIndex := lm.GetLastIndexUnsafe()
 	memLastTerm := lm.GetLastTermUnsafe()
-
 	storageLastIndex := lm.storage.LastLogIndex()
 
 	if memLastIndex != storageLastIndex {
-		lm.logger.Errorw(
-			"Log index mismatch detected",
-			"memoryIndex",
-			memLastIndex,
-			"storageIndex",
-			storageLastIndex,
-		)
 		lm.metrics.ObserveLogConsistencyError()
-		return false, fmt.Errorf(
-			"log index mismatch: memory=%d, storage=%d",
-			memLastIndex,
-			storageLastIndex,
-		)
+		return false, fmt.Errorf("log index mismatch: memory=%d, storage=%d", memLastIndex, storageLastIndex)
 	}
-
 	if storageLastIndex == 0 {
-		if memLastTerm != 0 {
-			lm.logger.Errorw("Log term mismatch detected for empty log", "memoryTerm", memLastTerm)
-			lm.metrics.ObserveLogConsistencyError()
-			return false, fmt.Errorf(
-				"term mismatch for empty log: memory=%d, expected=0",
-				memLastTerm,
-			)
-		}
-		return true, nil
+		return memLastTerm == 0, nil
 	}
-
 	storageTerm, err := lm.fetchEntryTerm(ctx, storageLastIndex)
 	if err != nil {
-		lm.logger.Errorw(
-			"Failed to fetch storage term for consistency check",
-			"index",
-			storageLastIndex,
-			"error",
-			err,
-		)
-		return false, fmt.Errorf(
-			"unable to verify log consistency: failed to fetch term for last index %d: %w",
-			storageLastIndex,
-			err,
-		)
+		return false, fmt.Errorf("unable to verify consistency: %w", err)
 	}
-
 	if memLastTerm != storageTerm {
-		lm.logger.Errorw(
-			"Log term mismatch detected",
-			"index",
-			storageLastIndex,
-			"memoryTerm",
-			memLastTerm,
-			"storageTerm",
-			storageTerm,
-		)
 		lm.metrics.ObserveLogConsistencyError()
-		return false, fmt.Errorf(
-			"log term mismatch at index %d: memory=%d, storage=%d",
-			storageLastIndex,
-			memLastTerm,
-			storageTerm,
-		)
+		return false, fmt.Errorf("log term mismatch at index %d: memory=%d, storage=%d", storageLastIndex, memLastTerm, storageTerm)
 	}
-
-	lm.logger.Debugw(
-		"Log consistency check passed",
-		"lastIndex",
-		storageLastIndex,
-		"lastTerm",
-		storageTerm,
-	)
 	return true, nil
 }
 
@@ -799,40 +594,17 @@ func (lm *logManager) IsConsistentWithStorage(ctx context.Context) (bool, error)
 // based on the current state of the log in persistent storage.
 func (lm *logManager) RebuildInMemoryState(ctx context.Context) error {
 	lm.logger.Infow("Rebuilding in-memory log state from storage...")
-
 	lastIndex := lm.storage.LastLogIndex()
-	firstIndex := lm.storage.FirstLogIndex()
 	var lastTerm types.Term
-
-	if lastIndex == 0 {
-		lm.updateCachedState(0, 0)
-		lm.metrics.ObserveLogState(firstIndex, 0, 0)
-		lm.logger.Infow("Log is empty; cached state reset", "firstIndex", firstIndex)
-		return nil
+	if lastIndex > 0 {
+		entryTerm, err := lm.fetchEntryTerm(ctx, lastIndex)
+		if err != nil {
+			return fmt.Errorf("failed to rebuild state: %w", err)
+		}
+		lastTerm = entryTerm
 	}
-
-	entryTerm, err := lm.fetchEntryTerm(ctx, lastIndex)
-	if err != nil {
-		lm.logger.Errorw("Failed to fetch last log entry during state rebuild",
-			"lastIndex", lastIndex, "error", err)
-		lm.updateCachedState(0, 0)
-		lm.metrics.ObserveLogState(firstIndex, 0, 0)
-		return fmt.Errorf(
-			"failed to rebuild state: could not fetch last entry term at index %d: %w",
-			lastIndex,
-			err,
-		)
-	}
-	lastTerm = entryTerm
-
 	lm.updateCachedState(lastIndex, lastTerm)
-	lm.metrics.ObserveLogState(firstIndex, lastIndex, lastTerm)
-
-	lm.logger.Infow("In-memory log state rebuilt successfully from storage",
-		"firstIndex", firstIndex,
-		"lastIndex", lastIndex,
-		"lastTerm", lastTerm)
-
+	lm.logger.Infow("In-memory log state rebuilt.", "lastIndex", lastIndex, "lastTerm", lastTerm)
 	return nil
 }
 
@@ -840,62 +612,27 @@ func (lm *logManager) RebuildInMemoryState(ctx context.Context) error {
 // Starts search from `searchFromHint` if provided, otherwise from the last log index.
 // Returns the index of the last entry with the given term, or ErrNotFound if not found.
 // Returns early if it encounters an older term or a compacted log region.
-func (lm *logManager) FindLastEntryWithTermUnsafe(
-	ctx context.Context,
-	term types.Term,
-	searchFromHint types.Index,
-) (types.Index, error) {
+func (lm *logManager) FindLastEntryWithTermUnsafe(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error) {
 	if lm.isShutdown.Load() {
 		return 0, ErrShuttingDown
 	}
 	if term == 0 {
-		return 0, fmt.Errorf("cannot search for term 0") // Term 0 is reserved for pre-log entries
+		return 0, fmt.Errorf("cannot search for term 0")
 	}
 
 	firstIdx := lm.GetFirstIndex()
-	lastIdx := types.Index(lm.lastIndex.Load())
-
+	lastIdx := lm.GetLastIndexUnsafe()
 	startIdx := lastIdx
 	if searchFromHint > 0 && searchFromHint < lastIdx {
 		startIdx = searchFromHint
 	}
 
-	lm.logger.Debugw(
-		"Starting FindLastEntryWithTerm",
-		"term",
-		term,
-		"startIndex",
-		startIdx,
-		"firstIndex",
-		firstIdx,
-	)
-
-	return lm.scanLogForTermUnsafe(
-		ctx,
-		startIdx,
-		firstIdx,
-		-1,
-		func(t types.Term, idx types.Index) (bool, bool) {
-			switch {
-			case t == term:
-				lm.logger.Debugw("Found last entry for term", "term", term, "index", idx)
-				return true, false
-			case t < term:
-				lm.logger.Debugw(
-					"Stopping early due to older term",
-					"term",
-					term,
-					"index",
-					idx,
-					"entryTerm",
-					t,
-				)
-				return false, true
-			default:
-				return false, false
-			}
-		},
-	)
+	return lm.scanLogForTermUnsafe(ctx, startIdx, firstIdx, -1, func(t types.Term, idx types.Index) (bool, bool) {
+		if t == term {
+			return true, false
+		}
+		return false, t < term
+	})
 }
 
 // FindFirstIndexInTermUnsafe scans backward from searchUpToIndex to find the first index
@@ -910,100 +647,40 @@ func (lm *logManager) FindLastEntryWithTermUnsafe(
 //   - or storage errors.
 //
 // Caller must ensure thread safety; no locks are acquired.
-func (lm *logManager) FindFirstIndexInTermUnsafe(
-	ctx context.Context,
-	termToFind types.Term,
-	searchUpToIndex types.Index,
-) (types.Index, error) {
+func (lm *logManager) FindFirstIndexInTermUnsafe(ctx context.Context, termToFind types.Term, searchUpToIndex types.Index) (types.Index, error) {
 	if lm.isShutdown.Load() {
 		return 0, ErrShuttingDown
 	}
 	if termToFind == 0 {
-		return 0, fmt.Errorf("cannot search for term 0 in FindFirstIndexInTermUnsafe")
+		return 0, fmt.Errorf("cannot search for term 0")
 	}
 
 	firstLogIdx := lm.GetFirstIndex()
 	lastLogIdx := lm.GetLastIndexUnsafe()
-
 	scanStartIndex := min(searchUpToIndex, lastLogIdx)
 
-	if scanStartIndex < firstLogIdx || (lastLogIdx == 0 && scanStartIndex == 0 && firstLogIdx > 0) {
-		if scanStartIndex < firstLogIdx {
-			lm.logger.Debugw(
-				"FindFirstIndexInTermUnsafe: scan start index is before first log index",
-				"termToFind",
-				termToFind,
-				"searchUpToIndex",
-				searchUpToIndex,
-				"scanStartIndex",
-				scanStartIndex,
-				"firstLogIdx",
-				firstLogIdx,
-			)
-			return 0, ErrNotFound
-		}
+	if scanStartIndex < firstLogIdx {
+		return 0, ErrNotFound
 	}
-
 	if lastLogIdx == 0 {
 		return 0, ErrNotFound
 	}
 
-	var firstIndexOfTermBlock types.Index = 0
-	var scanErr error
-
-	_, scanErr = lm.scanLogForTermUnsafe(
-		ctx,
-		scanStartIndex,
-		firstLogIdx,
-		-1, /* step backward */
-		func(currentEntryTerm types.Term, currentEntryIndex types.Index) (signalScanToStop bool, stopEarlyForScan bool) {
-			if currentEntryTerm == termToFind {
-				firstIndexOfTermBlock = currentEntryIndex
-				return false, false
-			}
-
-			if firstIndexOfTermBlock != 0 {
-				return true, false
-			}
-
+	var firstIndexOfTermBlock types.Index
+	_, err := lm.scanLogForTermUnsafe(ctx, scanStartIndex, firstLogIdx, -1, func(currentTerm types.Term, currentIndex types.Index) (bool, bool) {
+		if currentTerm == termToFind {
+			firstIndexOfTermBlock = currentIndex
 			return false, false
-		},
-	)
-
-	if scanErr != nil {
-		if firstIndexOfTermBlock == 0 {
-			return 0, scanErr
 		}
-
-		isHardOperationalError := !errors.Is(scanErr, ErrNotFound) &&
-			!errors.Is(scanErr, ErrCompacted)
-		if isHardOperationalError {
-			lm.logger.Warnw(
-				"Hard error during FindFirstIndexInTermUnsafe after term block was identified",
-				"termToFind",
-				termToFind,
-				"firstIndexOfTermBlock",
-				firstIndexOfTermBlock,
-				"scanError",
-				scanErr,
-			)
-			return 0, scanErr
-		}
-	}
+		return firstIndexOfTermBlock != 0, false
+	})
 
 	if firstIndexOfTermBlock == 0 {
-		if scanErr == nil {
-			lm.logger.Debugw(
-				"FindFirstIndexInTermUnsafe: scan completed without error, but no term index found.",
-				"termToFind",
-				termToFind,
-				"searchUpToIndex",
-				searchUpToIndex,
-			)
-		}
 		return 0, ErrNotFound
 	}
-
+	if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrCompacted) {
+		return 0, err
+	}
 	return firstIndexOfTermBlock, nil
 }
 
@@ -1059,6 +736,29 @@ func (lm *logManager) scanLogForTermUnsafe(
 	return 0, ErrNotFound
 }
 
+func (lm *logManager) GetLogStateForDebugging() (firstIndex, lastIndex types.Index, lastTerm types.Term) {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	firstIndex = lm.storage.FirstLogIndex()
+	lastIndex = types.Index(lm.lastIndex.Load())
+	lastTerm = types.Term(lm.lastTerm.Load())
+
+	return firstIndex, lastIndex, lastTerm
+}
+
+func (lm *logManager) RestoreFromSnapshot(meta types.SnapshotMetadata) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+
+	lm.snapshotIndex = meta.LastIncludedIndex
+	lm.snapshotTerm = meta.LastIncludedTerm
+
+	// The log has been truncated by the snapshot manager, so we must update our state.
+	lm.updateCachedState(meta.LastIncludedIndex, meta.LastIncludedTerm)
+	lm.TruncatePrefixUnsafe(context.Background(), meta.LastIncludedIndex+1)
+}
+
 // Stop logs the shutdown signal for the LogManager.
 func (lm *logManager) Stop() {
 	if lm.isShutdown.Load() {
@@ -1077,19 +777,27 @@ func (lm *logManager) updateCachedState(index types.Index, term types.Term) {
 	lm.updateCachedStateLocked(index, term)
 }
 
-// updateCachedStateAndGetFirst updates the cached last index/term under lock
+// updateCachedStateAndGetFirstLocked updates the cached last index/term under lock
 // and returns the current first index from storage.
-func (lm *logManager) updateCachedStateAndGetFirst(index types.Index, term types.Term) types.Index {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
+// The caller MUST hold the lm.mu write lock.
+func (lm *logManager) updateCachedStateAndGetFirstLocked(index types.Index, term types.Term) types.Index {
 	lm.updateCachedStateLocked(index, term)
 	return lm.storage.FirstLogIndex()
 }
 
 // updateCachedStateLocked assumes the caller holds lm.mu.
 func (lm *logManager) updateCachedStateLocked(index types.Index, term types.Term) {
+	oldIndex := lm.lastIndex.Load()
+	oldTerm := lm.lastTerm.Load()
+
 	lm.lastIndex.Store(uint64(index))
 	lm.lastTerm.Store(uint64(term))
+
+	lm.logger.Debugw("Updated cached log state",
+		"oldIndex", oldIndex,
+		"oldTerm", oldTerm,
+		"newIndex", index,
+		"newTerm", term)
 }
 
 // fetchEntryTerm fetches the term of the log entry at the given index from storage.
