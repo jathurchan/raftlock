@@ -6,93 +6,121 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/storage"
 	"github.com/jathurchan/raftlock/types"
 )
 
-// StateManager defines the interface for managing Raft node state.
-// It handles term changes, role transitions, vote tracking, and log index updates.
+// StateSnapshot provides atomic access to all state at a point in time
+type StateSnapshot struct {
+	Term            types.Term     // Current term
+	Role            types.NodeRole // Current role
+	LeaderID        types.NodeID   // Current leader
+	CommitIndex     types.Index    // Highest committed log index
+	LastApplied     types.Index    // Highest applied log index
+	VotedFor        types.NodeID   // Who we voted for in current term
+	LastKnownLeader types.NodeID   // Last known leader (persists when leader unknown)
+}
+
+// StateManager manages the state of a Raft node, including persistent fields
+// (currentTerm, votedFor), volatile state (role, leader), and log indices
+// (commitIndex, lastApplied). All persistent changes are atomically stored before
+// taking effect; failures trigger rollback to ensure consistency.
+//
+// Thread Safety:
+// - Methods without the "Unsafe" suffix are safe for concurrent use.
+// - "Unsafe" methods require external synchronization but offer better performance.
 type StateManager interface {
-	// Initialize loads the persisted state (term, votedFor) from storage.
-	// If no state exists or it's corrupted, it initializes default state.
+	// Initialize loads persisted state or defaults (term=0, votedFor=unknown, role=Follower).
+	// Must be called before any other method.
+	// - Loads from storage with timeout/retries
+	// - Validates and initializes in-memory structures and metrics
 	Initialize(ctx context.Context) error
 
-	// GetState returns the current term, role, and leader ID.
-	// Safe for concurrent use.
+	// Stop performs a graceful shutdown:
+	// - Prevents new operations
+	// - Waits for in-flight operations
+	// - Flushes state to disk and releases resources
+	// Safe to call multiple times.
+	Stop()
+
+	// GetState returns the current term, role, and leader ID atomically.
+	// Thread-safe.
 	GetState() (types.Term, types.NodeRole, types.NodeID)
 
-	// GetStateUnsafe returns the current term, role, and leader ID without synchronization.
-	// Intended for internal use where the caller can guarantee exclusive access or immutability.
-	// Not safe for concurrent use.
+	// GetStateUnsafe returns term, role, and leader without synchronization.
+	// Caller must hold a read or write lock.
 	GetStateUnsafe() (types.Term, types.NodeRole, types.NodeID)
 
-	// GetLastKnownLeader returns the most recently known leader ID.
-	// Useful for client request forwarding even when current leader is temporarily unknown.
-	// Safe for concurrent use.
+	// GetLastKnownLeader returns the last observed leader ID.
+	// Useful even when no current leader is known.
+	// Thread-safe.
 	GetLastKnownLeader() types.NodeID
 
-	// BecomeCandidate transitions the node to candidate state.
-	// Increments the term, votes for self, and persists the state.
-	// Returns true if the transition was successful (including persistence).
+	// BecomeCandidate increments term, votes for self, clears leader,
+	// transitions to Candidate, and persists changes atomically.
+	// Returns true on success, false if preconditions or persistence fail.
 	BecomeCandidate(ctx context.Context, reason ElectionReason) bool
 
-	// BecomeLeader transitions the node to leader state after winning an election.
-	// Persists the current state (which should reflect the election term and self-vote).
-	// Returns true if the transition was successful.
+	// BecomeCandidateForTerm transitions to Candidate for a specific term,
+	// used for pre-vote flows. Persists term and vote.
+	BecomeCandidateForTerm(ctx context.Context, term types.Term) bool
+
+	// BecomeLeader transitions from Candidate to Leader.
+	// Updates leader ID, metrics, and triggers notifications.
+	// Does not persist state (term already persisted by candidacy).
 	BecomeLeader(ctx context.Context) bool
 
-	// BecomeFollower transitions the node to follower state for the given term and leader ID.
-	// If the term is greater than the current term, updates the local term and resets votedFor.
-	// In both cases (higher or same term), updates role and known leader if they differ.
-	// Persists state only when the term is updated. No-op if already a follower in the same term and leader.
-	// This method does not return a value; failure to persist on term change results in rollback.
+	// BecomeFollower transitions to Follower with given term and leader.
+	// If term is higher, updates and persists new term; otherwise, just updates state.
+	// Handles rollback on failure.
 	BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID)
 
-	// CheckTermAndStepDown compares the given term with the local term.
-	// If the given term is higher, steps down and updates state.
-	// Returns whether a step-down occurred and the previous term.
+	// CheckTermAndStepDown compares the given term with local state.
+	// If higher, steps down to Follower, persists new term, and returns true.
+	// Otherwise, returns false.
 	CheckTermAndStepDown(
 		ctx context.Context,
 		rpcTerm types.Term,
 		rpcLeader types.NodeID,
 	) (steppedDown bool, previousTerm types.Term)
 
-	// GrantVote attempts to grant a vote to the given candidate for the specified term,
-	// checking term validity and if the node has already voted in this term.
-	// Persists the vote if granted. Returns true if the vote was granted and persisted.
+	// GrantVote attempts to grant a vote to the candidate.
+	// Applies Raft voting rules and persists changes if vote is granted.
+	// Returns true on success and persistence; false otherwise.
 	GrantVote(ctx context.Context, candidateID types.NodeID, term types.Term) bool
 
-	// UpdateCommitIndex sets the commit index if the new index is higher.
-	// Acquires a lock for thread safety. Returns true if the index was updated.
+	// UpdateCommitIndex sets a new commit index if it's higher than the current.
+	// Thread-safe.
 	UpdateCommitIndex(newCommitIndex types.Index) bool
 
-	// UpdateCommitIndexUnsafe sets the commit index if the new index is higher.
-	// The caller must ensure thread safety. Returns true if the index was updated.
+	// UpdateCommitIndexUnsafe is an unsynchronized version of UpdateCommitIndex.
+	// Caller must hold a write lock.
 	UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool
 
-	// UpdateLastApplied sets the last applied index if the new index is higher.
-	// Returns true if the index was updated. Safe for concurrent use.
+	// UpdateLastApplied sets a new last applied index if:
+	// - it's greater than the current
+	// - and ≤ commitIndex
+	// Logs an error if out of range. Thread-safe.
 	UpdateLastApplied(newLastApplied types.Index) bool
 
 	// GetCommitIndex returns the current commit index.
-	// Safe for concurrent use.
+	// Thread-safe.
 	GetCommitIndex() types.Index
 
-	// GetCommitIndexUnsafe returns the current commit index without synchronization.
-	// The caller must ensure thread safety.
+	// GetCommitIndexUnsafe returns the commit index without locking.
+	// Caller must hold a lock.
 	GetCommitIndexUnsafe() types.Index
 
-	// GetLastApplied returns the index of the last applied log entry. Safe for concurrent use.
+	// GetLastApplied returns the last applied index.
+	// Thread-safe.
 	GetLastApplied() types.Index
 
-	// GetLastAppliedUnsafe rreturns the index of the last applied log entry without synchronization.
-	// The caller must ensure thread safety.
+	// GetLastAppliedUnsafe returns the last applied index without locking.
+	// Caller must hold a lock.
 	GetLastAppliedUnsafe() types.Index
-
-	// Stop signals the state manager to stop processing and releases resources.
-	Stop()
 }
 
 // stateManager implements the StateManager interface.
@@ -101,88 +129,162 @@ type StateManager interface {
 // like commit/applied indices.
 // It ensures that state changes are persisted before they are acted upon.
 type stateManager struct {
-	mu         *sync.RWMutex // Raft's mutex protecting state fields
-	isShutdown *atomic.Bool  // Shared flag indicating Raft shutdown
+	mu         *sync.RWMutex // Shared Raft mutex
+	isShutdown *atomic.Bool  // Shared shutdown flag
 
-	id             types.NodeID        // ID of the local Raft node.
-	leaderChangeCh chan<- types.NodeID // Channel to notify leader changes
+	id             types.NodeID        // Local node ID
+	leaderChangeCh chan<- types.NodeID // Channel for leader change notifications
 
 	logger  logger.Logger
 	metrics Metrics
 	storage storage.Storage
 
-	currentTerm types.Term   // Latest term server has seen
-	votedFor    types.NodeID // CandidateID that received vote in current term
+	currentTerm types.Term   // Latest term server has seen (persisted)
+	votedFor    types.NodeID // CandidateID that received vote in current term (persisted)
 
-	role              types.NodeRole // Current role (Follower, Candidate, or Leader)
-	leaderID          types.NodeID   // Node ID of the current known leader, "" if unknown.
-	lastKnownLeaderID types.NodeID   // Stores the ID of the last known leader, persists even if leader becomes unknown.
+	role              types.NodeRole // Current role (Follower, Candidate, Leader)
+	leaderID          types.NodeID   // Current known leader
+	lastKnownLeaderID types.NodeID   // Last known leader (persists even when leader unknown)
 
 	commitIndex types.Index // Index of highest log entry known to be committed
-	lastApplied types.Index // Index of highest log entry applied (applier)
+	lastApplied types.Index // Index of highest log entry applied to state machine
+
+	lastRoleChange  time.Time     // Timestamp of last role change
+	roleChangeCount atomic.Uint64 // Count of role changes for debugging
+	termChangeCount atomic.Uint64 // Count of term changes for debugging
+
+	persistenceInProgress atomic.Bool   // Flag to prevent concurrent persistence operations
+	lastPersistAttempt    time.Time     // Timestamp of last persistence attempt
+	persistFailureCount   atomic.Uint64 // Count of persistence failures
 }
 
-// NewStateManager creates and initializes a new state manager.
-func NewStateManager(mu *sync.RWMutex, shutdownFlag *atomic.Bool, deps Dependencies,
-	nodeID types.NodeID, leaderChangeCh chan<- types.NodeID,
-) StateManager {
-	if mu == nil || shutdownFlag == nil || deps.Storage == nil || deps.Metrics == nil ||
-		deps.Logger == nil ||
-		nodeID == "" ||
-		leaderChangeCh == nil {
-		panic("raft: invalid arguments provided to NewStateManager")
+// StateManagerDeps contains all dependencies required for state manager
+type StateManagerDeps struct {
+	ID             types.NodeID
+	Mu             *sync.RWMutex
+	IsShutdown     *atomic.Bool
+	LeaderChangeCh chan<- types.NodeID
+	Logger         logger.Logger
+	Metrics        Metrics
+	Storage        storage.Storage
+}
+
+// NewStateManager creates a new state manager with improved error handling
+func NewStateManager(deps StateManagerDeps) (StateManager, error) {
+	if err := validateStateManagerDeps(deps); err != nil {
+		return nil, fmt.Errorf("invalid state manager dependencies: %w", err)
 	}
-	return &stateManager{
-		mu:             mu,
-		isShutdown:     shutdownFlag,
-		storage:        deps.Storage,
-		metrics:        deps.Metrics,
+
+	sm := &stateManager{
+		mu:             deps.Mu,
+		isShutdown:     deps.IsShutdown,
+		id:             deps.ID,
+		leaderChangeCh: deps.LeaderChangeCh,
 		logger:         deps.Logger.WithComponent("state"),
-		id:             nodeID,
-		leaderChangeCh: leaderChangeCh,
-		role:           types.RoleFollower,
-		commitIndex:    0,
-		lastApplied:    0,
+		metrics:        deps.Metrics,
+		storage:        deps.Storage,
+
+		// Initialize to unknown/default values
+		currentTerm:       0,
+		votedFor:          unknownNodeID,
+		role:              types.RoleFollower,
+		leaderID:          unknownNodeID,
+		lastKnownLeaderID: unknownNodeID,
+		commitIndex:       0,
+		lastApplied:       0,
+		lastRoleChange:    time.Now(),
 	}
+
+	sm.logger.Infow("State manager created",
+		"nodeID", sm.id,
+		"initialRole", sm.role.String())
+
+	return sm, nil
 }
 
-// Initialize loads the persisted state (term, votedFor) from storage during Raft startup.
-// If the persisted state is corrupted, it resets to a default follower state and persists that.
-func (sm *stateManager) Initialize(ctx context.Context) error {
-	sm.logger.Infow("Initializing state manager...")
+// validateStateManagerDeps ensures all required dependencies are provided
+func validateStateManagerDeps(deps StateManagerDeps) error {
+	if deps.ID == unknownNodeID {
+		return errors.New("node ID must be provided")
+	}
+	if deps.Mu == nil {
+		return errors.New("mutex must not be nil")
+	}
+	if deps.IsShutdown == nil {
+		return errors.New("shutdown flag must not be nil")
+	}
+	if deps.LeaderChangeCh == nil {
+		return errors.New("leader change channel must not be nil")
+	}
+	if deps.Logger == nil {
+		return errors.New("logger must not be nil")
+	}
+	if deps.Metrics == nil {
+		return errors.New("metrics must not be nil")
+	}
+	if deps.Storage == nil {
+		return errors.New("storage must not be nil")
+	}
+	return nil
+}
 
+// Initialize loads persisted state and sets up the state manager
+func (sm *stateManager) Initialize(ctx context.Context) error {
+	if sm.isShutdown.Load() {
+		return errors.New("cannot initialize: node is shutting down")
+	}
+
+	sm.logger.Infow("Initializing state manager", "nodeID", sm.id)
+
+	// Load persistent state with timeout
+	loadCtx, cancel := context.WithTimeout(ctx, stateManagerOpTimeout)
+	defer cancel()
+
+	if err := sm.loadPersistedState(loadCtx); err != nil {
+		sm.logger.Errorw("Failed to load persisted state, initializing defaults",
+			"error", err, "nodeID", sm.id)
+
+		// Try to initialize with defaults
+		if initErr := sm.initializeDefaultState(loadCtx); initErr != nil {
+			return fmt.Errorf("failed to initialize default state: %w", initErr)
+		}
+	}
+
+	// Log initial state
+	snapshot := sm.GetSnapshot()
+	sm.logger.Infow("State manager initialized successfully",
+		"nodeID", sm.id,
+		"term", snapshot.Term,
+		"role", snapshot.Role.String(),
+		"leader", snapshot.LeaderID,
+		"commitIndex", snapshot.CommitIndex,
+		"lastApplied", snapshot.LastApplied,
+		"votedFor", snapshot.VotedFor)
+
+	return nil
+}
+
+// loadPersistedState loads the persistent state from storage
+func (sm *stateManager) loadPersistedState(ctx context.Context) error {
 	state, err := sm.storage.LoadState(ctx)
 	if err != nil {
-		if errors.Is(err, storage.ErrCorruptedState) {
-			sm.logger.Warnw(
-				"Persistent state corrupted or missing, initializing default state",
-				"error",
-				err,
-			)
-			return sm.initializeDefaultState(ctx)
-		}
-
-		sm.logger.Errorw("Failed to load persistent state", "error", err)
 		return fmt.Errorf("failed to load persistent state: %w", err)
 	}
 
 	sm.mu.Lock()
 	sm.applyPersistentStateLocked(state.CurrentTerm, state.VotedFor)
-	sm.role = types.RoleFollower
-	sm.leaderID = unknownNodeID
-	currentTerm := sm.currentTerm
-	votedFor := sm.votedFor
 	sm.mu.Unlock()
 
-	sm.logger.Infow("Loaded persistent state from storage",
-		"term", currentTerm,
-		"voted_for", votedFor)
+	sm.logger.Infow("Loaded persisted state",
+		"term", state.CurrentTerm,
+		"votedFor", state.VotedFor,
+		"nodeID", sm.id)
+
 	sm.metrics.ObserveTerm(state.CurrentTerm)
 	return nil
 }
 
-// initializeDefaultState sets the in-memory state to term 0, no vote, follower role,
-// and persists this initial state. Called when loading fails or state is corrupted.
+// initializeDefaultState sets up default state when persistence fails
 func (sm *stateManager) initializeDefaultState(ctx context.Context) error {
 	initialTerm := types.Term(0)
 	initialVotedFor := unknownNodeID
@@ -199,172 +301,287 @@ func (sm *stateManager) initializeDefaultState(ctx context.Context) error {
 	}
 
 	sm.logger.Infow("Initialized and persisted default state",
-		"term", initialTerm, "voted_for", initialVotedFor)
+		"term", initialTerm,
+		"votedFor", initialVotedFor,
+		"nodeID", sm.id)
 
 	sm.metrics.ObserveTerm(initialTerm)
 	return nil
 }
 
-// GetState returns the current term, role, and leader ID using a read lock.
-// This method is safe for concurrent use.
+// GetState returns the current state with read lock protection
 func (sm *stateManager) GetState() (types.Term, types.NodeRole, types.NodeID) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-
 	return sm.GetStateUnsafe()
 }
 
-// GetStateUnsafe returns the current term, role, and leader ID without acquiring a lock.
-// This method is not safe for concurrent use and should only be called when external synchronization is guaranteed.
+// GetStateUnsafe returns current state without locking (caller must hold lock)
 func (sm *stateManager) GetStateUnsafe() (types.Term, types.NodeRole, types.NodeID) {
 	return sm.currentTerm, sm.role, sm.leaderID
 }
 
-// GetLastKnownLeader returns the most recently known leader ID using a read lock.
-// This might differ from `leaderID` if leadership is currently unknown but was known previously.
+// GetSnapshot returns a consistent snapshot of all state
+func (sm *stateManager) GetSnapshot() StateSnapshot {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.GetSnapshotUnsafe()
+}
+
+// GetSnapshotUnsafe returns state snapshot without locking (caller must hold lock)
+func (sm *stateManager) GetSnapshotUnsafe() StateSnapshot {
+	return StateSnapshot{
+		Term:            sm.currentTerm,
+		Role:            sm.role,
+		LeaderID:        sm.leaderID,
+		CommitIndex:     sm.commitIndex,
+		LastApplied:     sm.lastApplied,
+		VotedFor:        sm.votedFor,
+		LastKnownLeader: sm.lastKnownLeaderID,
+	}
+}
+
+// GetLastKnownLeader returns the most recently known leader
 func (sm *stateManager) GetLastKnownLeader() types.NodeID {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.lastKnownLeaderID
 }
 
-// BecomeCandidate attempts to transition the node from follower to candidate state.
-// It increments the term, votes for itself, and persists the new state *before*
-// signalling success. Returns true only if the transition and persistence succeed.
+// BecomeCandidate transitions to candidate state with improved error handling
 func (sm *stateManager) BecomeCandidate(ctx context.Context, reason ElectionReason) bool {
 	if sm.isShutdown.Load() {
-		sm.logger.Warnw("Attempted BecomeCandidate on shutdown node")
+		sm.logger.Debugw("Cannot become candidate: node shutting down",
+			"reason", reason, "nodeID", sm.id)
+		return false
+	}
+
+	// Use timeout context to prevent hanging
+	transitionCtx, cancel := context.WithTimeout(ctx, stateTransitionTimeout)
+	defer cancel()
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	currentTerm, currentRole, _ := sm.GetStateUnsafe()
+
+	// Only followers can become candidates
+	if currentRole != types.RoleFollower {
+		sm.logger.Debugw("Cannot become candidate: not a follower",
+			"currentRole", currentRole.String(),
+			"reason", reason,
+			"nodeID", sm.id)
+		return false
+	}
+
+	newTerm := currentTerm + 1
+
+	sm.logger.Infow("Attempting to become candidate",
+		"currentTerm", currentTerm,
+		"newTerm", newTerm,
+		"reason", reason,
+		"nodeID", sm.id)
+
+	// Start election process
+	sm.startElectionLocked()
+
+	// Persist the new state
+	if err := sm.persistState(transitionCtx, newTerm, sm.id); err != nil {
+		sm.logger.Errorw("Failed to persist candidate state, rolling back",
+			"term", newTerm,
+			"error", err,
+			"nodeID", sm.id)
+
+		// Rollback to previous state
+		sm.applyPersistentStateLocked(currentTerm, unknownNodeID)
+		sm.setRoleAndLeaderLocked(types.RoleFollower, unknownNodeID, currentTerm)
+		return false
+	}
+
+	sm.logger.Infow("Successfully became candidate",
+		"term", newTerm,
+		"reason", reason,
+		"nodeID", sm.id)
+
+	sm.roleChangeCount.Add(1)
+	sm.termChangeCount.Add(1)
+	sm.metrics.ObserveElectionStart(newTerm, reason)
+	sm.metrics.ObserveRoleChange(types.RoleCandidate, currentRole, newTerm)
+	sm.metrics.ObserveTerm(newTerm)
+
+	return true
+}
+
+// BecomeLeader transitions to leader state with validation
+func (sm *stateManager) BecomeLeader(ctx context.Context) bool {
+	if sm.isShutdown.Load() {
+		sm.logger.Debugw("Cannot become leader: node shutting down", "nodeID", sm.id)
 		return false
 	}
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	if !sm.role.CanTransitionTo(types.RoleCandidate) {
-		sm.logger.Warnw("Cannot become candidate: invalid role transition",
-			"current_role", sm.role.String(),
-			"current_term", sm.currentTerm)
+	currentTerm, currentRole, _ := sm.GetStateUnsafe()
+
+	// Only candidates can become leaders
+	if currentRole != types.RoleCandidate {
+		sm.logger.Warnw("Cannot become leader: not a candidate",
+			"currentRole", currentRole.String(),
+			"term", currentTerm,
+			"nodeID", sm.id)
 		return false
 	}
+
+	sm.logger.Infow("Becoming leader",
+		"term", currentTerm,
+		"nodeID", sm.id)
+
+	// Transition to leader role
+	sm.setRoleAndLeaderLocked(types.RoleLeader, sm.id, currentTerm)
+
+	sm.logger.Infow("Successfully became leader",
+		"term", currentTerm,
+		"nodeID", sm.id)
+
+	sm.roleChangeCount.Add(1)
+	sm.metrics.ObserveRoleChange(types.RoleLeader, currentRole, currentTerm)
+
+	// Notify about leader change
+	sm.notifyLeaderChange(sm.id)
+
+	return true
+}
+
+// BecomeCandidateForTerm transitions to candidate state for a specific term
+func (sm *stateManager) BecomeCandidateForTerm(ctx context.Context, term types.Term) bool {
+	if sm.isShutdown.Load() {
+		sm.logger.Debugw("Cannot become candidate: node shutting down",
+			"targetTerm", term, "nodeID", sm.id)
+		return false
+	}
+
+	transitionCtx, cancel := context.WithTimeout(ctx, stateTransitionTimeout)
+	defer cancel()
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	currentTerm, currentRole, _ := sm.GetStateUnsafe()
+
+	if currentRole != types.RoleFollower {
+		sm.logger.Debugw("Cannot become candidate: not a follower",
+			"currentRole", currentRole.String(),
+			"targetTerm", term,
+			"nodeID", sm.id)
+		return false
+	}
+
+	if term <= currentTerm {
+		sm.logger.Debugw("Cannot become candidate: target term not higher than current",
+			"currentTerm", currentTerm,
+			"targetTerm", term,
+			"nodeID", sm.id)
+		return false
+	}
+
+	sm.logger.Infow("Attempting to become candidate for specific term",
+		"currentTerm", currentTerm,
+		"targetTerm", term,
+		"nodeID", sm.id)
 
 	previousTerm := sm.currentTerm
 	previousVotedFor := sm.votedFor
 	previousRole := sm.role
 	previousLeader := sm.leaderID
 
-	sm.startElectionLocked()
-	newTerm := sm.currentTerm
+	sm.applyPersistentStateLocked(term, sm.id)
+	sm.setRoleAndLeaderLocked(types.RoleCandidate, unknownNodeID, term)
 
-	if err := sm.persistState(ctx, newTerm, sm.id); err != nil {
-		sm.logger.Errorw("Failed to persist state when becoming candidate, rolling back",
-			"new_term", newTerm,
-			"error", err)
+	if err := sm.persistState(transitionCtx, term, sm.id); err != nil {
+		sm.logger.Errorw("Failed to persist candidate state for term, rolling back",
+			"targetTerm", term,
+			"error", err,
+			"nodeID", sm.id)
 
 		sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
 		sm.setRoleAndLeaderLocked(previousRole, previousLeader, previousTerm)
-
 		return false
 	}
 
-	sm.metrics.ObserveTerm(newTerm)
-	sm.metrics.ObserveElectionStart(newTerm, reason)
+	sm.logger.Infow("Successfully became candidate for specific term",
+		"term", term,
+		"previousTerm", currentTerm,
+		"nodeID", sm.id)
 
-	sm.logger.Infow("Transitioned to Candidate", "new_term", newTerm)
+	sm.roleChangeCount.Add(1)
+	sm.termChangeCount.Add(1)
+	sm.metrics.ObserveTerm(term)
+	sm.metrics.ObserveRoleChange(types.RoleCandidate, previousRole, term)
+
 	return true
 }
 
-// BecomeLeader transitions the node to leader state, typically after winning an election.
-// Assumes the node is currently a Candidate in the correct term.
-func (sm *stateManager) BecomeLeader(ctx context.Context) bool {
+// BecomeFollower transitions to follower state
+func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID) {
 	if sm.isShutdown.Load() {
-		sm.logger.Warnw("Attempted BecomeLeader on shutdown node")
-		return false
-	}
-
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if !sm.role.CanTransitionTo(types.RoleLeader) {
-		sm.logger.Warnw("Cannot become leader: invalid role transition",
-			"current_role", sm.role.String(),
-			"current_term", sm.currentTerm)
-		return false
-	}
-
-	currentTerm := sm.currentTerm
-	leaderID := sm.id // Leader is self
-
-	sm.setRoleAndLeaderLocked(types.RoleLeader, leaderID, currentTerm)
-
-	sm.logger.Infow("Transitioned to Leader", "term", currentTerm, "leader", leaderID)
-	return true
-}
-
-// BecomeFollower transitions the node into Follower state for the specified term and leader.
-// If the provided term is greater than the current term, it updates the term and resets votedFor,
-// persisting the new state.
-func (sm *stateManager) BecomeFollower(
-	ctx context.Context,
-	term types.Term,
-	leaderID types.NodeID,
-) {
-	if sm.isShutdown.Load() {
-		sm.logger.Debugw("Attempted BecomeFollower on shutdown node")
+		sm.logger.Debugw("Cannot become follower: node shutting down",
+			"term", term, "leader", leaderID, "nodeID", sm.id)
 		return
 	}
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	if term < sm.currentTerm {
-		sm.logger.Errorw("BecomeFollower called with lower term than current",
-			"current_term", sm.currentTerm,
-			"received_term", term,
-			"current_role", sm.role.String())
-		return
-	}
+	currentTerm, currentRole, currentLeader := sm.GetStateUnsafe()
 
-	if sm.role == types.RoleFollower && sm.currentTerm == term && sm.leaderID == leaderID {
-		return
-	}
+	sm.logger.Infow("Becoming follower",
+		"currentTerm", currentTerm,
+		"newTerm", term,
+		"currentRole", currentRole.String(),
+		"currentLeader", currentLeader,
+		"newLeader", leaderID,
+		"nodeID", sm.id)
 
-	previousTerm := sm.currentTerm
-	previousVotedFor := sm.votedFor
+	// Update term if necessary
+	if term > currentTerm {
+		sm.applyPersistentStateLocked(term, unknownNodeID)
+		sm.termChangeCount.Add(1)
+		sm.metrics.ObserveTerm(term)
 
-	termChanged := false
-	if term > sm.currentTerm {
-		sm.logger.Infow("Becoming follower due to higher term",
-			"current_term", previousTerm, "new_term", term, "new_leader", leaderID)
-		sm.currentTerm = term
-		sm.votedFor = unknownNodeID
-		termChanged = true
+		// Persist the new term
+		persistCtx, cancel := context.WithTimeout(ctx, persistOperationTimeout)
+		defer cancel()
 
-		if err := sm.persistState(ctx, sm.currentTerm, sm.votedFor); err != nil {
-			sm.logger.Errorw(
-				"Failed to persist state change in BecomeFollower, rolling back term/vote",
-				"new_term",
-				sm.currentTerm,
-				"error",
-				err,
-			)
-			sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
-			sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, previousTerm)
-			return
+		if err := sm.persistState(persistCtx, term, unknownNodeID); err != nil {
+			sm.logger.Errorw("Failed to persist follower state",
+				"term", term, "error", err, "nodeID", sm.id)
+			// Continue despite persistence error - state is still updated in memory
 		}
-		sm.metrics.ObserveTerm(sm.currentTerm)
 	}
 
-	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, sm.currentTerm)
+	// Update role and leader
+	previousRole := sm.role
+	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderID, term)
 
-	if !termChanged {
-		sm.logger.Infow("Becoming follower in same term",
-			"term", sm.currentTerm, "new_leader", leaderID, "previous_role", sm.role.String())
+	if previousRole != types.RoleFollower {
+		sm.roleChangeCount.Add(1)
+		sm.metrics.ObserveRoleChange(types.RoleFollower, currentRole, sm.currentTerm)
+	}
+
+	sm.logger.Infow("Successfully became follower",
+		"term", term,
+		"leader", leaderID,
+		"previousRole", previousRole.String(),
+		"nodeID", sm.id)
+
+	// Notify about leader change if it actually changed
+	if currentLeader != leaderID {
+		sm.notifyLeaderChange(leaderID)
 	}
 }
 
-// CheckTermAndStepDown compares an RPC term with the local term and potentially steps down.
-// Returns true if the node stepped down (became Follower), false otherwise.
-// Also returns the node's term before any potential change.
+// CheckTermAndStepDown checks if we should step down due to a higher term
 func (sm *stateManager) CheckTermAndStepDown(
 	ctx context.Context,
 	rpcTerm types.Term,
@@ -372,90 +589,55 @@ func (sm *stateManager) CheckTermAndStepDown(
 ) (steppedDown bool, previousTerm types.Term) {
 	if sm.isShutdown.Load() {
 		sm.mu.RLock()
-		prevTerm := sm.currentTerm
+		currentTerm := sm.currentTerm
 		sm.mu.RUnlock()
-		sm.logger.Debugw("CheckTermAndStepDown called on shutdown node")
-		return false, prevTerm
+		return false, currentTerm
 	}
 
 	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-	previousTerm = sm.currentTerm
-	currentRole := sm.role
-	currentLeader := sm.leaderID
+	currentTerm, currentRole, _ := sm.GetStateUnsafe()
 
-	if rpcTerm > sm.currentTerm {
-		sm.logger.Infow("Higher term received via RPC, stepping down",
-			"current_term", sm.currentTerm,
-			"rpc_term", rpcTerm,
-			"rpc_leader_hint", rpcLeader,
-			"current_role", currentRole.String(),
-		)
-
-		if err := sm.stepDownToHigherTermLocked(ctx, rpcTerm, rpcLeader); err != nil {
-			sm.logger.Errorw("Persistence failed during step down", "error", err)
-		}
-		sm.mu.Unlock()
-		return true, previousTerm
+	if rpcTerm <= currentTerm {
+		return false, currentTerm
 	}
 
-	if rpcTerm == sm.currentTerm {
-		if currentRole != types.RoleFollower ||
-			(rpcLeader != unknownNodeID && rpcLeader != currentLeader) {
-			if currentRole != types.RoleFollower {
-				sm.logger.Infow("Same term RPC received; stepping down from non-follower role",
-					"term", sm.currentTerm,
-					"current_role", currentRole.String(),
-					"rpc_leader_hint", rpcLeader,
-				)
-			} else {
-				sm.logger.Infow("Same term RPC with new leader hint; updating follower's known leader",
-					"term", sm.currentTerm,
-					"old_leader", currentLeader,
-					"new_leader_hint", rpcLeader,
-				)
-			}
-			sm.setRoleAndLeaderLocked(types.RoleFollower, rpcLeader, sm.currentTerm)
-			sm.mu.Unlock()
-			return true, previousTerm
-		}
+	sm.logger.Infow("Stepping down due to higher term",
+		"currentTerm", currentTerm,
+		"rpcTerm", rpcTerm,
+		"currentRole", currentRole.String(),
+		"rpcLeader", rpcLeader,
+		"nodeID", sm.id)
+
+	// Update to higher term and reset vote
+	sm.applyPersistentStateLocked(rpcTerm, unknownNodeID)
+	sm.setRoleAndLeaderLocked(types.RoleFollower, rpcLeader, rpcTerm)
+
+	// Persist the new state
+	persistCtx, cancel := context.WithTimeout(ctx, persistOperationTimeout)
+	defer cancel()
+
+	if err := sm.persistState(persistCtx, rpcTerm, unknownNodeID); err != nil {
+		sm.logger.Errorw("Failed to persist step-down state",
+			"term", rpcTerm, "error", err, "nodeID", sm.id)
+		// Continue despite persistence error
 	}
 
-	sm.mu.Unlock()
-	return false, previousTerm
+	sm.termChangeCount.Add(1)
+	if currentRole != types.RoleFollower {
+		sm.roleChangeCount.Add(1)
+		sm.metrics.ObserveRoleChange(types.RoleFollower, currentRole, sm.currentTerm)
+	}
+	sm.metrics.ObserveTerm(rpcTerm)
+
+	// Notify about leader change
+	sm.notifyLeaderChange(rpcLeader)
+
+	return true, currentTerm
 }
 
-// stepDownToHigherTermLocked updates term, resets vote, becomes follower, and persists state.
-// Must be called with sm.mu.Lock() held. Returns error from persistence.
-func (sm *stateManager) stepDownToHigherTermLocked(
-	ctx context.Context,
-	newTerm types.Term,
-	leaderHint types.NodeID,
-) error {
-	previousTerm := sm.currentTerm
-	previousVotedFor := sm.votedFor
-
-	sm.applyPersistentStateLocked(newTerm, unknownNodeID)
-
-	if err := sm.persistState(ctx, newTerm, unknownNodeID); err != nil {
-		sm.logger.Errorw("Failed to persist state after stepping down to higher term",
-			"new_term", newTerm,
-			"error", err,
-		)
-
-		sm.applyPersistentStateLocked(previousTerm, previousVotedFor)
-		sm.setRoleAndLeaderLocked(types.RoleFollower, leaderHint, previousTerm)
-
-		return err
-	}
-
-	sm.setRoleAndLeaderLocked(types.RoleFollower, leaderHint, newTerm)
-	sm.metrics.ObserveTerm(newTerm)
-	return nil
-}
-
-// GrantVote attempts to grant a vote for the given candidate in the specified term.
-// Checks term validity and ensures only one vote is cast per term. Persists the vote if granted.
+// GrantVote attempts to grant a vote with improved validation and persistence
 func (sm *stateManager) GrantVote(
 	ctx context.Context,
 	candidateID types.NodeID,
@@ -463,71 +645,116 @@ func (sm *stateManager) GrantVote(
 ) bool {
 	if sm.isShutdown.Load() {
 		sm.logger.Infow("Vote rejected: node is shut down",
-			"requested_term", term,
-			"candidate_id", candidateID)
+			"requestedTerm", term,
+			"candidateID", candidateID,
+			"nodeID", sm.id)
 		return false
 	}
 
-	sm.mu.Lock()
-
-	if term < sm.currentTerm {
-		sm.logger.Debugw("Vote rejected: candidate term lower than current term",
-			"current_term", sm.currentTerm,
-			"candidate_term", term,
-			"candidate_id", candidateID)
-		sm.mu.Unlock()
-		return false
-	}
-
-	canVote := sm.votedFor == unknownNodeID || sm.votedFor == candidateID
-	if !canVote {
-		sm.logger.Infow("Vote rejected: already voted for another candidate in this term",
-			"current_term", sm.currentTerm,
-			"voted_for", sm.votedFor,
-			"candidate_id", candidateID)
-		sm.mu.Unlock()
-		return false
-	}
-
-	previousVotedFor := sm.votedFor
-	currentTerm := sm.currentTerm
-
-	sm.votedFor = candidateID
-
-	sm.mu.Unlock()
-
-	if err := sm.persistState(ctx, currentTerm, candidateID); err != nil {
-		sm.logger.Errorw("Failed to persist vote, rolling back in-memory vote",
-			"term", currentTerm,
-			"candidate_id", candidateID,
-			"error", err)
-		sm.mu.Lock()
-
-		if sm.currentTerm == currentTerm && sm.votedFor == candidateID {
-			sm.votedFor = previousVotedFor
-		}
-		sm.mu.Unlock()
-		return false
-	}
-
-	sm.logger.Infow("Vote granted",
-		"term", currentTerm,
-		"candidate_id", candidateID)
-	sm.metrics.ObserveVoteGranted(currentTerm)
-	return true
-}
-
-// UpdateCommitIndex sets the commit index if the new index is higher.
-// Acquires a lock for thread safety. Returns true if the index was updated.
-func (sm *stateManager) UpdateCommitIndex(newCommitIndex types.Index) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	currentTerm := sm.currentTerm
+
+	// Reject votes for lower terms
+	if term < currentTerm {
+		sm.logger.Debugw("Vote rejected: candidate term lower than current term",
+			"currentTerm", currentTerm,
+			"candidateTerm", term,
+			"candidateID", candidateID,
+			"nodeID", sm.id)
+		return false
+	}
+
+	// Store previous state for rollback
+	previousVotedFor := sm.votedFor
+	previousTerm := sm.currentTerm
+
+	// Update to higher term if necessary and reset vote
+	if term > currentTerm {
+		sm.logger.Debugw("Updating to higher term, resetting vote",
+			"currentTerm", currentTerm,
+			"newTerm", term,
+			"previousVote", sm.votedFor,
+			"nodeID", sm.id)
+
+		sm.currentTerm = term
+		sm.votedFor = unknownNodeID // Reset vote for new term
+		sm.termChangeCount.Add(1)
+		sm.metrics.ObserveTerm(term)
+	}
+
+	// Now check if we can vote in the current (possibly updated) term
+	canVote := sm.votedFor == unknownNodeID || sm.votedFor == candidateID
+	if !canVote {
+		sm.logger.Infow("Vote rejected: already voted for another candidate",
+			"currentTerm", sm.currentTerm,
+			"votedFor", sm.votedFor,
+			"candidateID", candidateID,
+			"nodeID", sm.id)
+
+		// If we updated the term but can't vote, we still need to persist the term update
+		if term > previousTerm {
+			persistCtx, cancel := context.WithTimeout(ctx, persistOperationTimeout)
+			defer cancel()
+
+			if err := sm.persistStateWithRetry(persistCtx, sm.currentTerm, sm.votedFor); err != nil {
+				sm.logger.Errorw("Failed to persist term update after vote rejection",
+					"term", sm.currentTerm,
+					"error", err,
+					"nodeID", sm.id)
+				// Rollback in-memory state
+				sm.currentTerm = previousTerm
+				sm.votedFor = previousVotedFor
+			}
+		}
+		return false
+	}
+
+	sm.logger.Debugw("Attempting to grant vote",
+		"term", sm.currentTerm,
+		"candidateID", candidateID,
+		"currentVotedFor", sm.votedFor,
+		"nodeID", sm.id)
+
+	// Update vote in memory
+	sm.votedFor = candidateID
+
+	// Persist the vote with retry logic
+	persistCtx, cancel := context.WithTimeout(ctx, persistOperationTimeout)
+	defer cancel()
+
+	if err := sm.persistStateWithRetry(persistCtx, sm.currentTerm, candidateID); err != nil {
+		sm.logger.Errorw("Failed to persist vote, rolling back",
+			"term", sm.currentTerm,
+			"candidateID", candidateID,
+			"error", err,
+			"nodeID", sm.id)
+
+		// Rollback in-memory state
+		sm.votedFor = previousVotedFor
+		sm.currentTerm = previousTerm
+
+		return false
+	}
+
+	sm.logger.Infow("Vote granted and persisted",
+		"term", sm.currentTerm,
+		"candidateID", candidateID,
+		"nodeID", sm.id)
+
+	sm.metrics.ObserveVoteGranted(sm.currentTerm)
+	return true
+}
+
+// UpdateCommitIndex updates the commit index if higher
+func (sm *stateManager) UpdateCommitIndex(newCommitIndex types.Index) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	return sm.UpdateCommitIndexUnsafe(newCommitIndex)
 }
 
-// UpdateCommitIndexUnsafe sets the commit index if the new index is higher.
-// Does not acquire a lock; caller must hold sm.mu.Lock(). Returns true if the index was updated.
+// UpdateCommitIndexUnsafe updates commit index without locking
 func (sm *stateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool {
 	if newCommitIndex <= sm.commitIndex {
 		return false
@@ -540,24 +767,26 @@ func (sm *stateManager) UpdateCommitIndexUnsafe(newCommitIndex types.Index) bool
 		"from", prev,
 		"to", newCommitIndex,
 		"term", sm.currentTerm,
-		"role", sm.role.String())
+		"role", sm.role.String(),
+		"nodeID", sm.id)
 
 	sm.metrics.ObserveCommitIndex(newCommitIndex)
 	return true
 }
 
-// UpdateLastApplied updates the last applied index if the new index is higher.
-// Safe for concurrent use.
+// UpdateLastApplied updates the last applied index with validation
 func (sm *stateManager) UpdateLastApplied(newLastApplied types.Index) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	// Validate that lastApplied doesn't exceed commitIndex
 	if newLastApplied > sm.commitIndex {
 		sm.logger.Errorw("Attempted to set lastApplied beyond commitIndex",
-			"last_applied", newLastApplied,
-			"commit_index", sm.commitIndex,
+			"lastApplied", newLastApplied,
+			"commitIndex", sm.commitIndex,
 			"term", sm.currentTerm,
-			"role", sm.role.String())
+			"role", sm.role.String(),
+			"nodeID", sm.id)
 		return false
 	}
 
@@ -572,151 +801,468 @@ func (sm *stateManager) UpdateLastApplied(newLastApplied types.Index) bool {
 		"from", prev,
 		"to", newLastApplied,
 		"term", sm.currentTerm,
-		"role", sm.role.String())
+		"role", sm.role.String(),
+		"nodeID", sm.id)
 
 	sm.metrics.ObserveAppliedIndex(newLastApplied)
 	return true
 }
 
-// GetCommitIndex returns the current commit index using a read lock.
+// GetCommitIndex returns the current commit index safely
 func (sm *stateManager) GetCommitIndex() types.Index {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-
 	return sm.commitIndex
 }
 
-// GetCommitIndexUnsafe returns the current commit index without acquiring a lock.
-// Assumes the caller holds sm.mu.RLock()
+// GetCommitIndexUnsafe returns commit index without locking
 func (sm *stateManager) GetCommitIndexUnsafe() types.Index {
 	return sm.commitIndex
 }
 
-// GetLastApplied returns the index of the last applied log entry using a read lock.
+// GetLastApplied returns the last applied index safely
 func (sm *stateManager) GetLastApplied() types.Index {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.lastApplied
 }
 
-// GetLastAppliedUnsafe returns the index of the last applied log entry without acquiring a lock.
-// Assumes the caller holds sm.mu.RLock()
+// GetLastAppliedUnsafe returns last applied index without locking
 func (sm *stateManager) GetLastAppliedUnsafe() types.Index {
 	return sm.lastApplied
 }
 
-// Stop sets the shutdown flag atomically.
+// Utility methods for role checking
+
+// IsLeader returns true if the node is currently the leader
+func (sm *stateManager) IsLeader() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.role == types.RoleLeader
+}
+
+// IsCandidate returns true if the node is currently a candidate
+func (sm *stateManager) IsCandidate() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.role == types.RoleCandidate
+}
+
+// IsFollower returns true if the node is currently a follower
+func (sm *stateManager) IsFollower() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.role == types.RoleFollower
+}
+
+// Stop performs cleanup when shutting down
 func (sm *stateManager) Stop() {
 	if sm.isShutdown.CompareAndSwap(false, true) {
-		sm.logger.Infow("StateManager received stop signal")
+		sm.logger.Infow("StateManager received stop signal",
+			"nodeID", sm.id,
+			"roleChangeCount", sm.roleChangeCount.Load(),
+			"termChangeCount", sm.termChangeCount.Load(),
+			"persistFailureCount", sm.persistFailureCount.Load())
 	} else {
-		sm.logger.Debugw("StateManager stop signal received multiple times")
+		sm.logger.Debugw("StateManager stop signal received multiple times", "nodeID", sm.id)
 	}
 }
 
-// startElectionLocked increments the term and votes for self.
-// Must be called with sm.mu.Lock() held.
+// startElectionLocked starts an election by incrementing term and voting for self
+// Must be called with sm.mu.Lock() held
 func (sm *stateManager) startElectionLocked() {
 	newTerm := sm.currentTerm + 1
 	sm.applyPersistentStateLocked(newTerm, sm.id)
 	sm.setRoleAndLeaderLocked(types.RoleCandidate, unknownNodeID, newTerm)
+
+	sm.logger.Debugw("Started election",
+		"newTerm", newTerm,
+		"nodeID", sm.id)
 }
 
-// applyPersistentStateLocked updates only the persistent fields (term, votedFor) in memory.
-// Must be called with sm.mu.Lock() held.
+// applyPersistentStateLocked updates persistent state fields in memory
+// Must be called with sm.mu.Lock() held
 func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor types.NodeID) {
 	sm.currentTerm = term
 	sm.votedFor = votedFor
 }
 
-// setRoleAndLeaderLocked updates the role and leaderID, logging the change and notifying listeners.
-// Must be called with sm.mu.Lock() held.
-func (sm *stateManager) setRoleAndLeaderLocked(
-	newRole types.NodeRole,
-	newLeader types.NodeID,
-	term types.Term,
-) {
-	oldRole := sm.role
-	oldLeader := sm.leaderID
+// setRoleAndLeaderLocked updates role and leader information
+// Must be called with sm.mu.Lock() held
+func (sm *stateManager) setRoleAndLeaderLocked(role types.NodeRole, leaderID types.NodeID, term types.Term) {
+	previousRole := sm.role
+	previousLeader := sm.leaderID
 
-	if oldRole == newRole && oldLeader == newLeader {
-		return
+	sm.role = role
+	sm.leaderID = leaderID
+	sm.lastRoleChange = time.Now()
+
+	// Update last known leader if we have a valid leader
+	if leaderID != unknownNodeID {
+		sm.lastKnownLeaderID = leaderID
 	}
 
-	sm.role = newRole
-	sm.leaderID = newLeader
-
-	if newLeader != unknownNodeID {
-		sm.lastKnownLeaderID = newLeader
-	}
-
-	sm.logger.Infow("Role changed",
-		"new_role", newRole.String(),
+	sm.logger.Debugw("Role and leader updated",
+		"previousRole", previousRole.String(),
+		"newRole", role.String(),
+		"previousLeader", previousLeader,
+		"newLeader", leaderID,
 		"term", term,
-		"leader", newLeader,
-		"previous_role", oldRole.String(),
-		"previous_leader", oldLeader,
-	)
-
-	sm.metrics.ObserveRoleChange(newRole, oldRole, term)
-
-	if oldLeader != newLeader {
-		sm.notifyLeaderChangeNonBlocking(newLeader, term)
-	}
+		"nodeID", sm.id)
 }
 
-// persistState saves the given term and votedFor to stable storage.
-func (sm *stateManager) persistState(
-	ctx context.Context,
-	term types.Term,
-	votedFor types.NodeID,
-) error {
+// persistState persists the current term and voted for to storage
+func (sm *stateManager) persistState(ctx context.Context, term types.Term, votedFor types.NodeID) error {
+	// Prevent concurrent persistence operations
+	if !sm.persistenceInProgress.CompareAndSwap(false, true) {
+		sm.logger.Debugw("Persistence operation already in progress, skipping",
+			"term", term, "votedFor", votedFor, "nodeID", sm.id)
+		return errors.New("persistence operation already in progress")
+	}
+	defer sm.persistenceInProgress.Store(false)
+
+	sm.lastPersistAttempt = time.Now()
+
+	sm.logger.Debugw("Persisting state",
+		"term", term,
+		"votedFor", votedFor,
+		"nodeID", sm.id)
+
 	state := types.PersistentState{
 		CurrentTerm: term,
 		VotedFor:    votedFor,
 	}
 
-	sm.logger.Debugw("Persisting state", "term", term, "voted_for", votedFor)
-	err := sm.storage.SaveState(ctx, state)
-	if err != nil {
-		sm.logger.Errorw("Failed to persist state",
-			"term", state.CurrentTerm,
-			"votedFor", state.VotedFor,
-			"error", err)
-
-		return fmt.Errorf(
-			"failed to save state (term: %d, votedFor: '%s'): %w",
-			state.CurrentTerm,
-			state.VotedFor,
-			err,
-		)
+	if err := sm.storage.SaveState(ctx, state); err != nil {
+		sm.persistFailureCount.Add(1)
+		return fmt.Errorf("failed to persist state: %w", err)
 	}
-	sm.logger.Debugw("State persisted successfully", "term", term, "voted_for", votedFor)
+
+	sm.logger.Debugw("State persisted successfully",
+		"term", term,
+		"votedFor", votedFor,
+		"nodeID", sm.id)
+
 	return nil
 }
 
-// notifyLeaderChangeNonBlocking sends leader updates to the leader change channel without blocking.
-// Logs a warning if the channel is full (indicates the receiver might be stuck).
-func (sm *stateManager) notifyLeaderChangeNonBlocking(newLeader types.NodeID, term types.Term) {
-	if sm.isShutdown.Load() {
-		sm.logger.Debugw("Skipped notifying leader change due to shutdown",
-			"new_leader", newLeader,
-			"term", term)
+// persistStateWithRetry persists state with retry logic
+func (sm *stateManager) persistStateWithRetry(ctx context.Context, term types.Term, votedFor types.NodeID) error {
+	var lastErr error
+	delay := basePersistDelay
+
+	for attempt := 1; attempt <= maxPersistRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled during persistence retry: %w", err)
+		}
+
+		lastErr = sm.persistState(ctx, term, votedFor)
+		if lastErr == nil {
+			if attempt > 1 {
+				sm.logger.Infow("Persistence succeeded after retry",
+					"attempt", attempt,
+					"term", term,
+					"votedFor", votedFor,
+					"nodeID", sm.id)
+			}
+			return nil
+		}
+
+		sm.logger.Warnw("Persistence attempt failed",
+			"attempt", attempt,
+			"maxRetries", maxPersistRetries,
+			"term", term,
+			"votedFor", votedFor,
+			"error", lastErr,
+			"nodeID", sm.id)
+
+		// Don't delay after the last attempt
+		if attempt < maxPersistRetries {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry delay: %w", ctx.Err())
+			case <-time.After(delay):
+				// Exponential backoff with cap
+				delay = delay * 2
+				if delay > maxPersistDelay {
+					delay = maxPersistDelay
+				}
+			}
+		}
+	}
+
+	sm.logger.Errorw("All persistence attempts failed",
+		"maxRetries", maxPersistRetries,
+		"term", term,
+		"votedFor", votedFor,
+		"finalError", lastErr,
+		"nodeID", sm.id)
+
+	return fmt.Errorf("persistence failed after %d attempts: %w", maxPersistRetries, lastErr)
+}
+
+// notifyLeaderChange sends leader change notification safely
+func (sm *stateManager) notifyLeaderChange(newLeaderID types.NodeID) {
+	if sm.leaderChangeCh == nil {
+		sm.logger.Debugw("No leader change channel configured", "nodeID", sm.id)
 		return
 	}
 
-	sm.metrics.ObserveLeaderChange(newLeader, term)
-
 	select {
-	case sm.leaderChangeCh <- newLeader:
-		sm.logger.Infow("Notified leader change",
-			"new_leader", newLeader,
-			"term", term)
+	case sm.leaderChangeCh <- newLeaderID:
+		sm.logger.Debugw("Leader change notification sent",
+			"newLeader", newLeaderID,
+			"nodeID", sm.id)
 	default:
-		sm.logger.Warnw("Leader change notification channel full, notification dropped",
-			"new_leader", newLeader,
-			"term", term)
-
-		sm.metrics.ObserveLeaderNotificationDropped()
+		sm.logger.Warnw("Leader change channel full, dropping notification",
+			"newLeader", newLeaderID,
+			"nodeID", sm.id)
 	}
+}
+
+// Debug and monitoring methods
+
+// GetStateInfo returns detailed state information for debugging
+func (sm *stateManager) GetStateInfo() map[string]interface{} {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return map[string]interface{}{
+		"nodeID":                sm.id,
+		"currentTerm":           sm.currentTerm,
+		"votedFor":              sm.votedFor,
+		"role":                  sm.role.String(),
+		"leaderID":              sm.leaderID,
+		"lastKnownLeaderID":     sm.lastKnownLeaderID,
+		"commitIndex":           sm.commitIndex,
+		"lastApplied":           sm.lastApplied,
+		"lastRoleChange":        sm.lastRoleChange,
+		"roleChangeCount":       sm.roleChangeCount.Load(),
+		"termChangeCount":       sm.termChangeCount.Load(),
+		"persistFailureCount":   sm.persistFailureCount.Load(),
+		"lastPersistAttempt":    sm.lastPersistAttempt,
+		"isShutdown":            sm.isShutdown.Load(),
+		"persistenceInProgress": sm.persistenceInProgress.Load(),
+	}
+}
+
+// GetRoleChangeCount returns the number of role changes for monitoring
+func (sm *stateManager) GetRoleChangeCount() uint64 {
+	return sm.roleChangeCount.Load()
+}
+
+// GetTermChangeCount returns the number of term changes for monitoring
+func (sm *stateManager) GetTermChangeCount() uint64 {
+	return sm.termChangeCount.Load()
+}
+
+// GetPersistFailureCount returns the number of persistence failures
+func (sm *stateManager) GetPersistFailureCount() uint64 {
+	return sm.persistFailureCount.Load()
+}
+
+// Advanced state management methods
+
+// CompareAndUpdateTerm atomically updates term if the new term is higher
+func (sm *stateManager) CompareAndUpdateTerm(ctx context.Context, newTerm types.Term) (updated bool, currentTerm types.Term) {
+	if sm.isShutdown.Load() {
+		sm.mu.RLock()
+		currentTerm := sm.currentTerm
+		sm.mu.RUnlock()
+		return false, currentTerm
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	currentTerm = sm.currentTerm
+	if newTerm <= currentTerm {
+		return false, currentTerm
+	}
+
+	sm.logger.Debugw("Updating term",
+		"from", currentTerm,
+		"to", newTerm,
+		"nodeID", sm.id)
+
+	// Update term and reset vote
+	sm.applyPersistentStateLocked(newTerm, unknownNodeID)
+	sm.termChangeCount.Add(1)
+	sm.metrics.ObserveTerm(newTerm)
+
+	// Persist the new term
+	persistCtx, cancel := context.WithTimeout(ctx, persistOperationTimeout)
+	defer cancel()
+
+	if err := sm.persistState(persistCtx, newTerm, unknownNodeID); err != nil {
+		sm.logger.Errorw("Failed to persist new term",
+			"term", newTerm, "error", err, "nodeID", sm.id)
+		// Rollback
+		sm.applyPersistentStateLocked(currentTerm, sm.votedFor)
+		return false, currentTerm
+	}
+
+	return true, newTerm
+}
+
+// GetVotedFor returns who this node voted for in the current term
+func (sm *stateManager) GetVotedFor() types.NodeID {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.votedFor
+}
+
+// GetVotedForUnsafe returns who this node voted for without locking
+func (sm *stateManager) GetVotedForUnsafe() types.NodeID {
+	return sm.votedFor
+}
+
+// HasVoted returns true if this node has voted in the current term
+func (sm *stateManager) HasVoted() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.votedFor != unknownNodeID
+}
+
+// HasVotedUnsafe returns true if this node has voted without locking
+func (sm *stateManager) HasVotedUnsafe() bool {
+	return sm.votedFor != unknownNodeID
+}
+
+// CanVoteFor returns true if this node can vote for the given candidate
+func (sm *stateManager) CanVoteFor(candidateID types.NodeID) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.votedFor == unknownNodeID || sm.votedFor == candidateID
+}
+
+// CanVoteForUnsafe returns true if this node can vote for the given candidate without locking
+func (sm *stateManager) CanVoteForUnsafe(candidateID types.NodeID) bool {
+	return sm.votedFor == unknownNodeID || sm.votedFor == candidateID
+}
+
+// GetTimeSinceLastRoleChange returns time elapsed since last role change
+func (sm *stateManager) GetTimeSinceLastRoleChange() time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return time.Since(sm.lastRoleChange)
+}
+
+// IsInTransition returns true if the node is in a transitional state
+func (sm *stateManager) IsInTransition() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	// Consider it in transition if it's a candidate or recent role change
+	return sm.role == types.RoleCandidate ||
+		time.Since(sm.lastRoleChange) < 100*time.Millisecond ||
+		sm.persistenceInProgress.Load()
+}
+
+// ValidateState performs internal consistency checks
+func (sm *stateManager) ValidateState() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var issues []string
+
+	// Check that lastApplied <= commitIndex
+	if sm.lastApplied > sm.commitIndex {
+		issues = append(issues, fmt.Sprintf("lastApplied (%d) > commitIndex (%d)",
+			sm.lastApplied, sm.commitIndex))
+	}
+
+	// Check that leaders have themselves as leader
+	if sm.role == types.RoleLeader && sm.leaderID != sm.id {
+		issues = append(issues, fmt.Sprintf("leader role but leaderID is %s, not %s",
+			sm.leaderID, sm.id))
+	}
+
+	// Check that candidates have no leader
+	if sm.role == types.RoleCandidate && sm.leaderID != unknownNodeID {
+		issues = append(issues, fmt.Sprintf("candidate role but has leader %s", sm.leaderID))
+	}
+
+	// Check that we voted for ourselves if we're a candidate
+	if sm.role == types.RoleCandidate && sm.votedFor != sm.id {
+		issues = append(issues, fmt.Sprintf("candidate role but voted for %s, not self", sm.votedFor))
+	}
+
+	return issues
+}
+
+// StateTransition represents a state transition for logging/debugging
+type StateTransition struct {
+	Timestamp  time.Time
+	FromRole   types.NodeRole
+	ToRole     types.NodeRole
+	FromTerm   types.Term
+	ToTerm     types.Term
+	FromLeader types.NodeID
+	ToLeader   types.NodeID
+	Reason     string
+}
+
+// Additional helper methods for specific Raft operations
+
+// PrepareForElection prepares the state for starting an election
+// Returns the new term and whether preparation was successful
+func (sm *stateManager) PrepareForElection(ctx context.Context) (types.Term, bool) {
+	if sm.isShutdown.Load() {
+		return 0, false
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Only followers can start elections
+	if sm.role != types.RoleFollower {
+		sm.logger.Debugw("Cannot prepare for election: not a follower",
+			"currentRole", sm.role.String(),
+			"nodeID", sm.id)
+		return sm.currentTerm, false
+	}
+
+	newTerm := sm.currentTerm + 1
+
+	sm.logger.Debugw("Preparing for election",
+		"currentTerm", sm.currentTerm,
+		"newTerm", newTerm,
+		"nodeID", sm.id)
+
+	return newTerm, true
+}
+
+// ResetElectionState resets election-related state (typically after stepping down)
+func (sm *stateManager) ResetElectionState(ctx context.Context) {
+	if sm.isShutdown.Load() {
+		return
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.role != types.RoleFollower {
+		sm.logger.Debugw("Resetting election state",
+			"previousRole", sm.role.String(),
+			"term", sm.currentTerm,
+			"nodeID", sm.id)
+
+		sm.setRoleAndLeaderLocked(types.RoleFollower, unknownNodeID, sm.currentTerm)
+		sm.roleChangeCount.Add(1)
+		sm.metrics.ObserveRoleChange(types.RoleFollower, sm.role, sm.currentTerm)
+	}
+}
+
+// GetLeaderInfo returns current leader information
+func (sm *stateManager) GetLeaderInfo() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return sm.leaderID, sm.lastKnownLeaderID, sm.leaderID != unknownNodeID
+}
+
+// GetLeaderInfoUnsafe returns leader information without locking
+func (sm *stateManager) GetLeaderInfoUnsafe() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
+	return sm.leaderID, sm.lastKnownLeaderID, sm.leaderID != unknownNodeID
 }
