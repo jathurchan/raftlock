@@ -1245,15 +1245,22 @@ type mockLogManager struct {
 	entries    map[types.Index]types.LogEntry
 	mu         sync.Mutex
 
+	// Function overrides for testing
 	initializeFunc                  func(ctx context.Context) error
 	getTermFunc                     func(ctx context.Context, index types.Index) (types.Term, error)
 	getTermUnsafeFunc               func(ctx context.Context, index types.Index) (types.Term, error)
 	getEntriesFunc                  func(ctx context.Context, start, end types.Index) ([]types.LogEntry, error)
+	getEntriesUnsafeFunc            func(ctx context.Context, start, end types.Index) ([]types.LogEntry, error)
 	appendEntriesFunc               func(ctx context.Context, entries []types.LogEntry) error
+	appendEntriesUnsafeFunc         func(ctx context.Context, entries []types.LogEntry) error
 	truncatePrefixFunc              func(ctx context.Context, newFirstIndex types.Index) error
+	truncatePrefixUnsafeFunc        func(ctx context.Context, newFirstIndex types.Index) error
 	truncateSuffixFunc              func(ctx context.Context, newLastIndexPlusOne types.Index) error
+	truncateSuffixUnsafeFunc        func(ctx context.Context, newLastIndexPlusOne types.Index) error
 	findFirstIndexInTermUnsafeFunc  func(ctx context.Context, term types.Term, searchUpToIndex types.Index) (types.Index, error)
 	findLastEntryWithTermUnsafeFunc func(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error)
+	restoreFromSnapshotFunc         func(ctx context.Context, meta types.SnapshotMetadata) error
+	restoreFromSnapshotUnsafeFunc   func(ctx context.Context, meta types.SnapshotMetadata) error
 }
 
 func newMockLogManager() *mockLogManager {
@@ -1269,7 +1276,6 @@ func (m *mockLogManager) Initialize(ctx context.Context) error {
 	if m.initializeFunc != nil {
 		return m.initializeFunc(ctx)
 	}
-
 	return nil
 }
 
@@ -1300,13 +1306,17 @@ func (m *mockLogManager) GetFirstIndex() types.Index {
 	return m.firstIndex
 }
 
+func (m *mockLogManager) GetFirstIndexUnsafe() types.Index {
+	// Mock doesn't need separate unsafe implementation since it's already simple
+	return m.GetFirstIndex()
+}
+
 func (m *mockLogManager) GetTerm(ctx context.Context, index types.Index) (types.Term, error) {
 	if m.getTermFunc != nil {
 		return m.getTermFunc(ctx, index)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	return m.getTermUnsafeLocked(index)
 }
 
@@ -1348,7 +1358,20 @@ func (m *mockLogManager) GetEntries(
 	if m.getEntriesFunc != nil {
 		return m.getEntriesFunc(ctx, start, end)
 	}
+	return m.getEntriesInternal(start, end)
+}
 
+func (m *mockLogManager) GetEntriesUnsafe(
+	ctx context.Context,
+	start, end types.Index,
+) ([]types.LogEntry, error) {
+	if m.getEntriesUnsafeFunc != nil {
+		return m.getEntriesUnsafeFunc(ctx, start, end)
+	}
+	return m.getEntriesInternal(start, end)
+}
+
+func (m *mockLogManager) getEntriesInternal(start, end types.Index) ([]types.LogEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1379,24 +1402,42 @@ func (m *mockLogManager) AppendEntries(ctx context.Context, entries []types.LogE
 	if m.appendEntriesFunc != nil {
 		err := m.appendEntriesFunc(ctx, entries)
 		if err == nil && len(entries) > 0 {
-			m.mu.Lock()
-			for _, entry := range entries {
-				m.entries[entry.Index] = entry
-				if entry.Index > m.lastIndex {
-					m.lastIndex = entry.Index
-					m.lastTerm = entry.Term
-				}
-				if m.firstIndex == 0 && entry.Index > 0 {
-					m.firstIndex = entry.Index
-				} else if entry.Index < m.firstIndex {
-					m.firstIndex = entry.Index
-				}
-			}
-			m.mu.Unlock()
+			m.updateEntriesAfterAppend(entries)
 		}
 		return err
 	}
+	return m.appendEntriesInternal(entries)
+}
 
+func (m *mockLogManager) AppendEntriesUnsafe(ctx context.Context, entries []types.LogEntry) error {
+	if m.appendEntriesUnsafeFunc != nil {
+		err := m.appendEntriesUnsafeFunc(ctx, entries)
+		if err == nil && len(entries) > 0 {
+			m.updateEntriesAfterAppend(entries)
+		}
+		return err
+	}
+	return m.appendEntriesInternal(entries)
+}
+
+func (m *mockLogManager) updateEntriesAfterAppend(entries []types.LogEntry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, entry := range entries {
+		m.entries[entry.Index] = entry
+		if entry.Index > m.lastIndex {
+			m.lastIndex = entry.Index
+			m.lastTerm = entry.Term
+		}
+		if m.firstIndex == 0 && entry.Index > 0 {
+			m.firstIndex = entry.Index
+		} else if entry.Index < m.firstIndex {
+			m.firstIndex = entry.Index
+		}
+	}
+}
+
+func (m *mockLogManager) appendEntriesInternal(entries []types.LogEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1436,6 +1477,17 @@ func (m *mockLogManager) TruncatePrefix(ctx context.Context, newFirstIndex types
 	if m.truncatePrefixFunc != nil {
 		return m.truncatePrefixFunc(ctx, newFirstIndex)
 	}
+	return m.truncatePrefixInternal(newFirstIndex)
+}
+
+func (m *mockLogManager) TruncatePrefixUnsafe(ctx context.Context, newFirstIndex types.Index) error {
+	if m.truncatePrefixUnsafeFunc != nil {
+		return m.truncatePrefixUnsafeFunc(ctx, newFirstIndex)
+	}
+	return m.truncatePrefixInternal(newFirstIndex)
+}
+
+func (m *mockLogManager) truncatePrefixInternal(newFirstIndex types.Index) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1473,6 +1525,20 @@ func (m *mockLogManager) TruncateSuffix(
 	if m.truncateSuffixFunc != nil {
 		return m.truncateSuffixFunc(ctx, newLastIndexPlusOne)
 	}
+	return m.truncateSuffixInternal(newLastIndexPlusOne)
+}
+
+func (m *mockLogManager) TruncateSuffixUnsafe(
+	ctx context.Context,
+	newLastIndexPlusOne types.Index,
+) error {
+	if m.truncateSuffixUnsafeFunc != nil {
+		return m.truncateSuffixUnsafeFunc(ctx, newLastIndexPlusOne)
+	}
+	return m.truncateSuffixInternal(newLastIndexPlusOne)
+}
+
+func (m *mockLogManager) truncateSuffixInternal(newLastIndexPlusOne types.Index) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1500,7 +1566,6 @@ func (m *mockLogManager) TruncateSuffix(
 	} else if entry, ok := m.entries[newLastIndex]; ok {
 		m.lastTerm = entry.Term
 	} else {
-
 		var maxFoundIdx types.Index = 0
 		for idx := range m.entries {
 			if idx <= newLastIndex && idx > maxFoundIdx {
@@ -1592,7 +1657,104 @@ func (m *mockLogManager) FindFirstIndexInTermUnsafe(
 	return 0, ErrNotFound
 }
 
-func (m *mockLogManager) Stop() {}
+// NEW: GetLogStateForDebugging
+func (m *mockLogManager) GetLogStateForDebugging() LogDebugState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	logSize := 0
+	if m.lastIndex >= m.firstIndex && m.lastIndex > 0 {
+		logSize = int(m.lastIndex - m.firstIndex + 1)
+	}
+
+	return LogDebugState{
+		NodeID:          types.NodeID("mock"),
+		FirstIndex:      m.firstIndex,
+		LastIndex:       m.lastIndex,
+		LastTerm:        m.lastTerm,
+		CachedLastIndex: m.lastIndex,
+		CachedLastTerm:  m.lastTerm,
+		LogSize:         logSize,
+		IsEmpty:         m.lastIndex == 0,
+		IsConsistent:    true, // Mock is always consistent
+		StorageMetrics:  nil,
+		LastChecked:     time.Now(),
+	}
+}
+
+func (m *mockLogManager) RestoreFromSnapshot(ctx context.Context, meta types.SnapshotMetadata) error {
+	if m.restoreFromSnapshotFunc != nil {
+		return m.restoreFromSnapshotFunc(ctx, meta)
+	}
+	return m.restoreFromSnapshotInternal(meta)
+}
+
+func (m *mockLogManager) RestoreFromSnapshotUnsafe(ctx context.Context, meta types.SnapshotMetadata) error {
+	if m.restoreFromSnapshotUnsafeFunc != nil {
+		return m.restoreFromSnapshotUnsafeFunc(ctx, meta)
+	}
+	return m.restoreFromSnapshotInternal(meta)
+}
+
+func (m *mockLogManager) restoreFromSnapshotInternal(meta types.SnapshotMetadata) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Update cached state to reflect the snapshot
+	m.lastIndex = meta.LastIncludedIndex
+	m.lastTerm = meta.LastIncludedTerm
+
+	// The snapshot manager should have already truncated the log,
+	// so we just update our state to be consistent
+	return nil
+}
+
+func (m *mockLogManager) Stop() {
+	// No-op for mock
+}
+
+func (m *mockLogManager) SetState(firstIndex, lastIndex types.Index, lastTerm types.Term) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.firstIndex = firstIndex
+	m.lastIndex = lastIndex
+	m.lastTerm = lastTerm
+}
+
+func (m *mockLogManager) AddEntry(index types.Index, term types.Term, command []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := types.LogEntry{
+		Index:   index,
+		Term:    term,
+		Command: command,
+	}
+	m.entries[index] = entry
+
+	if index > m.lastIndex {
+		m.lastIndex = index
+		m.lastTerm = term
+	}
+
+	if m.firstIndex == 0 || index < m.firstIndex {
+		m.firstIndex = index
+	}
+}
+
+func (m *mockLogManager) GetEntryCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.entries)
+}
+
+func (m *mockLogManager) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = make(map[types.Index]types.LogEntry)
+	m.firstIndex = 0
+	m.lastIndex = 0
+	m.lastTerm = 0
+}
 
 type mockSnapshotManager struct {
 	snapshots map[types.NodeID]bool
