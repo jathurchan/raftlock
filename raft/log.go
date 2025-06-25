@@ -80,7 +80,10 @@ type LogManager interface {
 	// Returns an empty slice if the range is empty or invalid.
 	// Returns an error if the range includes compacted entries (ErrCompacted) or is out of bounds.
 	// Callers must ensure thread safety.
-	GetEntriesUnsafe(ctx context.Context, startIndex, endIndex types.Index) ([]types.LogEntry, error)
+	GetEntriesUnsafe(
+		ctx context.Context,
+		startIndex, endIndex types.Index,
+	) ([]types.LogEntry, error)
 
 	// AppendEntries appends the given entries to the log.
 	// The entries must be contiguous with the existing log.
@@ -706,7 +709,11 @@ func (lm *logManager) clampEndIndex(requestedEnd types.Index, useUnlockedCache b
 
 // mapStorageReadError interprets errors from storage.GetLogEntries, mapping them to
 // Raft-level errors like ErrCompacted or ErrNotFound, and checking for concurrent compaction.
-func (lm *logManager) mapStorageReadError(err error, start, end types.Index, useUnlockedCache bool) error {
+func (lm *logManager) mapStorageReadError(
+	err error,
+	start, end types.Index,
+	useUnlockedCache bool,
+) error {
 	if errors.Is(err, storage.ErrIndexOutOfRange) {
 		newFirst := lm.getFirstIndexForBounds(useUnlockedCache)
 		if start < newFirst {
@@ -1019,7 +1026,10 @@ func (lm *logManager) TruncateSuffix(ctx context.Context, newLastIndexPlusOne ty
 }
 
 // TruncateSuffixUnsafe removes log entries at or after newLastIndexPlusOne without locking.
-func (lm *logManager) TruncateSuffixUnsafe(ctx context.Context, newLastIndexPlusOne types.Index) error {
+func (lm *logManager) TruncateSuffixUnsafe(
+	ctx context.Context,
+	newLastIndexPlusOne types.Index,
+) error {
 	lm.logger.Debugw("TruncateSuffixUnsafe called",
 		"newLastIndexPlusOne", newLastIndexPlusOne,
 		"nodeID", lm.id)
@@ -1028,7 +1038,10 @@ func (lm *logManager) TruncateSuffixUnsafe(ctx context.Context, newLastIndexPlus
 }
 
 // truncateSuffixInternal contains the core logic for suffix truncation.
-func (lm *logManager) truncateSuffixInternal(ctx context.Context, newLastIndexPlusOne types.Index) error {
+func (lm *logManager) truncateSuffixInternal(
+	ctx context.Context,
+	newLastIndexPlusOne types.Index,
+) error {
 	startTime := time.Now()
 	entriesRemoved := 0
 	success := false
@@ -1095,7 +1108,11 @@ func (lm *logManager) truncateSuffixInternal(ctx context.Context, newLastIndexPl
 	if newLastIndex > 0 {
 		newLastTerm, err = lm.fetchEntryTerm(ctx, newLastIndex)
 		if err != nil {
-			return fmt.Errorf("failed to fetch term for new last index %d after suffix truncation: %w", newLastIndex, err)
+			return fmt.Errorf(
+				"failed to fetch term for new last index %d after suffix truncation: %w",
+				newLastIndex,
+				err,
+			)
 		}
 	}
 
@@ -1603,11 +1620,19 @@ func (lm *logManager) scanLogForTermUnsafe(
 // Stop logs the shutdown signal for the LogManager.
 func (lm *logManager) Stop() {
 	if lm.isShutdown.Load() {
-		lm.logger.Debugw("LogManager Stop() called multiple times or already shut down.", "nodeID", lm.id)
+		lm.logger.Debugw(
+			"LogManager Stop() called multiple times or already shut down.",
+			"nodeID",
+			lm.id,
+		)
 		return
 	}
 
-	lm.logger.Infow("LogManager Stop() invoked; shutdown coordinated via shared flag.", "nodeID", lm.id)
+	lm.logger.Infow(
+		"LogManager Stop() invoked; shutdown coordinated via shared flag.",
+		"nodeID",
+		lm.id,
+	)
 	lm.isShutdown.Store(true)
 }
 
@@ -1620,7 +1645,10 @@ func (lm *logManager) updateCachedState(index types.Index, term types.Term) {
 
 // updateCachedStateAndGetFirstLocked updates the cached last index/term and returns first index.
 // Assumes the caller holds lm.mu write lock.
-func (lm *logManager) updateCachedStateAndGetFirstLocked(index types.Index, term types.Term) types.Index {
+func (lm *logManager) updateCachedStateAndGetFirstLocked(
+	index types.Index,
+	term types.Term,
+) types.Index {
 	lm.updateCachedStateLocked(index, term)
 	return lm.storage.FirstLogIndex()
 }
@@ -1754,7 +1782,10 @@ func (lm *logManager) RestoreFromSnapshot(ctx context.Context, meta types.Snapsh
 // RestoreFromSnapshotUnsafe updates the log manager's state after a snapshot has been installed
 // without acquiring locks. This should be called by the snapshot manager when it already holds
 // the appropriate locks. It updates cached state and ensures consistency.
-func (lm *logManager) RestoreFromSnapshotUnsafe(ctx context.Context, meta types.SnapshotMetadata) error {
+func (lm *logManager) RestoreFromSnapshotUnsafe(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+) error {
 	lm.logger.Debugw("RestoreFromSnapshotUnsafe called",
 		"snapshotIndex", meta.LastIncludedIndex,
 		"snapshotTerm", meta.LastIncludedTerm,
@@ -1764,7 +1795,10 @@ func (lm *logManager) RestoreFromSnapshotUnsafe(ctx context.Context, meta types.
 }
 
 // restoreFromSnapshotInternal contains the core logic for snapshot restoration.
-func (lm *logManager) restoreFromSnapshotInternal(ctx context.Context, meta types.SnapshotMetadata) error {
+func (lm *logManager) restoreFromSnapshotInternal(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+) error {
 	lm.logger.Infow("restoreFromSnapshotInternal: updating log state from snapshot",
 		"snapshotIndex", meta.LastIncludedIndex,
 		"snapshotTerm", meta.LastIncludedTerm,
@@ -1815,8 +1849,11 @@ func (lm *logManager) restoreFromSnapshotInternal(ctx context.Context, meta type
 				"actualLastIndex", currentLastIndex,
 				"nodeID", lm.id)
 
-			return fmt.Errorf("log state inconsistent after snapshot: expected first index %d, got %d",
-				expectedFirstIndex, currentFirstIndex)
+			return fmt.Errorf(
+				"log state inconsistent after snapshot: expected first index %d, got %d",
+				expectedFirstIndex,
+				currentFirstIndex,
+			)
 		}
 	}
 

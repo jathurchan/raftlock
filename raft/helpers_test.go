@@ -1480,7 +1480,10 @@ func (m *mockLogManager) TruncatePrefix(ctx context.Context, newFirstIndex types
 	return m.truncatePrefixInternal(newFirstIndex)
 }
 
-func (m *mockLogManager) TruncatePrefixUnsafe(ctx context.Context, newFirstIndex types.Index) error {
+func (m *mockLogManager) TruncatePrefixUnsafe(
+	ctx context.Context,
+	newFirstIndex types.Index,
+) error {
 	if m.truncatePrefixUnsafeFunc != nil {
 		return m.truncatePrefixUnsafeFunc(ctx, newFirstIndex)
 	}
@@ -1682,14 +1685,20 @@ func (m *mockLogManager) GetLogStateForDebugging() LogDebugState {
 	}
 }
 
-func (m *mockLogManager) RestoreFromSnapshot(ctx context.Context, meta types.SnapshotMetadata) error {
+func (m *mockLogManager) RestoreFromSnapshot(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+) error {
 	if m.restoreFromSnapshotFunc != nil {
 		return m.restoreFromSnapshotFunc(ctx, meta)
 	}
 	return m.restoreFromSnapshotInternal(meta)
 }
 
-func (m *mockLogManager) RestoreFromSnapshotUnsafe(ctx context.Context, meta types.SnapshotMetadata) error {
+func (m *mockLogManager) RestoreFromSnapshotUnsafe(
+	ctx context.Context,
+	meta types.SnapshotMetadata,
+) error {
 	if m.restoreFromSnapshotUnsafeFunc != nil {
 		return m.restoreFromSnapshotUnsafeFunc(ctx, meta)
 	}

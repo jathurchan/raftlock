@@ -94,7 +94,12 @@ func testLeaderFailureRecovery(t *testing.T, cluster *TestCluster) {
 	cluster.tick(cluster.config.Options.ElectionTickCount * 2)
 	oldLeaderID := cluster.WaitForLeader(t, 10*time.Second)
 
-	_, _, _, err := cluster.GetNode(oldLeaderID).raft.Propose(context.Background(), []byte("cmd-before-failure"))
+	_, _, _, err := cluster.GetNode(
+		oldLeaderID,
+	).raft.Propose(
+		context.Background(),
+		[]byte("cmd-before-failure"),
+	)
 	testutil.AssertNoError(t, err)
 	cluster.tick(cluster.config.Options.HeartbeatTickCount * 2)
 	cluster.WaitForApplied(t, 1, 5*time.Second)
@@ -108,7 +113,12 @@ func testLeaderFailureRecovery(t *testing.T, cluster *TestCluster) {
 	testutil.AssertTrue(t, newLeaderID != oldLeaderID, "A new leader should be elected")
 	t.Logf("New leader elected: %s", newLeaderID)
 
-	_, _, _, err = cluster.GetNode(newLeaderID).raft.Propose(context.Background(), []byte("cmd-after-failure"))
+	_, _, _, err = cluster.GetNode(
+		newLeaderID,
+	).raft.Propose(
+		context.Background(),
+		[]byte("cmd-after-failure"),
+	)
 	testutil.AssertNoError(t, err)
 	cluster.tick(cluster.config.Options.HeartbeatTickCount * 2)
 
@@ -123,7 +133,12 @@ func testBasicSnapshotting(t *testing.T, cluster *TestCluster) {
 
 	threshold := cluster.config.Options.SnapshotThreshold
 	for i := 0; i < threshold+1; i++ {
-		_, _, _, err := cluster.GetNode(leaderID).raft.Propose(context.Background(), []byte(fmt.Sprintf("cmd-%d", i+1)))
+		_, _, _, err := cluster.GetNode(
+			leaderID,
+		).raft.Propose(
+			context.Background(),
+			[]byte(fmt.Sprintf("cmd-%d", i+1)),
+		)
 		testutil.AssertNoError(t, err)
 	}
 
@@ -203,7 +218,11 @@ func (c *TestCluster) createRaftNodeOnly(id types.NodeID, cfg Config) {
 	}
 }
 
-func (c *TestCluster) createAndWireNetworkManager(node *TestNode, localAddr string, peers map[types.NodeID]PeerConfig) {
+func (c *TestCluster) createAndWireNetworkManager(
+	node *TestNode,
+	localAddr string,
+	peers map[types.NodeID]PeerConfig,
+) {
 	isShutdown := &atomic.Bool{}
 	rpcHandler := node.raft
 
@@ -352,7 +371,12 @@ func (c *TestCluster) WaitForApplied(t *testing.T, expectedCount int, timeout ti
 	c.WaitForAppliedSubset(t, expectedCount, timeout, c.GetActiveNodeIDs())
 }
 
-func (c *TestCluster) WaitForAppliedSubset(t *testing.T, expectedCount int, timeout time.Duration, nodeIDs []types.NodeID) {
+func (c *TestCluster) WaitForAppliedSubset(
+	t *testing.T,
+	expectedCount int,
+	timeout time.Duration,
+	nodeIDs []types.NodeID,
+) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
@@ -387,7 +411,12 @@ func (c *TestCluster) CheckStateConsistency(t *testing.T, expectedCount int) {
 		if !node.isShutdown.Load() {
 			referenceEntries = node.applier.GetAppliedEntries()
 			if len(referenceEntries) != expectedCount {
-				t.Fatalf("Node %s has %d applied entries, expected %d", id, len(referenceEntries), expectedCount)
+				t.Fatalf(
+					"Node %s has %d applied entries, expected %d",
+					id,
+					len(referenceEntries),
+					expectedCount,
+				)
 			}
 			break
 		}
@@ -396,11 +425,31 @@ func (c *TestCluster) CheckStateConsistency(t *testing.T, expectedCount int) {
 	for id, node := range c.nodes {
 		if !node.isShutdown.Load() {
 			entries := node.applier.GetAppliedEntries()
-			testutil.AssertEqual(t, len(referenceEntries), len(entries), "Applied entry count mismatch for node %s", id)
+			testutil.AssertEqual(
+				t,
+				len(referenceEntries),
+				len(entries),
+				"Applied entry count mismatch for node %s",
+				id,
+			)
 			for i, entry := range entries {
 				refEntry := referenceEntries[i]
-				testutil.AssertEqual(t, refEntry.CommandIndex, entry.CommandIndex, "Index mismatch at %d for node %s", i, id)
-				testutil.AssertEqual(t, refEntry.CommandTerm, entry.CommandTerm, "Term mismatch at %d for node %s", i, id)
+				testutil.AssertEqual(
+					t,
+					refEntry.CommandIndex,
+					entry.CommandIndex,
+					"Index mismatch at %d for node %s",
+					i,
+					id,
+				)
+				testutil.AssertEqual(
+					t,
+					refEntry.CommandTerm,
+					entry.CommandTerm,
+					"Term mismatch at %d for node %s",
+					i,
+					id,
+				)
 			}
 		}
 	}
@@ -439,10 +488,18 @@ func (a *TestApplier) Snapshot(ctx context.Context) (types.Index, []byte, error)
 	}
 	return a.appliedEntries[len(a.appliedEntries)-1].CommandIndex, []byte("snapshot"), nil
 }
-func (a *TestApplier) RestoreSnapshot(ctx context.Context, lastIncludedIndex types.Index, lastIncludedTerm types.Term, data []byte) error {
+
+func (a *TestApplier) RestoreSnapshot(
+	ctx context.Context,
+	lastIncludedIndex types.Index,
+	lastIncludedTerm types.Term,
+	data []byte,
+) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.appliedEntries = []types.ApplyMsg{{CommandValid: true, CommandIndex: lastIncludedIndex, CommandTerm: lastIncludedTerm}}
+	a.appliedEntries = []types.ApplyMsg{
+		{CommandValid: true, CommandIndex: lastIncludedIndex, CommandTerm: lastIncludedTerm},
+	}
 	return nil
 }
 func (a *TestApplier) GetAppliedCount() int {
@@ -682,7 +739,10 @@ func (s *MemoryStorage) AppendLogEntries(ctx context.Context, entries []types.Lo
 	return nil
 }
 
-func (s *MemoryStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+func (s *MemoryStorage) GetLogEntries(
+	ctx context.Context,
+	start, end types.Index,
+) ([]types.LogEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if start > end {
@@ -706,7 +766,10 @@ func (s *MemoryStorage) GetLogEntries(ctx context.Context, start, end types.Inde
 	return s.log[startOffset:endOffset], nil
 }
 
-func (s *MemoryStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
+func (s *MemoryStorage) GetLogEntry(
+	ctx context.Context,
+	index types.Index,
+) (types.LogEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if index < s.firstIndexLocked() || index > s.lastIndexLocked() {
@@ -743,7 +806,11 @@ func (s *MemoryStorage) TruncateLogPrefix(ctx context.Context, index types.Index
 	return nil
 }
 
-func (s *MemoryStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+func (s *MemoryStorage) SaveSnapshot(
+	ctx context.Context,
+	metadata types.SnapshotMetadata,
+	data []byte,
+) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshotMeta = metadata
