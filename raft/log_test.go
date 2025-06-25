@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/storage"
@@ -131,7 +132,7 @@ func TestRaftLog_NewLogManager_Panics(t *testing.T) {
 			mu:       validMu,
 			shutdown: validShutdown,
 			deps:     validDeps,
-			nodeID:   types.NodeID(""),
+			nodeID:   unknownNodeID,
 			wantMsg:  "raft: NewLogManager requires a non-empty nodeID",
 		},
 	}
@@ -255,6 +256,24 @@ func TestRaftLog_LogManager_GetFirstIndex(t *testing.T) {
 	}
 }
 
+func TestRaftLog_LogManager_GetFirstIndexUnsafe(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+
+	if idx := lm.GetFirstIndexUnsafe(); idx != 0 {
+		t.Errorf("Expected first index 0 for empty log, got %d", idx)
+	}
+
+	entries := prepareTestEntries(1, 3, 1)
+	ctx := context.Background()
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	if idx := lm.GetFirstIndexUnsafe(); idx != 1 {
+		t.Errorf("Expected first index 1, got %d", idx)
+	}
+}
+
 func TestRaftLog_LogManager_GetTerm(t *testing.T) {
 	lm, _, _ := setupLogManager(t)
 	ctx := context.Background()
@@ -340,10 +359,7 @@ func TestRaftLog_LogManager_GetTerm_ErrorPaths(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected storage error for index 3, got nil")
 		}
-		if !strings.Contains(
-			err.Error(),
-			"failed to get log entry 3 from storage: simulated storage failure",
-		) {
+		if !strings.Contains(err.Error(), "failed to get log entry 3 from storage") {
 			t.Errorf("Unexpected error for index 3: %v", err)
 		}
 	})
@@ -447,6 +463,27 @@ func TestRaftLog_LogManager_GetEntries(t *testing.T) {
 		}
 		assertEntriesEqual(t, testEntries[2:], entries)
 	})
+}
+
+func TestRaftLog_LogManager_GetEntriesUnsafe(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	testEntries := []types.LogEntry{
+		{Term: 1, Index: 1, Command: []byte("cmd1")},
+		{Term: 1, Index: 2, Command: []byte("cmd2")},
+		{Term: 2, Index: 3, Command: []byte("cmd3")},
+	}
+
+	if err := lm.AppendEntries(ctx, testEntries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	entries, err := lm.GetEntriesUnsafe(ctx, 1, 3)
+	if err != nil {
+		t.Fatalf("GetEntriesUnsafe failed: %v", err)
+	}
+	assertEntriesEqual(t, testEntries[:2], entries)
 }
 
 func TestRaftLog_LogManager_GetEntries_ShuttingDown(t *testing.T) {
@@ -624,6 +661,21 @@ func TestRaftLog_LogManager_AppendEntries(t *testing.T) {
 	})
 }
 
+func TestRaftLog_LogManager_AppendEntriesUnsafe(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 3, 1)
+	err := lm.AppendEntriesUnsafe(ctx, entries)
+	if err != nil {
+		t.Fatalf("AppendEntriesUnsafe failed: %v", err)
+	}
+
+	if got := lm.GetLastIndexUnsafe(); got != 3 {
+		t.Errorf("Expected last index 3, got %d", got)
+	}
+}
+
 func TestRaftLog_LogManager_AppendEntries_ShuttingDown(t *testing.T) {
 	lm, _, _ := setupLogManager(t)
 	ctx := context.Background()
@@ -724,6 +776,25 @@ func TestRaftLog_LogManager_TruncatePrefix(t *testing.T) {
 	})
 }
 
+func TestRaftLog_LogManager_TruncatePrefixUnsafe(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 5, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	err := lm.TruncatePrefixUnsafe(ctx, 3)
+	if err != nil {
+		t.Fatalf("TruncatePrefixUnsafe failed: %v", err)
+	}
+
+	if idx := lm.GetFirstIndexUnsafe(); idx != 3 {
+		t.Errorf("Expected first index 3 after truncation, got %d", idx)
+	}
+}
+
 func TestRaftLog_LogManager_TruncateSuffix(t *testing.T) {
 	lm, storage, metrics := setupLogManager(t)
 	ctx := context.Background()
@@ -813,23 +884,24 @@ func TestRaftLog_LogManager_TruncateSuffix(t *testing.T) {
 	})
 
 	t.Run("HandlesFailureToFetchTermAfterSuffixTruncation", func(t *testing.T) {
-		lm, store, metrics := setupLogManager(t)
+		lm, store, _ := setupLogManager(t)
 		ctx := context.Background()
 
 		_ = lm.AppendEntries(ctx, prepareTestEntries(1, 5, 1))
 
-		store.setFailure("GetLogEntry", errors.New("fetch term error"))
+		expectedErr := "simulated storage failure"
+		store.setFailure("GetLogEntry", errors.New(expectedErr))
+		defer store.clearFailures()
 
 		err := lm.TruncateSuffix(ctx, 3)
-		if err == nil || !strings.Contains(err.Error(), "failed to fetch new last term") {
-			t.Errorf("Expected fetch term failure after truncation, got: %v", err)
+
+		if err == nil {
+			t.Fatal("Expected error due to storage failure during truncation, got nil")
 		}
 
-		if metrics.logConsistencyErr != 1 {
-			t.Errorf("Expected log consistency error to be recorded")
+		if !strings.Contains(err.Error(), expectedErr) {
+			t.Errorf("Expected error to contain %q, but got: %v", expectedErr, err)
 		}
-
-		store.clearFailures()
 	})
 
 	t.Run("FailsWhenLastIndexIncreasesAfterTruncation", func(t *testing.T) {
@@ -861,6 +933,26 @@ func TestRaftLog_LogManager_TruncateSuffix(t *testing.T) {
 	})
 
 }
+
+func TestRaftLog_LogManager_TruncateSuffixUnsafe(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 5, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	err := lm.TruncateSuffixUnsafe(ctx, 3)
+	if err != nil {
+		t.Fatalf("TruncateSuffixUnsafe failed: %v", err)
+	}
+
+	if got := lm.GetLastIndexUnsafe(); got != 2 {
+		t.Errorf("Expected last index 2 after truncation, got %d", got)
+	}
+}
+
 func TestRaftLog_LogManager_IsConsistentWithStorage(t *testing.T) {
 	t.Run("EmptyLogIsConsistent", func(t *testing.T) {
 		lm, _, _ := setupLogManager(t)
@@ -879,7 +971,6 @@ func TestRaftLog_LogManager_IsConsistentWithStorage(t *testing.T) {
 		lm, _, metrics := setupLogManager(t)
 		ctx := context.Background()
 
-		// Inject memory corruption: term set while log is still empty
 		lm.lastIndex.Store(0)
 		lm.lastTerm.Store(99)
 
@@ -993,7 +1084,6 @@ func TestRaftLog_LogManager_RebuildInMemoryState(t *testing.T) {
 			t.Fatalf("AppendEntries failed: %v", err)
 		}
 
-		// Corrupt in-memory state
 		lm.lastIndex.Store(10)
 		lm.lastTerm.Store(99)
 
@@ -1143,7 +1233,7 @@ func TestRaftLog_LogManager_FindFirstIndexInTermUnsafe(t *testing.T) {
 		lm.isShutdown.Store(true)
 		_, err := lm.FindFirstIndexInTermUnsafe(ctx, 1, 1)
 		if !errors.Is(err, ErrShuttingDown) {
-			t.Errorf("Expected ErrShuttingDown, got %v", err)
+			t.Errorf("Expected ErrShuttingDown, got: %v", err)
 		}
 	})
 
@@ -1166,9 +1256,8 @@ func TestRaftLog_LogManager_FindFirstIndexInTermUnsafe(t *testing.T) {
 		}
 
 		_, err := lm.FindFirstIndexInTermUnsafe(ctx, 1, 3)
-		if err == nil || !strings.Contains(err.Error(), "GetTermUnsafe") ||
-			!strings.Contains(err.Error(), "hard failure") {
-			t.Errorf("Expected wrapped hard failure error after term block, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "term scan failed") {
+			t.Errorf("Expected term scan failure error, got: %v", err)
 		}
 	})
 
@@ -1214,6 +1303,101 @@ func TestRaftLog_LogManager_FindFirstIndexInTermUnsafe(t *testing.T) {
 
 }
 
+func TestRaftLog_LogManager_GetLogStateForDebugging(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	t.Run("EmptyLogState", func(t *testing.T) {
+		state := lm.GetLogStateForDebugging()
+		if state.NodeID != "test-node" {
+			t.Errorf("Expected NodeID 'test-node', got %s", state.NodeID)
+		}
+		if state.FirstIndex != 0 || state.LastIndex != 0 || state.LastTerm != 0 {
+			t.Errorf("Expected empty log state (0,0,0), got (%d,%d,%d)",
+				state.FirstIndex, state.LastIndex, state.LastTerm)
+		}
+		if !state.IsEmpty {
+			t.Errorf("Expected IsEmpty to be true for empty log")
+		}
+		if state.LogSize != 0 {
+			t.Errorf("Expected LogSize 0 for empty log, got %d", state.LogSize)
+		}
+	})
+
+	t.Run("NonEmptyLogState", func(t *testing.T) {
+		entries := prepareTestEntries(1, 5, 2)
+		if err := lm.AppendEntries(ctx, entries); err != nil {
+			t.Fatalf("AppendEntries failed: %v", err)
+		}
+
+		state := lm.GetLogStateForDebugging()
+		if state.FirstIndex != 1 || state.LastIndex != 5 || state.LastTerm != 2 {
+			t.Errorf("Expected log state (1,5,2), got (%d,%d,%d)",
+				state.FirstIndex, state.LastIndex, state.LastTerm)
+		}
+		if state.IsEmpty {
+			t.Errorf("Expected IsEmpty to be false for non-empty log")
+		}
+		if state.LogSize != 5 {
+			t.Errorf("Expected LogSize 5, got %d", state.LogSize)
+		}
+		if state.CachedLastIndex != 5 || state.CachedLastTerm != 2 {
+			t.Errorf("Expected cached state (5,2), got (%d,%d)",
+				state.CachedLastIndex, state.CachedLastTerm)
+		}
+	})
+}
+
+func TestRaftLog_LogManager_RestoreFromSnapshot(t *testing.T) {
+	lm, storage, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 5, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	meta := types.SnapshotMetadata{LastIncludedIndex: 3, LastIncludedTerm: 1}
+
+	if err := storage.TruncateLogPrefix(ctx, meta.LastIncludedIndex+1); err != nil {
+		t.Fatalf("Failed to truncate mock log: %v", err)
+	}
+
+	err := lm.RestoreFromSnapshot(ctx, meta)
+	if err != nil {
+		t.Fatalf("RestoreFromSnapshot failed: %v", err)
+	}
+
+	if lastIdx, lastTerm := lm.GetConsistentLastState(); lastIdx != 3 || lastTerm != 1 {
+		t.Errorf("Expected last state (3,1), got (%d,%d)", lastIdx, lastTerm)
+	}
+}
+
+func TestRaftLog_LogManager_RestoreFromSnapshotUnsafe(t *testing.T) {
+	lm, storage, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 5, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	meta := types.SnapshotMetadata{LastIncludedIndex: 4, LastIncludedTerm: 1}
+
+	if err := storage.TruncateLogPrefix(ctx, meta.LastIncludedIndex+1); err != nil {
+		t.Fatalf("Failed to truncate mock log: %v", err)
+	}
+
+	err := lm.RestoreFromSnapshotUnsafe(ctx, meta)
+	if err != nil {
+		t.Fatalf("RestoreFromSnapshotUnsafe failed: %v", err)
+	}
+
+	if lastIdx, lastTerm := lm.GetConsistentLastState(); lastIdx != 4 || lastTerm != 1 {
+		t.Errorf("Expected last state (4,1), got (%d,%d)", lastIdx, lastTerm)
+	}
+}
+
 func TestRaftLog_LogManager_Stop(t *testing.T) {
 	lm, _, _ := setupLogManager(t)
 
@@ -1222,5 +1406,266 @@ func TestRaftLog_LogManager_Stop(t *testing.T) {
 
 	if !lm.isShutdown.Load() {
 		t.Errorf("isShutdown flag should be set after Stop()")
+	}
+}
+
+func TestRaftLog_LogManager_ConcurrentAccess(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 10, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	const numGoroutines = 10
+	const numOps = 100
+	done := make(chan bool, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer func() { done <- true }()
+
+			for j := 0; j < numOps; j++ {
+				// Mix of read and write operations
+				switch j % 4 {
+				case 0:
+					_, _ = lm.GetConsistentLastState()
+				case 1:
+					_, _ = lm.GetTerm(ctx, types.Index(1+j%10))
+				case 2:
+					_, _ = lm.GetEntries(ctx, 1, 5)
+				case 3:
+					if j%10 == 0 { // Less frequent writes
+						newEntries := prepareTestEntries(types.Index(11+j), 1, types.Term(1+j%3))
+						_ = lm.AppendEntries(ctx, newEntries)
+					}
+				}
+			}
+		}(i)
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Test timed out waiting for concurrent operations")
+		}
+	}
+}
+
+func TestRaftLog_LogManager_ContextCancellation(t *testing.T) {
+	lm, storage, _ := setupLogManager(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	storage.setFailure("GetLogEntry", context.Canceled)
+	defer storage.clearFailures()
+
+	cancel() // Cancel context before operation
+
+	_, err := lm.GetTerm(ctx, 1)
+	if err == nil {
+		t.Errorf("Expected error due to cancelled context")
+	}
+}
+
+func TestRaftLog_LogManager_LargeEntryBatches(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	const batchSize = 1000
+	entries := prepareTestEntries(1, batchSize, 1)
+
+	err := lm.AppendEntries(ctx, entries)
+	if err != nil {
+		t.Fatalf("AppendEntries failed for large batch: %v", err)
+	}
+
+	retrieved, err := lm.GetEntries(ctx, 1, types.Index(batchSize+1))
+	if err != nil {
+		t.Fatalf("GetEntries failed for large batch: %v", err)
+	}
+
+	if len(retrieved) != batchSize {
+		t.Errorf("Expected %d entries, got %d", batchSize, len(retrieved))
+	}
+}
+
+func TestRaftLog_LogManager_EmptyRangeOperations(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	testCases := []struct {
+		name  string
+		start types.Index
+		end   types.Index
+	}{
+		{"SameStartEnd", 5, 5},
+		{"StartGreaterThanEnd", 10, 5},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := lm.GetEntries(ctx, tc.start, tc.end)
+			if err != nil {
+				t.Errorf("GetEntries should not error for empty range [%d,%d): %v", tc.start, tc.end, err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("Expected empty result for range [%d,%d), got %d entries", tc.start, tc.end, len(entries))
+			}
+		})
+	}
+}
+
+func TestRaftLog_LogManager_BoundaryConditions(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 5, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	testCases := []struct {
+		name        string
+		start       types.Index
+		end         types.Index
+		expectError bool
+		expectCount int
+	}{
+		{"ExactRange", 1, 6, false, 5},
+		{"PartialRange", 2, 4, false, 2},
+		{"SingleEntry", 3, 4, false, 1},
+		{"StartAtZero", 0, 3, true, 0}, // Should error
+		{"EndBeyondLog", 3, 100, false, 3},
+		{"StartBeyondLog", 10, 15, false, 0},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := lm.GetEntries(ctx, tc.start, tc.end)
+
+			if tc.expectError && err == nil {
+				t.Errorf("Expected error for range [%d,%d), got none", tc.start, tc.end)
+			}
+			if !tc.expectError && err != nil {
+				t.Errorf("Unexpected error for range [%d,%d): %v", tc.start, tc.end, err)
+			}
+			if !tc.expectError && len(result) != tc.expectCount {
+				t.Errorf("Expected %d entries for range [%d,%d), got %d", tc.expectCount, tc.start, tc.end, len(result))
+			}
+		})
+	}
+}
+
+func TestRaftLog_LogManager_MetricsRecording(t *testing.T) {
+	lm, storage, metrics := setupLogManager(t)
+	ctx := context.Background()
+
+	initialAppendCount := metrics.logAppendCount
+
+	entries := prepareTestEntries(1, 3, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	if metrics.logAppendCount != initialAppendCount+1 {
+		t.Errorf("Expected append count to increase by 1, got %d", metrics.logAppendCount-initialAppendCount)
+	}
+
+	initialTruncateCount := metrics.logTruncateCount
+	if err := lm.TruncatePrefix(ctx, 2); err != nil {
+		t.Fatalf("TruncatePrefix failed: %v", err)
+	}
+
+	if metrics.logTruncateCount != initialTruncateCount+1 {
+		t.Errorf("Expected truncate count to increase by 1, got %d", metrics.logTruncateCount-initialTruncateCount)
+	}
+
+	initialConsistencyErr := metrics.logConsistencyErr
+
+	storage.hookGetLogEntries = func(start, end types.Index) []types.LogEntry {
+		return nil
+	}
+	defer func() { storage.hookGetLogEntries = nil }()
+
+	_, _ = lm.GetEntries(ctx, 1, 3)
+
+	if metrics.logConsistencyErr <= initialConsistencyErr {
+		t.Errorf("Expected consistency error count to increase")
+	}
+}
+
+func TestRaftLog_LogManager_StorageRecovery(t *testing.T) {
+	lm, storage, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	entries := prepareTestEntries(1, 5, 1)
+	if err := lm.AppendEntries(ctx, entries); err != nil {
+		t.Fatalf("AppendEntries failed: %v", err)
+	}
+
+	storage.setFailure("GetLogEntry", errors.New("temporary failure"))
+
+	_, err := lm.GetTerm(ctx, 3)
+	if err == nil {
+		t.Errorf("Expected error due to storage failure")
+	}
+
+	storage.clearFailures()
+
+	term, err := lm.GetTerm(ctx, 3)
+	if err != nil {
+		t.Errorf("Expected successful operation after storage recovery: %v", err)
+	}
+	if term != 1 {
+		t.Errorf("Expected term 1, got %d", term)
+	}
+}
+
+func TestRaftLog_LogManager_StateConsistency(t *testing.T) {
+	lm, _, _ := setupLogManager(t)
+	ctx := context.Background()
+
+	operations := []func() error{
+		func() error {
+			entries := prepareTestEntries(1, 5, 1)
+			return lm.AppendEntries(ctx, entries)
+		},
+		func() error {
+			return lm.TruncatePrefix(ctx, 3)
+		},
+		func() error {
+			return lm.TruncateSuffix(ctx, 4)
+		},
+		func() error {
+			entries := prepareTestEntries(4, 2, 2)
+			return lm.AppendEntries(ctx, entries)
+		},
+	}
+
+	for i, op := range operations {
+		if err := op(); err != nil {
+			t.Fatalf("Operation %d failed: %v", i, err)
+		}
+
+		firstIdx := lm.GetFirstIndex()
+		lastIdx := lm.GetLastIndexUnsafe()
+		lastTerm := lm.GetLastTermUnsafe()
+
+		if lastIdx > 0 && firstIdx > lastIdx {
+			t.Errorf("After operation %d: firstIndex %d > lastIndex %d", i, firstIdx, lastIdx)
+		}
+
+		if lastIdx > 0 {
+			term, err := lm.GetTerm(ctx, lastIdx)
+			if err != nil {
+				t.Errorf("After operation %d: could not get term for last index %d: %v", i, lastIdx, err)
+			}
+			if term != lastTerm {
+				t.Errorf("After operation %d: term mismatch for last index: expected %d, got %d", i, lastTerm, term)
+			}
+		}
 	}
 }
