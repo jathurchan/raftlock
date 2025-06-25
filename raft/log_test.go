@@ -1509,10 +1509,20 @@ func TestRaftLog_LogManager_EmptyRangeOperations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			entries, err := lm.GetEntries(ctx, tc.start, tc.end)
 			if err != nil {
-				t.Errorf("GetEntries should not error for empty range [%d,%d): %v", tc.start, tc.end, err)
+				t.Errorf(
+					"GetEntries should not error for empty range [%d,%d): %v",
+					tc.start,
+					tc.end,
+					err,
+				)
 			}
 			if len(entries) != 0 {
-				t.Errorf("Expected empty result for range [%d,%d), got %d entries", tc.start, tc.end, len(entries))
+				t.Errorf(
+					"Expected empty result for range [%d,%d), got %d entries",
+					tc.start,
+					tc.end,
+					len(entries),
+				)
 			}
 		})
 	}
@@ -1553,7 +1563,13 @@ func TestRaftLog_LogManager_BoundaryConditions(t *testing.T) {
 				t.Errorf("Unexpected error for range [%d,%d): %v", tc.start, tc.end, err)
 			}
 			if !tc.expectError && len(result) != tc.expectCount {
-				t.Errorf("Expected %d entries for range [%d,%d), got %d", tc.expectCount, tc.start, tc.end, len(result))
+				t.Errorf(
+					"Expected %d entries for range [%d,%d), got %d",
+					tc.expectCount,
+					tc.start,
+					tc.end,
+					len(result),
+				)
 			}
 		})
 	}
@@ -1571,7 +1587,10 @@ func TestRaftLog_LogManager_MetricsRecording(t *testing.T) {
 	}
 
 	if metrics.logAppendCount != initialAppendCount+1 {
-		t.Errorf("Expected append count to increase by 1, got %d", metrics.logAppendCount-initialAppendCount)
+		t.Errorf(
+			"Expected append count to increase by 1, got %d",
+			metrics.logAppendCount-initialAppendCount,
+		)
 	}
 
 	initialTruncateCount := metrics.logTruncateCount
@@ -1580,7 +1599,10 @@ func TestRaftLog_LogManager_MetricsRecording(t *testing.T) {
 	}
 
 	if metrics.logTruncateCount != initialTruncateCount+1 {
-		t.Errorf("Expected truncate count to increase by 1, got %d", metrics.logTruncateCount-initialTruncateCount)
+		t.Errorf(
+			"Expected truncate count to increase by 1, got %d",
+			metrics.logTruncateCount-initialTruncateCount,
+		)
 	}
 
 	initialConsistencyErr := metrics.logConsistencyErr
@@ -1661,10 +1683,20 @@ func TestRaftLog_LogManager_StateConsistency(t *testing.T) {
 		if lastIdx > 0 {
 			term, err := lm.GetTerm(ctx, lastIdx)
 			if err != nil {
-				t.Errorf("After operation %d: could not get term for last index %d: %v", i, lastIdx, err)
+				t.Errorf(
+					"After operation %d: could not get term for last index %d: %v",
+					i,
+					lastIdx,
+					err,
+				)
 			}
 			if term != lastTerm {
-				t.Errorf("After operation %d: term mismatch for last index: expected %d, got %d", i, lastTerm, term)
+				t.Errorf(
+					"After operation %d: term mismatch for last index: expected %d, got %d",
+					i,
+					lastTerm,
+					term,
+				)
 			}
 		}
 	}
