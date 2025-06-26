@@ -10,15 +10,6 @@ const (
 	// unknownNodeID represents the absence of a node.
 	unknownNodeID = types.NodeID("")
 
-	// HeartbeatTickCount is the number of ticks between leader heartbeats (empty AppendEntries RPCs).
-	DefaultHeartbeatTickCount = 1
-
-	// ElectionTickCount is the number of ticks a follower waits without hearing from the leader before starting an election.
-	DefaultElectionTickCount = 10
-
-	// ElectionRandomizationFactor randomizes election timeouts to reduce split votes. Range: [0.0, 1.0].
-	DefaultElectionRandomizationFactor = 0.2
-
 	// MaxLogEntriesPerRequest limits the number of log entries sent in one AppendEntries RPC.
 	DefaultMaxLogEntriesPerRequest = 100
 
@@ -95,10 +86,6 @@ const (
 	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
 	logManagerOpTimeout = 500 * time.Millisecond
 
-	// electionManagerOpTimeout bounds the duration of electionManager operations
-	// such as requesting votes or updating election state, ensuring they complete promptly.
-	electionManagerOpTimeout = 1 * time.Second
-
 	// defaultSnapshotCaptureTimeout is the timeout for capturing snapshot data from the applier.
 	defaultSnapshotCaptureTimeout = 30 * time.Second
 
@@ -135,4 +122,33 @@ const (
 
 	// defaultTermFetchTimeout limits the time allowed for retrieving the term of a specific log index,
 	defaultTermFetchTimeout = 500 * time.Millisecond
+)
+
+// state.go
+
+const (
+	// Timeout constants to prevent deadlocks in state operations
+	stateManagerOpTimeout   = 5 * time.Second
+	persistOperationTimeout = 3 * time.Second
+	stateTransitionTimeout  = 2 * time.Second
+
+	// Retry constants for persistence operations
+	maxPersistRetries = 3
+	basePersistDelay  = 10 * time.Millisecond
+	maxPersistDelay   = 100 * time.Millisecond
+)
+
+// election.go
+
+const (
+	// Timeout constants to prevent deadlocks
+	electionManagerOpTimeout = 5 * time.Second
+	voteRequestTimeout       = 3 * time.Second
+	maxConcurrentElections   = 1
+)
+
+const (
+	DefaultElectionTickCount           = 20
+	DefaultHeartbeatTickCount          = 1
+	DefaultElectionRandomizationFactor = 0.5
 )

@@ -121,6 +121,15 @@ type StateManager interface {
 	// GetLastAppliedUnsafe returns the last applied index without locking.
 	// Caller must hold a lock.
 	GetLastAppliedUnsafe() types.Index
+
+	// GetLeaderInfo returns the current leader and last known leader IDs,
+	// along with a boolean indicating if a current leader is known.
+	// Thread-safe.
+	GetLeaderInfo() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool)
+
+	// GetLeaderInfoUnsafe returns current and last known leader IDs without locking.
+	// Caller must hold a read or write lock.
+	GetLeaderInfoUnsafe() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool)
 }
 
 // stateManager implements the StateManager interface.
@@ -523,7 +532,11 @@ func (sm *stateManager) BecomeCandidateForTerm(ctx context.Context, term types.T
 }
 
 // BecomeFollower transitions to follower state
-func (sm *stateManager) BecomeFollower(ctx context.Context, term types.Term, leaderID types.NodeID) {
+func (sm *stateManager) BecomeFollower(
+	ctx context.Context,
+	term types.Term,
+	leaderID types.NodeID,
+) {
 	if sm.isShutdown.Load() {
 		sm.logger.Debugw("Cannot become follower: node shutting down",
 			"term", term, "leader", leaderID, "nodeID", sm.id)
@@ -889,7 +902,11 @@ func (sm *stateManager) applyPersistentStateLocked(term types.Term, votedFor typ
 
 // setRoleAndLeaderLocked updates role and leader information
 // Must be called with sm.mu.Lock() held
-func (sm *stateManager) setRoleAndLeaderLocked(role types.NodeRole, leaderID types.NodeID, term types.Term) {
+func (sm *stateManager) setRoleAndLeaderLocked(
+	role types.NodeRole,
+	leaderID types.NodeID,
+	term types.Term,
+) {
 	previousRole := sm.role
 	previousLeader := sm.leaderID
 
@@ -912,7 +929,11 @@ func (sm *stateManager) setRoleAndLeaderLocked(role types.NodeRole, leaderID typ
 }
 
 // persistState persists the current term and voted for to storage
-func (sm *stateManager) persistState(ctx context.Context, term types.Term, votedFor types.NodeID) error {
+func (sm *stateManager) persistState(
+	ctx context.Context,
+	term types.Term,
+	votedFor types.NodeID,
+) error {
 	// Prevent concurrent persistence operations
 	if !sm.persistenceInProgress.CompareAndSwap(false, true) {
 		sm.logger.Debugw("Persistence operation already in progress, skipping",
@@ -947,7 +968,11 @@ func (sm *stateManager) persistState(ctx context.Context, term types.Term, voted
 }
 
 // persistStateWithRetry persists state with retry logic
-func (sm *stateManager) persistStateWithRetry(ctx context.Context, term types.Term, votedFor types.NodeID) error {
+func (sm *stateManager) persistStateWithRetry(
+	ctx context.Context,
+	term types.Term,
+	votedFor types.NodeID,
+) error {
 	var lastErr error
 	delay := basePersistDelay
 
@@ -1064,7 +1089,10 @@ func (sm *stateManager) GetPersistFailureCount() uint64 {
 // Advanced state management methods
 
 // CompareAndUpdateTerm atomically updates term if the new term is higher
-func (sm *stateManager) CompareAndUpdateTerm(ctx context.Context, newTerm types.Term) (updated bool, currentTerm types.Term) {
+func (sm *stateManager) CompareAndUpdateTerm(
+	ctx context.Context,
+	newTerm types.Term,
+) (updated bool, currentTerm types.Term) {
 	if sm.isShutdown.Load() {
 		sm.mu.RLock()
 		currentTerm := sm.currentTerm
@@ -1185,7 +1213,10 @@ func (sm *stateManager) ValidateState() []string {
 
 	// Check that we voted for ourselves if we're a candidate
 	if sm.role == types.RoleCandidate && sm.votedFor != sm.id {
-		issues = append(issues, fmt.Sprintf("candidate role but voted for %s, not self", sm.votedFor))
+		issues = append(
+			issues,
+			fmt.Sprintf("candidate role but voted for %s, not self", sm.votedFor),
+		)
 	}
 
 	return issues

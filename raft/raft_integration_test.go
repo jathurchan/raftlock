@@ -204,7 +204,7 @@ func (c *TestCluster) createRaftNodeOnly(id types.NodeID, cfg Config) {
 		WithConfig(cfg).
 		WithStorage(storage).
 		WithApplier(applier).
-		WithLogger(logger.NewStdLogger("info")).
+		WithLogger(logger.NewStdLogger("debug")).
 		WithMetrics(NewNoOpMetrics()).
 		WithClock(c.clock).
 		WithRand(NewStandardRand()).
@@ -686,9 +686,9 @@ func (tnm *TestNetworkManager) RegisterHandler(id types.NodeID, handler RPCHandl
 func defaultTestConfig() Config {
 	return Config{
 		Options: Options{
-			ElectionTickCount:           10,
+			ElectionTickCount:           20,
 			HeartbeatTickCount:          2,
-			ElectionRandomizationFactor: 0.2,
+			ElectionRandomizationFactor: 0.5,
 			MaxLogEntriesPerRequest:     100,
 			SnapshotThreshold:           1000,
 			LogCompactionMinEntries:     500,
