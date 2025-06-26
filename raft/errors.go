@@ -64,3 +64,12 @@ var (
 	// from the configuration provided during Raft node initialization.
 	ErrMissingDependencies = errors.New("raft: config missing required dependencies")
 )
+
+// election.go
+
+// Error definitions
+var (
+	ErrElectionInProgress = errors.New("raft: election already in progress")
+	ErrInvalidState       = errors.New("raft: invalid state for operation")
+	ErrConcurrencyLimit   = errors.New("raft: concurrency limit exceeded")
+)

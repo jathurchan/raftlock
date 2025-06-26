@@ -1033,6 +1033,7 @@ type mockStateManager struct {
 	becomeFollowerFunc          func(ctx context.Context, term types.Term, leaderID types.NodeID)
 	becomeLeaderFunc            func(ctx context.Context) bool
 	becomeCandidateFunc         func(ctx context.Context, reason ElectionReason) bool
+	becomeCandidateForTermFunc  func(ctx context.Context, term types.Term) bool
 	grantVoteFunc               func(ctx context.Context, candidateID types.NodeID, term types.Term) bool
 	updateCommitIndexFunc       func(newCommitIndex types.Index) bool
 	updateCommitIndexUnsafeFunc func(newCommitIndex types.Index) bool
@@ -1089,6 +1090,23 @@ func (m *mockStateManager) BecomeCandidate(ctx context.Context, reason ElectionR
 	m.leaderID = ""      // Candidate doesn't know leader
 	return true
 }
+
+func (m *mockStateManager) BecomeCandidateForTerm(ctx context.Context, term types.Term) bool {
+	if m.becomeCandidateForTermFunc != nil {
+		return m.becomeCandidateForTermFunc(ctx, term)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if term <= m.currentTerm {
+		return false
+	}
+	m.currentTerm = term
+	m.currentRole = types.RoleCandidate
+	m.votedFor = "node1" // Self ID hardcoded for mock simplicity
+	m.leaderID = ""      // Candidate doesn't know leader
+	return true
+}
+
 func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
 	if m.becomeLeaderFunc != nil {
 		return m.becomeLeaderFunc(ctx)
@@ -1235,6 +1253,16 @@ func (m *mockStateManager) GetLastApplied() types.Index {
 }
 func (m *mockStateManager) GetLastAppliedUnsafe() types.Index {
 	return m.lastApplied
+}
+
+func (m *mockStateManager) GetLeaderInfo() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.leaderID, m.leaderID, m.leaderID != ""
+}
+
+func (m *mockStateManager) GetLeaderInfoUnsafe() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
+	return m.leaderID, m.leaderID, m.leaderID != ""
 }
 func (m *mockStateManager) Stop() {}
 

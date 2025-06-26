@@ -118,7 +118,19 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		fetchEntriesTimeout: fetchTimeout,
 	}
 
-	stateMgr := NewStateManager(mu, shutdownFlag, deps, b.config.ID, node.leaderChangeCh)
+	stateManagerDeps := StateManagerDeps{
+		ID:             b.config.ID,
+		Mu:             mu,
+		IsShutdown:     shutdownFlag,
+		LeaderChangeCh: node.leaderChangeCh,
+		Logger:         b.logger,
+		Metrics:        b.metrics,
+		Storage:        b.storage,
+	}
+	stateMgr, err := NewStateManager(stateManagerDeps)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create state manager: %w", err)
+	}
 	logMgr := NewLogManager(mu, shutdownFlag, deps, b.config.ID)
 
 	node.stateMgr = stateMgr
@@ -148,7 +160,6 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		IsShutdown:        shutdownFlag,
 		NotifyCommitCheck: func() {}, // Will be updated later
 	}
-	var err error
 	node.snapshotMgr, err = NewSnapshotManager(snapshotDeps)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize snapshot manager: %w", err)
