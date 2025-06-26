@@ -107,21 +107,8 @@ const (
 	// defaultSnapshotSendRPCTimeout is the timeout for sending the InstallSnapshot RPC to a follower.
 	defaultSnapshotSendRPCTimeout = 2 * time.Minute
 
-	// defaultSnapshotStopTimeout is the timeout for completing snapshot-related operations during shutdown.
-	// Ensures the system can shut down gracefully without hanging on snapshot activity.
-	defaultSnapshotStopTimeout = 10 * time.Second
-
-	// defaultAppendEntriesTimeout is the maximum duration allowed for an AppendEntries RPC to complete.
-	defaultAppendEntriesTimeout = 2 * time.Second
-
-	// defaultLogFetchTimeout bounds the time spent fetching log entries from storage or memory.
-	defaultLogFetchTimeout = 1 * time.Second
-
 	// defaultReadIndexTimeout is the timeout for waiting on quorum confirmation in a ReadIndex operation.
 	defaultReadIndexTimeout = 1 * time.Second
-
-	// defaultTermFetchTimeout limits the time allowed for retrieving the term of a specific log index,
-	defaultTermFetchTimeout = 500 * time.Millisecond
 )
 
 // state.go
@@ -151,4 +138,17 @@ const (
 	DefaultElectionTickCount           = 20
 	DefaultHeartbeatTickCount          = 1
 	DefaultElectionRandomizationFactor = 0.5
+)
+
+// replication.go
+
+const (
+	defaultAppendEntriesTimeout = 10 * time.Second
+	defaultLogFetchTimeout      = 5 * time.Second
+	defaultTermFetchTimeout     = 2 * time.Second
+	defaultHeartbeatInterval    = 150 * time.Millisecond
+	defaultSnapshotStopTimeout  = 30 * time.Second
+
+	// Channel buffer sizes to prevent blocking
+	commitNotifyChannelSize = 16
 )
