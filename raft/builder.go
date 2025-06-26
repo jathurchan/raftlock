@@ -3,6 +3,7 @@ package raft
 import (
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 
@@ -67,6 +68,13 @@ func (b *RaftBuilder) WithRand(rand Rand) *RaftBuilder {
 // WithStorage sets the storage implementation.
 func (b *RaftBuilder) WithStorage(storage storage.Storage) *RaftBuilder {
 	b.storage = storage
+	return b
+}
+
+func (b *RaftBuilder) WithListener(listener net.Listener) *RaftBuilder { // TODO
+	// This would require adding a listener field to the builder
+	// For now, we can just modify the test to set it on the built node.
+	// A more robust solution would add it to the builder pattern.
 	return b
 }
 

@@ -234,12 +234,10 @@ const (
 type ReplicationResult string
 
 const (
-	ReplicationResultSuccess          ReplicationResult = "success"
-	ReplicationResultLogMismatch      ReplicationResult = "log_mismatch"
-	ReplicationResultStaleTerm        ReplicationResult = "stale_term"
-	ReplicationResultTimeout          ReplicationResult = "timeout"
-	ReplicationResultSnapshotRequired ReplicationResult = "snapshot_required"
-	ReplicationResultFailed           ReplicationResult = "failed"
+	ReplicationResultSuccess      ReplicationResult = "success"
+	ReplicationResultFailed       ReplicationResult = "failed"
+	ReplicationResultLogMismatch  ReplicationResult = "log_mismatch"
+	ReplicationResultTermMismatch ReplicationResult = "term_mismatch"
 )
 
 // LogReadType specifies the type of log read operation.
