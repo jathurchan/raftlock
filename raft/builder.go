@@ -206,6 +206,7 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		Metrics:           b.metrics,
 		Logger:            log,
 		Rand:              b.rand,
+		Clock:             b.clock,
 		Config:            b.config,
 	}
 	node.electionMgr, err = NewElectionManager(electionDeps)
