@@ -128,16 +128,20 @@ const (
 // election.go
 
 const (
-	// Timeout constants to prevent deadlocks
-	electionManagerOpTimeout = 5 * time.Second
-	voteRequestTimeout       = 3 * time.Second
-	maxConcurrentElections   = 1
-)
-
-const (
-	DefaultElectionTickCount           = 20
-	DefaultHeartbeatTickCount          = 1
-	DefaultElectionRandomizationFactor = 0.5
+	DefaultElectionTickCount           = 50
+	DefaultHeartbeatTickCount          = 5
+	DefaultElectionRandomizationFactor = 2.0
+	maxConcurrentElections             = 3
+	voteRequestTimeout                 = 5 * time.Second
+	electionManagerOpTimeout           = 3 * time.Second
+	// Changed from 100ms to 50ms.
+	// This ensures that the minimum interval between election attempts (50ms + 25ms = 75ms)
+	// is less than the mock clock's tick interval (100ms), preventing the "too soon" deadlock.
+	minElectionIntervalBase     = 50 * time.Millisecond
+	maxElectionBackoff          = 2 * time.Second
+	splitVoteDetectionThreshold = 2
+	splitVoteRecoveryDelay      = 500 * time.Millisecond
+	maxSplitVoteBackoff         = 5 * time.Second
 )
 
 // replication.go
