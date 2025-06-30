@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -161,6 +162,22 @@ func TestRaftBuilder_RaftBuilder_WithStorage(t *testing.T) {
 
 	if builder.storage != storage {
 		t.Error("Storage not properly set")
+	}
+}
+
+func TestRaftBuilder_WithListener(t *testing.T) {
+	builder := NewRaftBuilder()
+
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	result := builder.WithListener(listener)
+
+	if result != builder {
+		t.Error("WithListener should return the builder for chaining")
 	}
 }
 
