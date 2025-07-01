@@ -141,8 +141,8 @@ type stateManager struct {
 	mu         *sync.RWMutex // Shared Raft mutex
 	isShutdown *atomic.Bool  // Shared shutdown flag
 
-	id             types.NodeID        // Local node ID
-	leaderChangeCh chan<- types.NodeID // Channel for leader change notifications
+	id             types.NodeID      // Local node ID
+	leaderChangeCh chan types.NodeID // Channel for leader change notifications
 
 	logger  logger.Logger
 	metrics Metrics
@@ -172,7 +172,7 @@ type StateManagerDeps struct {
 	ID             types.NodeID
 	Mu             *sync.RWMutex
 	IsShutdown     *atomic.Bool
-	LeaderChangeCh chan<- types.NodeID
+	LeaderChangeCh chan types.NodeID
 	Logger         logger.Logger
 	Metrics        Metrics
 	Storage        storage.Storage
