@@ -81,7 +81,8 @@ type FeatureFlags struct {
 	EnableLeaderLease bool
 
 	// PreVoteEnabled enables a PreVote phase before starting an election.
-	PreVoteEnabled bool
+	// Not supported for now. Out of scope.
+	// PreVoteEnabled bool
 
 	// explicitlySet is an internal flag to track if defaults should be overridden.
 	explicitlySet bool

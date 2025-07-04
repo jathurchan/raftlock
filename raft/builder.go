@@ -134,6 +134,7 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		Logger:         b.logger,
 		Metrics:        b.metrics,
 		Storage:        b.storage,
+		Clock:          b.clock,
 	}
 	stateMgr, err := NewStateManager(stateManagerDeps)
 	if err != nil {

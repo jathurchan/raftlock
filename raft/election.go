@@ -18,7 +18,6 @@ type ElectionState int32
 
 const (
 	ElectionStateIdle ElectionState = iota
-	ElectionStatePreVoting
 	ElectionStateVoting
 )
 
@@ -100,15 +99,9 @@ type electionManager struct {
 
 	electionTickCount   int     // Base number of ticks before an election timeout
 	randomizationFactor float64 // Randomization percentage to avoid election collisions
-	enablePreVote       bool    // Whether to perform a pre-vote phase before a real election
 
 	electionElapsed  int // Ticks elapsed since last heartbeat
 	randomizedPeriod int // Randomized timeout threshold for current cycle
-
-	preVoteMu        sync.RWMutex          // Protects pre-vote tracking
-	preVotesReceived map[types.NodeID]bool // Tracks pre-vote responses
-	preVoteCount     int                   // Pre-vote count
-	preVoteTerm      types.Term            // Term for pre-vote tracking
 
 	voteMu        sync.RWMutex          // To isolate vote tracking from mu and reduce contention
 	votesReceived map[types.NodeID]bool // Tracks which peers have granted votes
@@ -121,13 +114,11 @@ type electionManager struct {
 	electionCount    atomic.Uint64 // Total number of elections triggered
 	concurrentOps    atomic.Int32  // Number of active operations (e.g., ticks, RPCs)
 
-	startPreVote          func(ctx context.Context) // Begins the pre-vote phase
 	handleElectionTimeout func(ctx context.Context) // Handles election timeout logic
 	startElection         func(ctx context.Context) // Begins a real election
 
 	timerMu sync.Mutex // Serializes access to pre-vote/election delay timers to prevent overlapping triggers
 
-	preVoteSuccessTime atomic.Int64  // Timestamp when pre-vote succeeded
 	electionStartDelay time.Duration // Random delay before starting election after pre-vote
 
 	splitVoteDetector *SplitVoteDetector // Tracks and recovers from split votes
@@ -163,7 +154,6 @@ func NewElectionManager(deps ElectionManagerDeps) (ElectionManager, error) {
 
 	log := deps.Logger.WithComponent("election")
 	opts := deps.Config.Options
-	features := deps.Config.FeatureFlags
 
 	// Calculate node-based deterministic seed
 	nodeBasedSeed := int64(0)
@@ -189,14 +179,12 @@ func NewElectionManager(deps ElectionManagerDeps) (ElectionManager, error) {
 
 		electionTickCount:   opts.ElectionTickCount,
 		randomizationFactor: opts.ElectionRandomizationFactor,
-		enablePreVote:       features.PreVoteEnabled,
 
 		electionStartDelay: time.Duration(nodeBasedSeed%100)*time.Millisecond +
 			time.Duration(deps.Rand.IntN(100))*time.Millisecond,
 		nodeBasedSeed: nodeBasedSeed,
 
-		preVotesReceived: make(map[types.NodeID]bool),
-		votesReceived:    make(map[types.NodeID]bool),
+		votesReceived: make(map[types.NodeID]bool),
 
 		stopCh: make(chan struct{}),
 
@@ -208,7 +196,6 @@ func NewElectionManager(deps ElectionManagerDeps) (ElectionManager, error) {
 
 	em.electionState.Store(int32(ElectionStateIdle))
 
-	em.startPreVote = em.defaultStartPreVote
 	em.handleElectionTimeout = em.defaultHandleElectionTimeout
 	em.startElection = em.defaultStartElection
 
@@ -217,7 +204,6 @@ func NewElectionManager(deps ElectionManagerDeps) (ElectionManager, error) {
 
 	log.Infow("Election manager initialized with enhanced split vote prevention",
 		"nodeID", em.id,
-		"preVoteEnabled", em.enablePreVote,
 		"electionTickCount", em.electionTickCount,
 		"randomizationFactor", em.randomizationFactor,
 		"quorumSize", em.quorumSize,
@@ -427,11 +413,14 @@ func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	}
 	defer em.electionInFlight.Store(false)
 
-	now := em.clock.Now().UnixMilli() // Using the clock interface
+	now := em.clock.Now().UnixMilli()
 	lastElection := em.lastElectionTime.Load()
 	electionCount := em.electionCount.Load()
 
-	minInterval := int64(minElectionIntervalBase.Milliseconds()) + int64(electionCount*25) // Reduced from 50
+	// Be more aggressive with timing when pre-vote is enabled
+	minIntervalBase := int64(minElectionIntervalBase.Milliseconds())
+
+	minInterval := minIntervalBase + int64(electionCount*25)
 	maxInterval := int64(maxElectionBackoff.Milliseconds())
 	if minInterval > maxInterval {
 		minInterval = maxInterval
@@ -444,6 +433,7 @@ func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 			"minInterval", minInterval,
 			"electionCount", electionCount,
 			"unit", "ms")
+		em.resetElectionTimeoutPeriod()
 		return
 	}
 
@@ -457,11 +447,14 @@ func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	if role != types.RoleFollower {
 		em.logger.Debugw("Not starting election: not a follower",
 			"nodeID", em.id, "role", role.String())
+		em.resetElectionTimeoutPeriod()
 		return
 	}
 
-	if em.detectSplitVote() {
-		em.handleSplitVoteRecovery(ctx)
+	currentState := ElectionState(em.electionState.Load())
+	if currentState != ElectionStateIdle {
+		em.logger.Debugw("Election timeout ignored: election already in progress",
+			"nodeID", em.id, "currentState", currentState)
 		em.resetElectionTimeoutPeriod()
 		return
 	}
@@ -471,116 +464,8 @@ func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 
 	em.trackElectionAttempt(currentTerm)
 
-	if em.enablePreVote {
-		em.electionState.Store(int32(ElectionStatePreVoting))
-		em.startPreVote(ctx)
-	} else {
-		em.electionState.Store(int32(ElectionStateVoting))
-		em.startElection(ctx)
-	}
-}
-
-func (em *electionManager) detectSplitVote() bool {
-	em.splitVoteDetector.mu.RLock()
-	defer em.splitVoteDetector.mu.RUnlock()
-
-	currentTerm, _, _ := em.stateMgr.GetState()
-	electionCount := em.electionCount.Load()
-
-	if em.splitVoteDetector.consecutiveFails >= splitVoteDetectionThreshold {
-		timeSinceLastFail := em.clock.Since(em.splitVoteDetector.lastFailTime) // Using the clock interface
-		if timeSinceLastFail < 30*time.Second {
-			em.logger.Infow("Split vote detected: consecutive failures",
-				"nodeID", em.id,
-				"consecutiveFails", em.splitVoteDetector.consecutiveFails,
-				"timeSinceLastFail", timeSinceLastFail)
-			return true
-		}
-	}
-
-	if len(em.splitVoteDetector.termHistory) >= 2 { // Reduced from 3 to 2
-		recentTerms := em.splitVoteDetector.termHistory[len(em.splitVoteDetector.termHistory)-2:]
-		if recentTerms[1]-recentTerms[0] >= 1 && currentTerm > 0 { // Any term progression in current election
-			em.logger.Infow("Split vote detected: rapid term progression",
-				"nodeID", em.id,
-				"termProgression", recentTerms[1]-recentTerms[0],
-				"currentTerm", currentTerm)
-			return true
-		}
-	}
-
-	if em.splitVoteDetector.electionAttempts >= 3 { // Reduced from 5 to 3
-		em.logger.Infow("Split vote detected: too many election attempts",
-			"nodeID", em.id,
-			"electionAttempts", em.splitVoteDetector.electionAttempts)
-		return true
-	}
-
-	if electionCount >= 2 {
-		currentState := ElectionState(em.electionState.Load())
-		if currentState == ElectionStateVoting {
-			em.logger.Infow("Split vote detected: stuck in voting state",
-				"nodeID", em.id,
-				"electionCount", electionCount,
-				"currentState", currentState)
-			return true
-		}
-	}
-
-	return false
-}
-
-func (em *electionManager) handleSplitVoteRecovery(ctx context.Context) {
-	em.logger.Infow("Split vote detected, applying recovery mechanism", "nodeID", em.id)
-
-	currentTerm, _, _ := em.stateMgr.GetState()
-	electionCount := em.electionCount.Load()
-
-	nodeSpecificDelay := time.Duration((em.nodeBasedSeed%500)+250) * time.Millisecond // Reduced range
-	termBasedDelay := time.Duration(currentTerm*50) * time.Millisecond                // Reduced multiplier
-	randomDelay := time.Duration(em.rand.IntN(1000)+500) * time.Millisecond           // Reduced range
-	clusterDelay := time.Duration(len(em.peers)*50) * time.Millisecond                // Reduced multiplier
-
-	backoffMultiplier := math.Min(float64(electionCount), 4.0) // Cap at 4x
-	exponentialDelay := time.Duration(float64(splitVoteRecoveryDelay) * backoffMultiplier)
-
-	totalRecoveryDelay := nodeSpecificDelay + termBasedDelay + randomDelay + clusterDelay + exponentialDelay
-
-	// Lower cap for faster recovery
-	if totalRecoveryDelay > maxSplitVoteBackoff {
-		totalRecoveryDelay = maxSplitVoteBackoff
-	}
-
-	em.logger.Infow("Applying split vote recovery delay",
-		"nodeID", em.id,
-		"nodeSpecificDelay", nodeSpecificDelay,
-		"termBasedDelay", termBasedDelay,
-		"randomDelay", randomDelay,
-		"clusterDelay", clusterDelay,
-		"exponentialDelay", exponentialDelay,
-		"totalDelay", totalRecoveryDelay,
-		"electionCount", electionCount)
-
-	timer := em.clock.NewTimer(totalRecoveryDelay) // Using the clock interface
-	defer timer.Stop()
-
-	select {
-	case <-timer.Chan():
-	case <-ctx.Done():
-		em.logger.Debugw("Split vote recovery cancelled due to context", "nodeID", em.id)
-		return
-	case <-em.stopCh:
-		em.logger.Debugw("Split vote recovery cancelled due to shutdown", "nodeID", em.id)
-		return
-	}
-
-	em.splitVoteDetector.mu.Lock()
-	em.splitVoteDetector.consecutiveFails = 0
-	em.splitVoteDetector.lastFailTime = time.Time{}
-	em.splitVoteDetector.electionAttempts = 0
-	em.splitVoteDetector.mu.Unlock()
-
-	em.logger.Infow("Split vote recovery completed", "nodeID", em.id)
+	em.electionState.Store(int32(ElectionStateVoting))
+	em.startElection(ctx)
 }
 
 func (em *electionManager) trackElectionAttempt(currentTerm types.Term) {
@@ -608,7 +493,6 @@ func (em *electionManager) resetElectionState(reason string) {
 	em.electionInFlight.Store(false)
 
 	em.resetVoteTracking(0)
-	em.resetPreVoteTracking(0)
 
 	em.resetElectionTimeoutPeriod()
 }
@@ -677,45 +561,6 @@ func (em *electionManager) processVoteReply(
 	}
 }
 
-// Enhanced pre-vote phase with improved error handling
-func (em *electionManager) defaultStartPreVote(ctx context.Context) {
-	if em.isShutdown.Load() {
-		em.logger.Debugw("Pre-vote aborted: node shutting down", "nodeID", em.id)
-		return
-	}
-
-	currentTerm, role, _ := em.stateMgr.GetState()
-
-	if role != types.RoleFollower {
-		em.logger.Debugw("Pre-vote aborted: no longer a follower",
-			"nodeID", em.id, "role", role.String())
-		em.resetElectionState("not a follower")
-		return
-	}
-
-	preVoteTerm := currentTerm + 1
-	lastIndex, lastTerm := em.logMgr.GetConsistentLastState()
-
-	em.logger.Infow("Starting pre-vote phase",
-		"nodeID", em.id,
-		"currentTerm", currentTerm,
-		"preVoteTerm", preVoteTerm,
-		"lastLogIndex", lastIndex,
-		"lastLogTerm", lastTerm)
-
-	em.resetPreVoteTracking(preVoteTerm)
-
-	args := &types.RequestVoteArgs{
-		Term:         preVoteTerm,
-		CandidateID:  em.id,
-		LastLogIndex: lastIndex,
-		LastLogTerm:  lastTerm,
-		IsPreVote:    true,
-	}
-
-	em.broadcastVoteRequests(ctx, args, true, currentTerm)
-}
-
 // Enhanced real election with improved error handling
 func (em *electionManager) defaultStartElection(ctx context.Context) {
 	if em.isShutdown.Load() {
@@ -778,18 +623,20 @@ func (em *electionManager) defaultStartElection(ctx context.Context) {
 		"term", newTerm,
 		"peerCount", len(em.peers)-1)
 
-	em.broadcastVoteRequests(ctx, args, false, newTerm)
+	em.broadcastVoteRequests(ctx, args)
 
-	if em.hasQuorum() {
+	alreadyHasQuorum := em.hasQuorum()
+	if alreadyHasQuorum {
 		em.logger.Infow("Already have quorum after self-vote, becoming leader immediately",
 			"nodeID", em.id,
 			"term", newTerm)
 
-		em.electionInFlight.Store(true)
-		go func() {
-			defer em.electionInFlight.Store(false)
-			em.becomeLeader(ctx, newTerm)
-		}()
+		if em.electionInFlight.CompareAndSwap(false, true) {
+			go func() {
+				defer em.electionInFlight.Store(false)
+				em.becomeLeader(ctx, newTerm)
+			}()
+		}
 	} else {
 		em.logger.Infow("Waiting for vote replies to achieve quorum",
 			"nodeID", em.id,
@@ -805,161 +652,11 @@ func (em *electionManager) recordElectionFailure() {
 	defer em.splitVoteDetector.mu.Unlock()
 
 	em.splitVoteDetector.consecutiveFails++
-	em.splitVoteDetector.lastFailTime = em.clock.Now() // Using the clock interface
+	em.splitVoteDetector.lastFailTime = em.clock.Now()
 
-	em.logger.Infow("Election failure recorded", // Changed from Debugw to Infow for visibility
+	em.logger.Infow("Election failure recorded",
 		"nodeID", em.id,
 		"consecutiveFails", em.splitVoteDetector.consecutiveFails)
-}
-
-// Enhanced election delay with adaptive backoff
-func (em *electionManager) startElectionWithDelay() {
-	totalDelay := em.calculateAdaptiveDelay()
-
-	// Cap maximum delay
-	if totalDelay > 5*time.Second {
-		totalDelay = 5 * time.Second
-	}
-
-	timer := em.clock.NewTimer(totalDelay)
-	defer timer.Stop()
-
-	select {
-	case <-timer.Chan(): // This channel will now correctly receive a value when the mock clock advances.
-	case <-em.stopCh:
-		em.logger.Debugw("Election start cancelled: node shutting down", "nodeID", em.id)
-		return
-	}
-
-	if em.isShutdown.Load() {
-		return
-	}
-
-	currentState := ElectionState(em.electionState.Load())
-	if currentState != ElectionStatePreVoting {
-		em.logger.Debugw("Cancelling delayed election: no longer in pre-voting state",
-			"nodeID", em.id, "currentState", currentState)
-		return
-	}
-
-	_, role, _ := em.stateMgr.GetState()
-	if role != types.RoleFollower {
-		em.logger.Debugw("Cancelling delayed election: no longer a follower",
-			"nodeID", em.id, "role", role.String())
-		em.resetElectionState("not a follower")
-		return
-	}
-
-	currentLeader, _, hasLeader := em.stateMgr.GetLeaderInfo()
-	if hasLeader && currentLeader != "" {
-		em.logger.Debugw("Cancelling delayed election: leader detected",
-			"nodeID", em.id, "leader", currentLeader)
-		em.resetElectionState("leader detected")
-		return
-	}
-
-	// Proceed with election
-	ctx, cancel := context.WithTimeout(context.Background(), electionManagerOpTimeout)
-	defer cancel()
-	em.startElection(ctx)
-}
-
-// Helper to encapsulate delay calculation
-func (em *electionManager) calculateAdaptiveDelay() time.Duration {
-	electionCount := em.electionCount.Load()
-	baseDelay := em.electionStartDelay
-
-	if electionCount > 1 {
-		backoffMultiplier := math.Min(float64(electionCount), 8.0)
-		baseDelay = time.Duration(float64(baseDelay) * backoffMultiplier)
-	}
-
-	additionalJitter := time.Duration(em.rand.IntN(200)+100) * time.Millisecond
-	clusterDelay := time.Duration(len(em.peers)*(em.rand.IntN(100)+50)) * time.Millisecond
-	nodeDelay := time.Duration((em.nodeBasedSeed%int64(len(em.peers)))*50) * time.Millisecond
-	totalDelay := baseDelay + additionalJitter + clusterDelay + nodeDelay
-
-	em.logger.Debugw("Starting election with adaptive delay",
-		"nodeID", em.id,
-		"electionCount", electionCount,
-		"baseDelay", baseDelay,
-		"additionalJitter", additionalJitter,
-		"clusterDelay", clusterDelay,
-		"nodeDelay", nodeDelay,
-		"totalDelay", totalDelay)
-
-	if totalDelay > 5*time.Second {
-		totalDelay = 5 * time.Second
-	}
-	return totalDelay
-}
-
-// Enhanced pre-vote reply processing with better delay calculation
-func (em *electionManager) processPreVoteReply(
-	fromPeerID types.NodeID,
-	preVoteTerm types.Term,
-	originatorTerm types.Term,
-	reply *types.RequestVoteReply,
-) {
-	if em.isShutdown.Load() {
-		return
-	}
-
-	currentState := ElectionState(em.electionState.Load())
-	if currentState != ElectionStatePreVoting {
-		em.logger.Debugw("Ignoring pre-vote reply: no longer in pre-voting state",
-			"from", fromPeerID, "nodeID", em.id, "currentState", currentState)
-		return
-	}
-
-	if reply.Term > originatorTerm {
-		em.logger.Infow("Received higher term in pre-vote reply, stepping down",
-			"from", fromPeerID,
-			"replyTerm", reply.Term,
-			"currentTerm", originatorTerm,
-			"nodeID", em.id)
-
-		ctx, cancel := context.WithTimeout(context.Background(), stateTransitionTimeout)
-		defer cancel()
-		em.stateMgr.CheckTermAndStepDown(ctx, reply.Term, fromPeerID)
-		em.resetElectionState("higher term in pre-vote reply")
-		return
-	}
-
-	em.logger.Debugw("Received pre-vote reply",
-		"from", fromPeerID,
-		"granted", reply.VoteGranted,
-		"term", reply.Term,
-		"nodeID", em.id)
-
-	em.recordPreVote(fromPeerID, reply.VoteGranted)
-
-	if em.hasPreVoteQuorum() {
-		baseDelay := em.electionStartDelay
-		clusterFactor := time.Duration(len(em.peers)) * time.Duration(em.rand.IntN(100)+50) * time.Millisecond
-		electionCount := em.electionCount.Load()
-		historyDelay := time.Duration(electionCount*50) * time.Millisecond
-		nodeDelay := time.Duration((em.nodeBasedSeed%100)+50) * time.Millisecond
-		totalDelay := baseDelay + clusterFactor + historyDelay + nodeDelay
-
-		if totalDelay > 3*time.Second {
-			totalDelay = 3 * time.Second
-		}
-
-		em.logger.Infow("Pre-vote succeeded, starting real election after enhanced delay",
-			"nodeID", em.id,
-			"preVoteTerm", preVoteTerm,
-			"baseDelay", baseDelay,
-			"clusterFactor", clusterFactor,
-			"historyDelay", historyDelay,
-			"nodeDelay", nodeDelay,
-			"totalDelay", totalDelay)
-
-		em.preVoteSuccessTime.Store(em.clock.Now().UnixNano()) // Using the clock interface
-		em.electionStartDelay = totalDelay
-
-		go em.startElectionWithDelay()
-	}
 }
 
 // becomeLeader transitions to leader role with enhanced logging
@@ -972,7 +669,7 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 
 	currentTerm, role, _ := em.stateMgr.GetState()
 
-	em.logger.Infow("ATTEMPTING TO BECOME LEADER - DETAILED",
+	em.logger.Infow("ATTEMPTING TO BECOME LEADER",
 		"nodeID", em.id,
 		"expectedTerm", term,
 		"currentTerm", currentTerm,
@@ -995,10 +692,6 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 		em.resetElectionState("not a candidate")
 		return
 	}
-
-	em.logger.Infow("Calling stateMgr.BecomeLeader()...",
-		"nodeID", em.id,
-		"term", currentTerm)
 
 	leaderCtx, cancel := context.WithTimeout(ctx, electionManagerOpTimeout)
 	defer cancel()
@@ -1023,40 +716,19 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 	em.splitVoteDetector.electionAttempts = 0
 	em.splitVoteDetector.mu.Unlock()
 
-	em.logger.Infow("Initializing leader state...",
-		"nodeID", em.id,
-		"term", currentTerm)
-
 	em.leaderInitializer.InitializeLeaderState()
 
-	em.logger.Infow("Sending initial heartbeats...",
-		"nodeID", em.id,
-		"term", currentTerm)
-
-	em.leaderInitializer.SendHeartbeats(leaderCtx)
+	go func() {
+		heartbeatCtx, cancel := context.WithTimeout(context.Background(), electionManagerOpTimeout)
+		defer cancel()
+		em.leaderInitializer.SendHeartbeats(heartbeatCtx)
+	}()
 
 	em.resetElectionState("became leader")
 
 	em.logger.Infow("Leader transition completed successfully",
 		"nodeID", em.id,
 		"term", currentTerm)
-}
-
-// resetPreVoteTracking clears pre-vote tracking state
-func (em *electionManager) resetPreVoteTracking(term types.Term) {
-	em.preVoteMu.Lock()
-	defer em.preVoteMu.Unlock()
-
-	for k := range em.preVotesReceived {
-		delete(em.preVotesReceived, k)
-	}
-	em.preVoteCount = 0
-	em.preVoteTerm = term
-
-	em.logger.Debugw("Pre-vote tracking reset",
-		"nodeID", em.id,
-		"term", term,
-		"quorumSize", em.quorumSize)
 }
 
 // resetVoteTracking clears real vote tracking state for a new term
@@ -1074,40 +746,6 @@ func (em *electionManager) resetVoteTracking(term types.Term) {
 		"nodeID", em.id,
 		"term", term,
 		"quorumSize", em.quorumSize)
-}
-
-// recordPreVote records a pre-vote response
-func (em *electionManager) recordPreVote(from types.NodeID, granted bool) {
-	if !granted {
-		em.logger.Debugw("Pre-vote not granted, not recording",
-			"from", from,
-			"nodeID", em.id,
-			"term", em.preVoteTerm)
-		return
-	}
-
-	em.preVoteMu.Lock()
-	defer em.preVoteMu.Unlock()
-
-	if em.preVotesReceived[from] {
-		em.logger.Debugw("Pre-vote already recorded from this peer",
-			"from", from,
-			"nodeID", em.id,
-			"term", em.preVoteTerm)
-		return
-	}
-
-	em.preVotesReceived[from] = true
-	em.preVoteCount++
-
-	em.logger.Infow("Pre-vote recorded - DETAILED",
-		"from", from,
-		"nodeID", em.id,
-		"preVoteCount", em.preVoteCount,
-		"quorumSize", em.quorumSize,
-		"hasQuorum", em.preVoteCount >= em.quorumSize,
-		"term", em.preVoteTerm,
-		"allPreVoters", em.getPreVotersList())
 }
 
 // recordVote records a real vote response
@@ -1144,24 +782,6 @@ func (em *electionManager) recordVote(from types.NodeID, granted bool) {
 		"allVoters", em.getVotersList())
 }
 
-// hasPreVoteQuorum checks if we have enough pre-votes
-func (em *electionManager) hasPreVoteQuorum() bool {
-	em.preVoteMu.RLock()
-	defer em.preVoteMu.RUnlock()
-
-	hasIt := em.preVoteCount >= em.quorumSize
-
-	em.logger.Infow("Pre-vote quorum check - DETAILED",
-		"nodeID", em.id,
-		"preVoteCount", em.preVoteCount,
-		"quorumSize", em.quorumSize,
-		"hasQuorum", hasIt,
-		"term", em.preVoteTerm,
-		"allPreVoters", em.getPreVotersListUnsafe())
-
-	return hasIt
-}
-
 // hasQuorum checks if we have enough votes to become leader with enhanced logging
 func (em *electionManager) hasQuorum() bool {
 	em.voteMu.RLock()
@@ -1178,23 +798,6 @@ func (em *electionManager) hasQuorum() bool {
 		"allVoters", em.getVotersListUnsafe())
 
 	return hasIt
-}
-
-// Helper functions for voter lists
-func (em *electionManager) getPreVotersList() []types.NodeID {
-	var voters []types.NodeID
-	for voterID := range em.preVotesReceived {
-		voters = append(voters, voterID)
-	}
-	return voters
-}
-
-func (em *electionManager) getPreVotersListUnsafe() []types.NodeID {
-	var voters []types.NodeID
-	for voterID := range em.preVotesReceived {
-		voters = append(voters, voterID)
-	}
-	return voters
 }
 
 // Helper to get list of all voters for debugging
@@ -1219,13 +822,8 @@ func (em *electionManager) getVotersListUnsafe() []types.NodeID {
 func (em *electionManager) broadcastVoteRequests(
 	ctx context.Context,
 	args *types.RequestVoteArgs,
-	isPreVote bool,
-	originatorTerm types.Term,
 ) {
 	requestType := "vote"
-	if isPreVote {
-		requestType = "pre-vote"
-	}
 
 	em.logger.Debugw("Broadcasting vote requests",
 		"type", requestType,
@@ -1257,11 +855,8 @@ func (em *electionManager) broadcastVoteRequests(
 			rpcCtx, cancel := context.WithTimeout(context.Background(), voteRequestTimeout)
 			defer cancel()
 
-			if isPreVote {
-				em.sendPreVoteRequest(rpcCtx, targetPeerID, args, originatorTerm)
-			} else {
-				em.sendVoteRequest(rpcCtx, targetPeerID, args, false, args.Term)
-			}
+			em.sendVoteRequest(rpcCtx, targetPeerID, args, args.Term)
+
 		}(peerID)
 	}
 
@@ -1274,36 +869,20 @@ func (em *electionManager) broadcastVoteRequests(
 	}()
 }
 
-// sendPreVoteRequest sends a pre-vote request with improved error handling
-func (em *electionManager) sendPreVoteRequest(
-	ctx context.Context,
-	peerID types.NodeID,
-	args *types.RequestVoteArgs,
-	originatorTerm types.Term,
-) {
-	reply, err := em.networkMgr.SendRequestVote(ctx, peerID, args)
-	if err != nil {
-		em.logger.Debugw("Pre-vote request failed",
-			"to", peerID,
-			"preVoteTerm", args.Term,
-			"error", err,
-			"nodeID", em.id)
-		return
-	}
-
-	em.processPreVoteReply(peerID, args.Term, originatorTerm, reply)
-}
-
 // sendVoteRequest sends a regular vote request with improved error handling
 func (em *electionManager) sendVoteRequest(
 	ctx context.Context,
 	peer types.NodeID,
 	args *types.RequestVoteArgs,
-	isPreVote bool,
 	currentTerm types.Term,
 ) {
 	requestCtx, cancel := context.WithTimeout(ctx, voteRequestTimeout)
 	defer cancel()
+
+	em.logger.Debugw("Sending vote request",
+		"to", peer,
+		"term", args.Term,
+		"nodeID", em.id)
 
 	reply, err := em.networkMgr.SendRequestVote(requestCtx, peer, args)
 	if err != nil {
@@ -1313,19 +892,21 @@ func (em *electionManager) sendVoteRequest(
 			"term", args.Term,
 			"error", err)
 
-		if !isPreVote {
-			em.splitVoteDetector.mu.Lock()
-			em.splitVoteDetector.electionAttempts++
-			em.splitVoteDetector.mu.Unlock()
-		}
+		em.splitVoteDetector.mu.Lock()
+		em.splitVoteDetector.electionAttempts++
+		em.splitVoteDetector.mu.Unlock()
+
 		return
 	}
 
-	if isPreVote {
-		em.processPreVoteReply(peer, args.Term, currentTerm, reply)
-	} else {
-		em.processVoteReply(peer, args.Term, currentTerm, reply)
-	}
+	em.logger.Debugw("Vote request succeeded",
+		"to", peer,
+		"term", args.Term,
+		"granted", reply.VoteGranted,
+		"replyTerm", reply.Term,
+		"nodeID", em.id)
+
+	em.processVoteReply(peer, args.Term, currentTerm, reply)
 }
 
 // Enhanced vote request handling with improved validation
@@ -1352,9 +933,6 @@ func (em *electionManager) HandleRequestVote(
 
 	reply := &types.RequestVoteReply{VoteGranted: false}
 	requestType := "vote"
-	if args.IsPreVote {
-		requestType = "pre-vote"
-	}
 
 	em.logger.Debugw("Processing vote request",
 		"type", requestType,
@@ -1362,24 +940,23 @@ func (em *electionManager) HandleRequestVote(
 		"term", args.Term,
 		"nodeID", em.id)
 
-	if !args.IsPreVote {
-		steppedDown, termBeforeCheck := em.stateMgr.CheckTermAndStepDown(
-			ctx,
-			args.Term,
-			args.CandidateID,
-		)
-		if steppedDown {
-			em.logger.Infow("Stepped down due to higher term in vote request",
-				"from", args.CandidateID,
-				"newTerm", args.Term,
-				"previousTerm", termBeforeCheck,
-				"nodeID", em.id)
-			// reset the election state when stepping down
-			em.resetElectionState("higher term in vote request")
-		}
+	steppedDown, termBeforeCheck := em.stateMgr.CheckTermAndStepDown(
+		ctx,
+		args.Term,
+		args.CandidateID,
+	)
+	if steppedDown {
+		em.logger.Infow("Stepped down due to higher term in vote request",
+			"from", args.CandidateID,
+			"newTerm", args.Term,
+			"previousTerm", termBeforeCheck,
+			"nodeID", em.id)
+		// reset the election state when stepping down
+		em.resetElectionState("higher term in vote request")
 	}
 
-	currentTerm, currentRole, votedFor := em.stateMgr.GetState()
+	currentTerm, currentRole, _ := em.stateMgr.GetState()
+	votedFor := em.stateMgr.GetVotedFor()
 	reply.Term = currentTerm
 
 	if args.Term < currentTerm {
@@ -1391,8 +968,15 @@ func (em *electionManager) HandleRequestVote(
 		return reply, nil
 	}
 
-	if args.IsPreVote {
-		return em.handlePreVoteRequest(args, currentTerm, currentRole)
+	if currentRole == types.RoleCandidate && args.Term > currentTerm {
+		em.logger.Infow("Candidate stepping down for higher term vote request",
+			"from", args.CandidateID,
+			"requestTerm", args.Term,
+			"currentTerm", currentTerm,
+			"nodeID", em.id)
+		currentTerm, _, _ = em.stateMgr.GetState()
+		votedFor = em.stateMgr.GetVotedFor()
+		reply.Term = currentTerm
 	}
 
 	if votedFor != "" && votedFor != args.CandidateID {
@@ -1424,61 +1008,17 @@ func (em *electionManager) HandleRequestVote(
 		"nodeID", em.id)
 
 	if !em.stateMgr.GrantVote(ctx, args.CandidateID, args.Term) {
-		em.logger.Errorw("Failed to grant vote",
+		em.logger.Debugw("Vote not granted based on Raft rules",
 			"to", args.CandidateID,
 			"term", args.Term,
-			"nodeID", em.id)
-		return reply, errors.New("failed to grant vote")
+			"nodeID", em.id,
+			"reason", "state manager denied vote")
+		return reply, nil
 	}
 
 	reply.VoteGranted = true
 	em.ResetTimerOnHeartbeat()
 
-	return reply, nil
-}
-
-// handlePreVoteRequest handles pre-vote requests with special logic
-func (em *electionManager) handlePreVoteRequest(
-	args *types.RequestVoteArgs,
-	currentTerm types.Term,
-	currentRole types.NodeRole,
-) (*types.RequestVoteReply, error) {
-	reply := &types.RequestVoteReply{
-		Term:        currentTerm,
-		VoteGranted: false,
-	}
-
-	if currentRole == types.RoleFollower {
-		currentLeader, _, hasLeader := em.stateMgr.GetLeaderInfo()
-		if hasLeader && currentLeader != "" {
-			em.logger.Debugw("Rejecting pre-vote: have current leader",
-				"from", args.CandidateID,
-				"currentLeader", currentLeader,
-				"nodeID", em.id)
-			return reply, nil
-		}
-	}
-
-	lastIndex, lastTerm := em.logMgr.GetConsistentLastState()
-	logUpToDate := em.isLogUpToDate(args.LastLogTerm, args.LastLogIndex, lastTerm, lastIndex)
-
-	if !logUpToDate {
-		em.logger.Debugw("Rejecting pre-vote: log not up-to-date",
-			"from", args.CandidateID,
-			"candidateLastTerm", args.LastLogTerm,
-			"candidateLastIndex", args.LastLogIndex,
-			"ourLastTerm", lastTerm,
-			"ourLastIndex", lastIndex,
-			"nodeID", em.id)
-		return reply, nil
-	}
-
-	em.logger.Debugw("Granting pre-vote",
-		"to", args.CandidateID,
-		"term", args.Term,
-		"nodeID", em.id)
-
-	reply.VoteGranted = true
 	return reply, nil
 }
 
