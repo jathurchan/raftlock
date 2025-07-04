@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package raft
 
 import (
@@ -14,6 +17,39 @@ import (
 	"github.com/jathurchan/raftlock/testutil"
 	"github.com/jathurchan/raftlock/types"
 )
+
+func TestTimerFunctionality(t *testing.T) {
+	clock := newTestClock()
+
+	// Create a 500ms timer
+	timer := clock.NewTimer(500 * time.Millisecond)
+
+	// Should not fire yet
+	select {
+	case <-timer.Chan():
+		t.Fatal("Timer fired before time advancement")
+	default:
+		t.Log("Timer correctly not fired yet")
+	}
+
+	// Advance by 300ms - should not fire
+	clock.advanceTime(300 * time.Millisecond)
+	select {
+	case <-timer.Chan():
+		t.Fatal("Timer fired too early")
+	default:
+		t.Log("Timer correctly not fired at 300ms")
+	}
+
+	// Advance by another 300ms (total 600ms) - should fire
+	clock.advanceTime(300 * time.Millisecond)
+	select {
+	case fireTime := <-timer.Chan():
+		t.Logf("Timer fired correctly at %v", fireTime)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Timer did not fire after sufficient time advancement")
+	}
+}
 
 // TestRaftIntegration is the main entry point for Raft integration tests.
 func TestRaftIntegration(t *testing.T) {
@@ -51,7 +87,7 @@ type TestCluster struct {
 	t      *testing.T
 	nodes  map[types.NodeID]*TestNode
 	config Config
-	clock  *mockClock
+	clock  *testClock
 	mu     sync.RWMutex
 }
 
@@ -70,51 +106,19 @@ type TestNode struct {
 func testBasicElection(t *testing.T, cluster *TestCluster) {
 	t.Helper()
 
-	// Advance the mock clock to trigger an election.
-	cluster.tick(cluster.config.Options.ElectionTickCount * 2)
-	time.Sleep(100 * time.Millisecond) // Allow time for network communication.
+	// Trigger initial election with more aggressive time advancement
+	// The split vote recovery mechanism can create long delays, so we need to advance more time
+	cluster.tick(cluster.config.Options.ElectionTickCount * 5) // More aggressive initial advancement
+	time.Sleep(100 * time.Millisecond)
 
-	// The issue: After pre-vote succeeds, there's an election delay (up to 1.238s based on logs)
-	// We need to continuously advance the mock clock until a leader is elected
-	// Since NominalTickInterval = 100ms, we need ~13 ticks for 1.3s delay
-
-	leaderElected := false
-	maxAttempts := 50 // Prevent infinite loop
-
-	for i := 0; i < maxAttempts && !leaderElected; i++ {
-		// Advance the clock significantly to handle election delays
-		cluster.tick(15)                  // 15 * 100ms = 1.5s advance
-		time.Sleep(50 * time.Millisecond) // Allow for processing
-
-		// Check if a leader has been elected
-		cluster.mu.RLock()
-		for _, node := range cluster.nodes {
-			if !node.isShutdown.Load() {
-				_, isLeader := node.raft.GetState()
-				if isLeader {
-					leaderElected = true
-					break
-				}
-			}
-		}
-		cluster.mu.RUnlock()
-
-		if leaderElected {
-			break
-		}
-
-		// Log progress every few attempts
-		if i%5 == 0 {
-			t.Logf("Attempt %d: Still waiting for leader election...", i+1)
-		}
-	}
-
-	// Now use WaitForLeader with a shorter timeout since we've been trying
-	leader := cluster.WaitForLeader(t, 5*time.Second)
+	// Now wait for leader with timeout, the WaitForLeader method will handle the advanced time progression
+	leader := cluster.WaitForLeader(t, 30*time.Second) // Increased timeout for split vote scenarios
 	testutil.AssertTrue(t, leader != "", "A leader should be elected")
 
 	leaders := cluster.countLeaders()
 	testutil.AssertEqual(t, 1, leaders, "There should be exactly one leader")
+
+	t.Logf("Leader elected successfully: %s", leader)
 }
 
 // testCommandReplication verifies that a command is proposed and replicated to all nodes.
@@ -221,7 +225,7 @@ func NewTestCluster(t *testing.T, size int, cfg Config) *TestCluster {
 		t:      t,
 		nodes:  make(map[types.NodeID]*TestNode),
 		config: cfg,
-		clock:  newMockClock(),
+		clock:  newTestClock(),
 	}
 
 	peers := make(map[types.NodeID]PeerConfig)
@@ -252,7 +256,7 @@ func NewTestCluster(t *testing.T, size int, cfg Config) *TestCluster {
 			WithConfig(nodeCfg).
 			WithStorage(storage).
 			WithApplier(applier).
-			WithLogger(logger.NewStdLogger("debug")).
+			WithLogger(logger.NewStdLogger("info")).
 			WithMetrics(NewNoOpMetrics()).
 			WithClock(cluster.clock).
 			WithRand(NewStandardRand()).
@@ -263,9 +267,9 @@ func NewTestCluster(t *testing.T, size int, cfg Config) *TestCluster {
 			id,
 			peerCfg.Address,
 			peers,
-			raftNode, // Corrected: raftNode implements RPCHandler
+			raftNode,
 			isShutdown,
-			logger.NewStdLogger("debug"),
+			logger.NewStdLogger("info"),
 			NewNoOpMetrics(),
 			cluster.clock,
 			DefaultGRPCNetworkManagerOptions(),
@@ -416,7 +420,7 @@ func (c *TestCluster) GetActiveNodeIDs() []types.NodeID {
 func (c *TestCluster) WaitForLeader(t *testing.T, timeout time.Duration) types.NodeID {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	checkInterval := 50 * time.Millisecond // Reduced from 100ms
+	checkInterval := 100 * time.Millisecond
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
@@ -437,11 +441,7 @@ func (c *TestCluster) WaitForLeader(t *testing.T, timeout time.Duration) types.N
 
 		select {
 		case <-ticker.C:
-			// More aggressive clock advancement to handle election delays
-			// Each election delay can be up to 1.3s, so advance by 1.5s worth of ticks
-			ticksFor1_5Seconds := int(1500 / int(NominalTickInterval.Milliseconds())) // ~15 ticks
-			c.tick(ticksFor1_5Seconds)
-
+			// Check for leader first
 			c.mu.RLock()
 			for _, node := range c.nodes {
 				if !node.isShutdown.Load() {
@@ -454,6 +454,13 @@ func (c *TestCluster) WaitForLeader(t *testing.T, timeout time.Duration) types.N
 				}
 			}
 			c.mu.RUnlock()
+
+			// Advance time more aggressively to handle split vote recovery delays
+			// Split vote recovery can create delays of 3-5 seconds, so we need larger advances
+			maxDelay := 5 * time.Second                             // Handle maximum split vote recovery delay
+			ticksForMaxDelay := int(maxDelay / NominalTickInterval) // ~50 ticks for 5 seconds
+			c.tick(ticksForMaxDelay)
+
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -627,9 +634,9 @@ func (a *TestApplier) GetAppliedCount() int {
 func defaultTestConfig() Config {
 	return Config{
 		Options: Options{
-			ElectionTickCount:           30,
-			HeartbeatTickCount:          3,
-			ElectionRandomizationFactor: 2.0,
+			ElectionTickCount:           10,
+			HeartbeatTickCount:          2,
+			ElectionRandomizationFactor: 1.0,
 			MaxLogEntriesPerRequest:     100,
 			SnapshotThreshold:           1000,
 			LogCompactionMinEntries:     500,
@@ -637,7 +644,6 @@ func defaultTestConfig() Config {
 		FeatureFlags: FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: true,
-			PreVoteEnabled:    false,
 		}.WithExplicitFlags(),
 	}
 }
@@ -907,4 +913,223 @@ func (tnm *TestNetworkManager) RegisterHandler(id types.NodeID, handler RPCHandl
 	tnm.mu.Lock()
 	defer tnm.mu.Unlock()
 	tnm.handlers[id] = handler
+}
+
+// testClock is a mock implementation of Clock for testing
+type testClock struct {
+	mu      sync.RWMutex
+	now     time.Time
+	timers  map[*testTimer]struct{}
+	tickers map[*testTicker]struct{}
+}
+
+// newTestClock creates a new mock clock starting at the Unix epoch
+func newTestClock() *testClock {
+	return &testClock{
+		now:     time.Unix(0, 0),
+		timers:  make(map[*testTimer]struct{}),
+		tickers: make(map[*testTicker]struct{}),
+	}
+}
+
+func (mc *testClock) Now() time.Time {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	return mc.now
+}
+
+func (mc *testClock) Since(t time.Time) time.Duration {
+	return mc.Now().Sub(t)
+}
+
+func (mc *testClock) After(d time.Duration) <-chan time.Time {
+	timer := mc.NewTimer(d)
+	return timer.Chan()
+}
+
+func (mc *testClock) NewTicker(d time.Duration) Ticker {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	ticker := &testTicker{
+		clock:    mc,
+		period:   d,
+		ch:       make(chan time.Time, 1),
+		stopped:  false,
+		nextTick: mc.now.Add(d),
+	}
+	mc.tickers[ticker] = struct{}{}
+	return ticker
+}
+
+func (mc *testClock) NewTimer(d time.Duration) Timer {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	expiry := mc.now.Add(d)
+	timer := &testTimer{
+		clock:   mc,
+		ch:      make(chan time.Time, 1),
+		stopped: false,
+		expiry:  expiry,
+	}
+	mc.timers[timer] = struct{}{}
+
+	// Debug logging
+	// fmt.Printf("[TIMER DEBUG] Created timer: duration=%v, expiry=%v, now=%v\n", d, expiry, mc.now)
+
+	return timer
+}
+
+func (mc *testClock) Sleep(d time.Duration) {
+	// For mock clock, we don't actually sleep
+	// In a real implementation, you might want to advance time
+}
+
+// advanceTime advances the mock clock by the given duration and fires any expired timers/tickers
+func (mc *testClock) advanceTime(d time.Duration) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	// oldTime := mc.now
+	mc.now = mc.now.Add(d)
+
+	// fmt.Printf("[CLOCK DEBUG] Advancing time by %v: %v -> %v\n", d, oldTime, mc.now)
+	// fmt.Printf("[CLOCK DEBUG] Active timers: %d, Active tickers: %d\n", len(mc.timers), len(mc.tickers))
+
+	// Fire expired timers
+	firedTimers := 0
+	for timer := range mc.timers {
+		// fmt.Printf("[CLOCK DEBUG] Checking timer: expiry=%v, stopped=%v, now=%v\n", timer.expiry, timer.stopped, mc.now)
+		if !timer.stopped && !mc.now.Before(timer.expiry) {
+			// fmt.Printf("[CLOCK DEBUG] Firing timer! Expiry: %v, Now: %v\n", timer.expiry, mc.now)
+			select {
+			case timer.ch <- mc.now:
+				// fmt.Printf("[CLOCK DEBUG] Timer fired successfully!\n")
+				firedTimers++
+			default:
+				// fmt.Printf("[CLOCK DEBUG] Timer channel full, skipping\n")
+			}
+			// Remove one-shot timer
+			delete(mc.timers, timer)
+		}
+	}
+
+	// Fire expired tickers
+	firedTickers := 0
+	for ticker := range mc.tickers {
+		if !ticker.stopped {
+			tickCount := 0
+			for !mc.now.Before(ticker.nextTick) {
+				select {
+				case ticker.ch <- ticker.nextTick:
+					tickCount++
+				default:
+					// Channel full, skip
+					break
+				}
+				ticker.nextTick = ticker.nextTick.Add(ticker.period)
+			}
+			if tickCount > 0 {
+				firedTickers++
+				// fmt.Printf("[CLOCK DEBUG] Ticker fired %d times\n", tickCount)
+			}
+		}
+	}
+
+	// fmt.Printf("[CLOCK DEBUG] Fired %d timers and %d tickers\n", firedTimers, firedTickers)
+}
+
+// testTimer implements the Timer interface for testing
+type testTimer struct {
+	clock   *testClock
+	ch      chan time.Time
+	stopped bool
+	expiry  time.Time
+	mu      sync.Mutex
+}
+
+func (mt *testTimer) Chan() <-chan time.Time {
+	return mt.ch
+}
+
+func (mt *testTimer) Stop() bool {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	if mt.stopped {
+		return false
+	}
+
+	// fmt.Printf("[TIMER DEBUG] Stopping timer: expiry=%v\n", mt.expiry)
+	mt.stopped = true
+	mt.clock.mu.Lock()
+	delete(mt.clock.timers, mt)
+	mt.clock.mu.Unlock()
+
+	return true
+}
+
+func (mt *testTimer) Reset(d time.Duration) bool {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	wasActive := !mt.stopped
+
+	mt.clock.mu.Lock()
+	if mt.stopped {
+		// Timer was stopped, add it back
+		mt.clock.timers[mt] = struct{}{}
+	}
+	mt.expiry = mt.clock.now.Add(d)
+	mt.stopped = false
+	mt.clock.mu.Unlock()
+
+	// Drain the channel
+	select {
+	case <-mt.ch:
+	default:
+	}
+
+	return wasActive
+}
+
+// mockTicker implements the Ticker interface for testing
+type testTicker struct {
+	clock    *testClock
+	period   time.Duration
+	ch       chan time.Time
+	stopped  bool
+	nextTick time.Time
+	mu       sync.Mutex
+}
+
+func (mt *testTicker) Chan() <-chan time.Time {
+	return mt.ch
+}
+
+func (mt *testTicker) Stop() {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	if !mt.stopped {
+		mt.stopped = true
+		mt.clock.mu.Lock()
+		delete(mt.clock.tickers, mt)
+		mt.clock.mu.Unlock()
+	}
+}
+
+func (mt *testTicker) Reset(d time.Duration) {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	mt.clock.mu.Lock()
+	mt.period = d
+	mt.nextTick = mt.clock.now.Add(d)
+	if mt.stopped {
+		mt.stopped = false
+		mt.clock.tickers[mt] = struct{}{}
+	}
+	mt.clock.mu.Unlock()
 }

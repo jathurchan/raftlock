@@ -106,9 +106,6 @@ const (
 
 	// defaultSnapshotSendRPCTimeout is the timeout for sending the InstallSnapshot RPC to a follower.
 	defaultSnapshotSendRPCTimeout = 2 * time.Minute
-
-	// defaultReadIndexTimeout is the timeout for waiting on quorum confirmation in a ReadIndex operation.
-	defaultReadIndexTimeout = 1 * time.Second
 )
 
 // state.go
@@ -134,14 +131,9 @@ const (
 	maxConcurrentElections             = 3
 	voteRequestTimeout                 = 5 * time.Second
 	electionManagerOpTimeout           = 3 * time.Second
-	// Changed from 100ms to 50ms.
-	// This ensures that the minimum interval between election attempts (50ms + 25ms = 75ms)
-	// is less than the mock clock's tick interval (100ms), preventing the "too soon" deadlock.
-	minElectionIntervalBase     = 50 * time.Millisecond
-	maxElectionBackoff          = 2 * time.Second
-	splitVoteDetectionThreshold = 2
-	splitVoteRecoveryDelay      = 500 * time.Millisecond
-	maxSplitVoteBackoff         = 5 * time.Second
+	minElectionIntervalBase            = 50 * time.Millisecond
+	maxElectionBackoff                 = 1 * time.Second
+	splitVoteDetectionThreshold        = 3
 )
 
 // replication.go

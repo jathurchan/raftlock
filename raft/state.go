@@ -130,6 +130,18 @@ type StateManager interface {
 	// GetLeaderInfoUnsafe returns current and last known leader IDs without locking.
 	// Caller must hold a read or write lock.
 	GetLeaderInfoUnsafe() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool)
+
+	// GetVotedFor returns who this node voted for in the current term.
+	// Safe for concurrent use.
+	GetVotedFor() types.NodeID
+
+	// GetVotedForUnsafe returns who this node voted for without locking.
+	// Caller must hold a lock.
+	GetVotedForUnsafe() types.NodeID
+
+	// GetTimeSinceLastRoleChange returns the duration since the last role transition.
+	// Useful for election timeout handling and monitoring.
+	GetTimeSinceLastRoleChange() time.Duration
 }
 
 // stateManager implements the StateManager interface.
@@ -147,6 +159,7 @@ type stateManager struct {
 	logger  logger.Logger
 	metrics Metrics
 	storage storage.Storage
+	clock   Clock
 
 	currentTerm types.Term   // Latest term server has seen (persisted)
 	votedFor    types.NodeID // CandidateID that received vote in current term (persisted)
@@ -175,6 +188,7 @@ type StateManagerDeps struct {
 	LeaderChangeCh chan types.NodeID
 	Logger         logger.Logger
 	Metrics        Metrics
+	Clock          Clock
 	Storage        storage.Storage
 }
 
@@ -192,6 +206,7 @@ func NewStateManager(deps StateManagerDeps) (StateManager, error) {
 		logger:         deps.Logger.WithComponent("state"),
 		metrics:        deps.Metrics,
 		storage:        deps.Storage,
+		clock:          deps.Clock,
 
 		// Initialize to unknown/default values
 		currentTerm:       0,
@@ -201,8 +216,9 @@ func NewStateManager(deps StateManagerDeps) (StateManager, error) {
 		lastKnownLeaderID: unknownNodeID,
 		commitIndex:       0,
 		lastApplied:       0,
-		lastRoleChange:    time.Now(),
 	}
+
+	sm.lastRoleChange = sm.clock.Now()
 
 	sm.logger.Infow("State manager created",
 		"nodeID", sm.id,
@@ -233,6 +249,9 @@ func validateStateManagerDeps(deps StateManagerDeps) error {
 	}
 	if deps.Storage == nil {
 		return errors.New("storage must not be nil")
+	}
+	if deps.Clock == nil {
+		return errors.New("clock must not be nil")
 	}
 	return nil
 }
@@ -912,7 +931,7 @@ func (sm *stateManager) setRoleAndLeaderLocked(
 
 	sm.role = role
 	sm.leaderID = leaderID
-	sm.lastRoleChange = time.Now()
+	sm.lastRoleChange = sm.clock.Now()
 
 	// Update last known leader if we have a valid leader
 	if leaderID != unknownNodeID {
@@ -942,7 +961,7 @@ func (sm *stateManager) persistState(
 	}
 	defer sm.persistenceInProgress.Store(false)
 
-	sm.lastPersistAttempt = time.Now()
+	sm.lastPersistAttempt = sm.clock.Now()
 
 	sm.logger.Debugw("Persisting state",
 		"term", term,
@@ -1006,7 +1025,7 @@ func (sm *stateManager) persistStateWithRetry(
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled during retry delay: %w", ctx.Err())
-			case <-time.After(delay):
+			case <-sm.clock.After(delay):
 				// Exponential backoff with cap
 				delay = delay * 2
 				if delay > maxPersistDelay {
@@ -1173,7 +1192,7 @@ func (sm *stateManager) CanVoteForUnsafe(candidateID types.NodeID) bool {
 func (sm *stateManager) GetTimeSinceLastRoleChange() time.Duration {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return time.Since(sm.lastRoleChange)
+	return sm.clock.Since(sm.lastRoleChange)
 }
 
 // IsInTransition returns true if the node is in a transitional state
@@ -1183,7 +1202,7 @@ func (sm *stateManager) IsInTransition() bool {
 
 	// Consider it in transition if it's a candidate or recent role change
 	return sm.role == types.RoleCandidate ||
-		time.Since(sm.lastRoleChange) < 100*time.Millisecond ||
+		sm.clock.Since(sm.lastRoleChange) < 100*time.Millisecond ||
 		sm.persistenceInProgress.Load()
 }
 
