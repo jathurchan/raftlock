@@ -23,6 +23,7 @@ func createTestStateManager(t *testing.T) (*stateManager, *mockStorage, *mockMet
 	storage := newMockStorage()
 	metrics := newMockMetrics()
 	logger := logger.NewNoOpLogger()
+	clock := newMockClock()
 	mu := &sync.RWMutex{}
 	isShutdown := &atomic.Bool{}
 	leaderChangeCh := make(chan types.NodeID, 1)
@@ -34,6 +35,7 @@ func createTestStateManager(t *testing.T) (*stateManager, *mockStorage, *mockMet
 		LeaderChangeCh: leaderChangeCh,
 		Logger:         logger,
 		Metrics:        metrics,
+		Clock:          clock,
 		Storage:        storage,
 	}
 
@@ -1088,7 +1090,7 @@ func TestStateManager_GetTimeSinceLastRoleChange(t *testing.T) {
 	sm, _, _ := createTestStateManager(t)
 
 	// Set a specific time for testing
-	testTime := time.Now().Add(-5 * time.Minute)
+	testTime := sm.clock.Now().Add(-5 * time.Minute)
 	sm.lastRoleChange = testTime
 
 	duration := sm.GetTimeSinceLastRoleChange()
@@ -1100,7 +1102,7 @@ func TestStateManager_IsInTransition(t *testing.T) {
 
 	// Should not be in transition as follower with old role change
 	sm.role = types.RoleFollower
-	sm.lastRoleChange = time.Now().Add(-time.Second)
+	sm.lastRoleChange = sm.clock.Now().Add(-time.Second)
 	testutil.AssertFalse(t, sm.IsInTransition())
 
 	// Should be in transition as candidate
@@ -1109,11 +1111,11 @@ func TestStateManager_IsInTransition(t *testing.T) {
 
 	// Should be in transition with recent role change
 	sm.role = types.RoleFollower
-	sm.lastRoleChange = time.Now()
+	sm.lastRoleChange = sm.clock.Now()
 	testutil.AssertTrue(t, sm.IsInTransition())
 
 	// Should be in transition with persistence in progress
-	sm.lastRoleChange = time.Now().Add(-time.Second)
+	sm.lastRoleChange = sm.clock.Now().Add(-time.Second)
 	sm.persistenceInProgress.Store(true)
 	testutil.AssertTrue(t, sm.IsInTransition())
 }
