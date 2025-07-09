@@ -166,9 +166,9 @@ func validateSnapshotManagerDeps(deps SnapshotManagerDeps) error {
 
 // snapshotManager is a concrete implementation of the SnapshotManager interface.
 type snapshotManager struct {
-	mu            *sync.RWMutex  // Raft's mutex protecting state fields
-	isShutdown    *atomic.Bool   // Shared flag indicating Raft shutdown
-	snapshotOpsWg sync.WaitGroup // Wait group for in-flight snapshot operations
+	mu            *sync.RWMutex   // Raft's mutex protecting state fields
+	isShutdown    *atomic.Bool    // Shared flag indicating Raft shutdown
+	snapshotOpsWg *sync.WaitGroup // Wait group for in-flight snapshot operations
 
 	id  types.NodeID // ID of the local Raft node.
 	cfg Config
@@ -192,8 +192,8 @@ type snapshotManager struct {
 	lastSnapshotIndex types.Index // Last snapshot index (protected by mu)
 	lastSnapshotTerm  types.Term  // Last snapshot term (protected by mu)
 
-	snapshotCreateInProgress atomic.Bool  // Prevents concurrent local snapshot creation
-	snapshotOpsCounter       atomic.Int32 // Counts all active snapshot ops (create, send, handle) for graceful shutdown
+	snapshotCreateInProgress atomic.Bool   // Prevents concurrent local snapshot creation
+	snapshotOpsCounter       *atomic.Int32 // Counts all active snapshot ops (create, send, handle) for graceful shutdown
 }
 
 // NewSnapshotManager initializes and returns a new SnapshotManager instance.
@@ -220,6 +220,9 @@ func NewSnapshotManager(deps SnapshotManagerDeps) (SnapshotManager, error) {
 
 		lastSnapshotIndex: 0,
 		lastSnapshotTerm:  0,
+
+		snapshotOpsWg:      new(sync.WaitGroup),
+		snapshotOpsCounter: new(atomic.Int32),
 	}
 
 	sm.logger.Infow("Snapshot manager initialized",

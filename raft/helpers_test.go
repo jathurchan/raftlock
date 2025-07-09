@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,8 @@ type mockStorage struct {
 
 	snapshotAttempted bool
 	snapshotSaved     bool
+	hookSaveState     func(ctx context.Context, state types.PersistentState) error
+	hookLoadState     func(ctx context.Context) (types.PersistentState, error)
 	hookLoadSnapshot  func(ctx context.Context) (types.SnapshotMetadata, []byte, error)
 	hookSaveSnapshot  func()
 
@@ -34,6 +37,10 @@ type mockStorage struct {
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
+		state: types.PersistentState{
+			CurrentTerm: 0,
+			VotedFor:    unknownNodeID,
+		},
 		log:     make([]types.LogEntry, 0),
 		failOps: make(map[string]error),
 	}
@@ -67,6 +74,9 @@ func (ms *mockStorage) checkFailure(op string) error {
 }
 
 func (ms *mockStorage) SaveState(ctx context.Context, state types.PersistentState) error {
+	if ms.hookSaveState != nil {
+		return ms.hookSaveState(ctx, state)
+	}
 	if err := ms.checkFailure("SaveState"); err != nil {
 		return err
 	}
@@ -78,6 +88,9 @@ func (ms *mockStorage) SaveState(ctx context.Context, state types.PersistentStat
 }
 
 func (ms *mockStorage) LoadState(ctx context.Context) (types.PersistentState, error) {
+	if ms.hookLoadState != nil {
+		return ms.hookLoadState(ctx)
+	}
 	if err := ms.checkFailure("LoadState"); err != nil {
 		return types.PersistentState{}, err
 	}
@@ -352,6 +365,9 @@ type mockNetworkManager struct {
 	mu                 sync.RWMutex // Protects access to function pointers
 	requestVoteSuccess bool
 	requestVoteReplies map[types.NodeID]*types.RequestVoteReply
+	requestVoteErrors  map[types.NodeID]error
+
+	callCount int
 
 	startFunc               func() error
 	sendAppendEntriesFunc   func(context.Context, types.NodeID, *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)
@@ -364,6 +380,9 @@ type mockNetworkManager struct {
 
 	stopFunc func() error
 }
+
+// Ensure mockNetworkManager implements NetworkManager
+var _ NetworkManager = &mockNetworkManager{}
 
 func newMockNetworkManager() *mockNetworkManager {
 	return &mockNetworkManager{
@@ -417,7 +436,12 @@ func (m *mockNetworkManager) SendRequestVote(
 ) (*types.RequestVoteReply, error) {
 	m.mu.RLock()
 	fn := m.sendRequestVoteFunc
+	m.callCount++
 	m.mu.RUnlock()
+
+	if err, exists := m.requestVoteErrors[target]; exists {
+		return nil, err
+	}
 
 	if fn != nil {
 		return fn(ctx, target, args)
@@ -480,6 +504,10 @@ func (m *mockNetworkManager) LocalAddr() string {
 	return "localhost:1234"
 }
 
+func (m *mockNetworkManager) ResetConnection(ctx context.Context, peerID types.NodeID) error {
+	return nil
+}
+
 func (m *mockNetworkManager) getAndResetCallCounts() (appendEntries, heartbeats int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -535,13 +563,16 @@ func (m *mockApplier) RestoreSnapshot(
 	return m.restoreErr
 }
 
+// MockClock is a mock implementation of the Clock interface.
 type mockClock struct {
-	nowVal       time.Time
-	mu           sync.Mutex
-	afterChannel chan time.Time
-	timers       []*mockTimer
-	tickers      []*mockTicker
+	nowVal  time.Time
+	mu      sync.RWMutex
+	timers  []*mockTimer
+	tickers []*mockTicker
 }
+
+// Ensure mockClock implements Clock
+var _ Clock = &mockClock{}
 
 func newMockClock() *mockClock {
 	return &mockClock{
@@ -550,8 +581,8 @@ func newMockClock() *mockClock {
 }
 
 func (m *mockClock) Now() time.Time {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.nowVal
 }
 
@@ -559,56 +590,42 @@ func (m *mockClock) Since(t time.Time) time.Duration {
 	return m.Now().Sub(t)
 }
 
+// TriggerAfter advances time and fires any timers that should expire
 func (m *mockClock) TriggerAfter(d time.Duration, t *testing.T) {
 	m.mu.Lock()
 	m.nowVal = m.nowVal.Add(d)
-	currentAfterChan := m.afterChannel
 	currentTime := m.nowVal
-	m.mu.Unlock()
 
-	if currentAfterChan != nil {
-		select {
-		case currentAfterChan <- currentTime:
-		case <-time.After(50 * time.Millisecond):
-			if t != nil {
-				t.Logf(
-					"mockClock.TriggerAfter: timeout waiting for test to receive from afterChannel",
-				)
-			}
-		}
+	// Fire expired timers
+	for _, timer := range m.timers {
+		timer.checkAndSignal(currentTime)
 	}
+
+	// Fire expired tickers
+	for _, ticker := range m.tickers {
+		ticker.checkAndSignal(currentTime)
+	}
+	m.mu.Unlock()
 }
 
+// After creates a timer that must be manually triggered
 func (m *mockClock) After(d time.Duration) <-chan time.Time {
-	m.mu.Lock()
-	ch := make(chan time.Time, 1)
-	m.afterChannel = ch
-	m.mu.Unlock()
-
-	go func() {
-		time.Sleep(1 * time.Millisecond) // Minimal real sleep to allow channel return
-		m.mu.Lock()
-		m.nowVal = m.nowVal.Add(d)
-		sendTime := m.nowVal
-		m.mu.Unlock()
-		ch <- sendTime
-	}()
-	return ch
+	timer := m.NewTimer(d)
+	return timer.Chan()
 }
 
 func (m *mockClock) NewTicker(d time.Duration) Ticker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	ticker := &mockTicker{
-		C:         make(chan time.Time, 1), // Buffered to allow advanceTime to send
-		d:         d,
-		clock:     m,
-		active:    true,
-		resetChan: make(chan time.Duration),
-		stopChan:  make(chan struct{}),
+		C:        make(chan time.Time, 1),
+		d:        d,
+		clock:    m,
+		active:   true,
+		nextTick: m.nowVal.Add(d),
 	}
 	m.tickers = append(m.tickers, ticker)
-	go ticker.run()
 	return ticker
 }
 
@@ -616,8 +633,14 @@ func (m *mockClock) NewTimer(d time.Duration) Timer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	timer := newMockTimer(d, m)
-	m.timers = append(m.timers, timer) // Keep track of it
+	timer := &mockTimer{
+		C:         make(chan time.Time, 1),
+		mockClock: m,
+		active:    true,
+		d:         d,
+		expiresAt: m.nowVal.Add(d),
+	}
+	m.timers = append(m.timers, timer)
 	return timer
 }
 
@@ -627,27 +650,30 @@ func (m *mockClock) Sleep(d time.Duration) {
 	m.nowVal = m.nowVal.Add(d)
 }
 
-func (m *mockClock) advanceTime(d time.Duration) {
+func (m *mockClock) Advance(d time.Duration) {
 	m.mu.Lock()
 	m.nowVal = m.nowVal.Add(d)
+	currentTime := m.nowVal
+
+	// Fire expired timers
 	for _, timer := range m.timers {
-		timer.checkAndSignal(m.nowVal)
+		timer.checkAndSignal(currentTime)
 	}
+
+	// Fire expired tickers
 	for _, ticker := range m.tickers {
-		ticker.checkAndSignal(m.nowVal)
+		ticker.checkAndSignal(currentTime)
 	}
 	m.mu.Unlock()
 }
 
 type mockTicker struct {
-	C         chan time.Time
-	d         time.Duration
-	clock     *mockClock
-	nextTick  time.Time
-	active    bool
-	mu        sync.Mutex
-	resetChan chan time.Duration
-	stopChan  chan struct{}
+	C        chan time.Time
+	d        time.Duration
+	clock    *mockClock
+	nextTick time.Time
+	active   bool
+	mu       sync.RWMutex
 }
 
 func (m *mockTicker) Chan() <-chan time.Time {
@@ -657,10 +683,7 @@ func (m *mockTicker) Chan() <-chan time.Time {
 func (m *mockTicker) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active {
-		m.active = false
-		close(m.stopChan)
-	}
+	m.active = false
 }
 
 func (m *mockTicker) Reset(d time.Duration) {
@@ -671,66 +694,22 @@ func (m *mockTicker) Reset(d time.Duration) {
 	}
 	m.d = d
 	m.nextTick = m.clock.Now().Add(d)
-	select {
-	case m.resetChan <- d:
-	default:
-	}
-}
-
-func (m *mockTicker) run() {
-	m.mu.Lock()
-	m.nextTick = m.clock.Now().Add(m.d)
-	currentDuration := m.d
-	m.mu.Unlock()
-
-	for {
-		m.mu.Lock()
-		isActive := m.active
-		nextT := m.nextTick
-		m.mu.Unlock()
-
-		if !isActive {
-			return
-		}
-
-		now := m.clock.Now()
-		var waitTime time.Duration
-		if now.Before(nextT) {
-			waitTime = nextT.Sub(now)
-		}
-
-		select {
-		case <-time.After(waitTime):
-			m.mu.Lock()
-			if !m.active {
-				m.mu.Unlock()
-				return
-			}
-			if !m.clock.Now().Before(m.nextTick) {
-				select {
-				case m.C <- m.nextTick:
-				default:
-				}
-				m.nextTick = m.nextTick.Add(currentDuration)
-			}
-			m.mu.Unlock()
-		case newDuration := <-m.resetChan:
-			m.mu.Lock()
-			currentDuration = newDuration
-			m.mu.Unlock()
-		case <-m.stopChan:
-			return
-		}
-	}
 }
 
 func (m *mockTicker) checkAndSignal(currentTime time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active && !currentTime.Before(m.nextTick) {
+
+	if !m.active {
+		return
+	}
+
+	if !currentTime.Before(m.nextTick) {
 		select {
 		case m.C <- m.nextTick:
+			// Successfully sent
 		default:
+			// Channel full, skip this tick
 		}
 		m.nextTick = m.nextTick.Add(m.d)
 	}
@@ -738,22 +717,11 @@ func (m *mockTicker) checkAndSignal(currentTime time.Time) {
 
 type mockTimer struct {
 	C         chan time.Time
-	mu        sync.Mutex
-	mockClock *mockClock // ref to mock clock
-	expiresAt time.Time  // when this timer should expire according to mock clock
+	mu        sync.RWMutex
+	mockClock *mockClock
+	expiresAt time.Time
 	active    bool
-	d         time.Duration // duration of the timer
-}
-
-func newMockTimer(d time.Duration, clock *mockClock) *mockTimer {
-	mt := &mockTimer{
-		C:         make(chan time.Time, 1),
-		mockClock: clock,
-		d:         d,
-		active:    true,
-	}
-	mt.expiresAt = clock.Now().Add(d)
-	return mt
+	d         time.Duration
 }
 
 func (m *mockTimer) Chan() <-chan time.Time {
@@ -763,8 +731,10 @@ func (m *mockTimer) Chan() <-chan time.Time {
 func (m *mockTimer) Stop() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	if m.active {
 		m.active = false
+		// Drain the channel if needed
 		select {
 		case <-m.C:
 		default:
@@ -783,36 +753,43 @@ func (m *mockTimer) Reset(d time.Duration) bool {
 	m.d = d
 	m.expiresAt = m.mockClock.Now().Add(d)
 
+	// Drain the channel
 	select {
 	case <-m.C:
 	default:
 	}
+
 	return wasActive
 }
 
 func (m *mockTimer) checkAndSignal(currentTime time.Time) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.active && !currentTime.Before(m.expiresAt) {
 		select {
 		case m.C <- m.expiresAt:
-			m.active = false
+			m.active = false // One-shot timer
 		default:
+			// Channel full, timer already fired
 		}
 	}
-	m.mu.Unlock()
 }
 
-type mockRand struct{}
+type mockRand struct {
+	floatVal float64
+	intVal   int
+}
 
 func (m *mockRand) IntN(n int) int {
 	if n <= 0 {
 		panic("IntN called with non-positive n")
 	}
-	return 0
+	return m.intVal
 }
 
 func (m *mockRand) Float64() float64 {
-	return 0.0
+	return m.floatVal
 }
 
 type mockMetrics struct {
@@ -822,6 +799,13 @@ type mockMetrics struct {
 	logReadCount      int
 	logConsistencyErr int
 	logTruncateCount  int
+
+	termObservations          []types.Term
+	roleChangeObservations    []RoleChangeData
+	electionStartObservations []ElectionStartData
+	voteGrantedObservations   []types.Term
+	commitIndexObservations   []types.Index
+	appliedIndexObservations  []types.Index
 
 	lastTruncateType    LogTruncateType
 	lastEntriesRemoved  int
@@ -839,6 +823,17 @@ type mockMetrics struct {
 	grpcClientRPCLatencyHist   map[string][]float64
 }
 
+type RoleChangeData struct {
+	NewRole      types.NodeRole
+	PreviousRole types.NodeRole
+	Term         types.Term
+}
+
+type ElectionStartData struct {
+	Term   types.Term
+	Reason ElectionReason
+}
+
 func newMockMetrics() *mockMetrics {
 	return &mockMetrics{
 		peerReplicationCalls: make([]struct {
@@ -851,6 +846,7 @@ func newMockMetrics() *mockMetrics {
 		grpcClientRPCLatencyHist:   make(map[string][]float64),
 	}
 }
+
 func (mm *mockMetrics) IncCounter(name string, labels ...string) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -877,23 +873,37 @@ func (mm *mockMetrics) ObserveHistogram(name string, value float64, labels ...st
 		mm.grpcClientRPCLatencyHist[key] = append(mm.grpcClientRPCLatencyHist[key], value)
 	}
 }
-func (mm *mockMetrics) ObserveCommitIndex(index types.Index)                        {}
-func (mm *mockMetrics) ObserveAppliedIndex(index types.Index)                       {}
-func (mm *mockMetrics) ObserveTerm(term types.Term)                                 {}
+func (mm *mockMetrics) ObserveCommitIndex(index types.Index) {
+	mm.commitIndexObservations = append(mm.commitIndexObservations, index)
+}
+func (mm *mockMetrics) ObserveAppliedIndex(index types.Index) {
+	mm.appliedIndexObservations = append(mm.appliedIndexObservations, index)
+}
+func (mm *mockMetrics) ObserveTerm(term types.Term) {
+	mm.termObservations = append(mm.termObservations, term)
+}
 func (mm *mockMetrics) ObserveLeaderChange(newLeader types.NodeID, term types.Term) {}
 func (mm *mockMetrics) ObserveLeaderNotificationDropped()                           {}
 func (mm *mockMetrics) ObserveLeadershipLost(term types.Term, reason string)        {}
 func (mm *mockMetrics) ObserveApplyNotificationDropped()                            {}
 func (mm *mockMetrics) ObserveApplyLoopStopped(reason string)                       {}
 
-func (mm *mockMetrics) ObserveRoleChange(
-	newRole types.NodeRole,
-	oldRole types.NodeRole,
-	term types.Term,
-) {
+func (mm *mockMetrics) ObserveRoleChange(newRole, previousRole types.NodeRole, term types.Term) {
+	mm.roleChangeObservations = append(mm.roleChangeObservations, RoleChangeData{
+		NewRole:      newRole,
+		PreviousRole: previousRole,
+		Term:         term,
+	})
 }
-func (mm *mockMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {}
-func (mm *mockMetrics) ObserveVoteGranted(term types.Term)                          {}
+func (mm *mockMetrics) ObserveElectionStart(term types.Term, reason ElectionReason) {
+	mm.electionStartObservations = append(mm.electionStartObservations, ElectionStartData{
+		Term:   term,
+		Reason: reason,
+	})
+}
+func (mm *mockMetrics) ObserveVoteGranted(term types.Term) {
+	mm.voteGrantedObservations = append(mm.voteGrantedObservations, term)
+}
 func (mm *mockMetrics) ObserveLogState(firstIndex, lastIndex types.Index, lastTerm types.Term) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -988,6 +998,9 @@ func (mm *mockMetrics) resetPeerReplicationCalls() {
 }
 
 type mockLeaderInitializer struct {
+	initCalls      int
+	heartbeatCalls int
+
 	initializeStateCalled bool
 	sendHeartbeatsCalled  bool
 
@@ -995,8 +1008,12 @@ type mockLeaderInitializer struct {
 	sendHeartbeatsFunc        func(ctx context.Context)
 }
 
+var _ LeaderInitializer = &mockLeaderInitializer{}
+
 func (m *mockLeaderInitializer) InitializeLeaderState() {
 	m.initializeStateCalled = true
+
+	m.initCalls++
 
 	if m.initializeLeaderStateFunc != nil {
 		m.initializeLeaderStateFunc()
@@ -1006,6 +1023,8 @@ func (m *mockLeaderInitializer) InitializeLeaderState() {
 
 func (m *mockLeaderInitializer) SendHeartbeats(ctx context.Context) {
 	m.sendHeartbeatsCalled = true
+
+	m.heartbeatCalls++
 
 	if m.sendHeartbeatsFunc != nil {
 		m.sendHeartbeatsFunc(ctx)
@@ -1023,6 +1042,11 @@ type mockStateManager struct {
 	lastApplied  types.Index
 	becomeLeader bool // controls mock behavior for BecomeLeader
 
+	becomeLeaderCalls int
+	becomeResult      bool
+	steppedDown       bool
+	grantVoteResult   bool
+
 	lastAppliedUpdated bool
 	commitIndexUpdated bool
 
@@ -1039,17 +1063,32 @@ type mockStateManager struct {
 	updateCommitIndexUnsafeFunc func(newCommitIndex types.Index) bool
 	updateLastAppliedFunc       func(newLastApplied types.Index) bool
 	getLastAppliedFunc          func() types.Index
+
+	lastRoleChange time.Time
+
+	metrics Metrics
+
+	termChangeCount atomic.Uint64
 }
 
-func newMockStateManager() *mockStateManager {
-	return &mockStateManager{
-		currentTerm:  1,
-		currentRole:  types.RoleFollower,
-		leaderID:     "node1",
-		commitIndex:  0,
-		lastApplied:  0,
-		becomeLeader: false,
+func newMockStateManager(m Metrics) *mockStateManager {
+	if m == nil {
+		m = NewNoOpMetrics() // Fallback if no metrics instance is provided
 	}
+
+	sm := &mockStateManager{
+		currentTerm:    1,
+		currentRole:    types.RoleFollower,
+		leaderID:       "node1",
+		commitIndex:    0,
+		lastApplied:    0,
+		becomeLeader:   false,
+		lastRoleChange: time.Now(),
+		metrics:        m, // Initialize with a no-op metrics for safety
+	}
+
+	sm.termChangeCount.Store(0)
+	return sm
 }
 
 func (m *mockStateManager) Initialize(ctx context.Context) error {
@@ -1088,6 +1127,7 @@ func (m *mockStateManager) BecomeCandidate(ctx context.Context, reason ElectionR
 	m.currentRole = types.RoleCandidate
 	m.votedFor = "node1" // Self ID hardcoded for mock simplicity
 	m.leaderID = ""      // Candidate doesn't know leader
+	m.lastRoleChange = time.Now()
 	return true
 }
 
@@ -1111,8 +1151,18 @@ func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
 	if m.becomeLeaderFunc != nil {
 		return m.becomeLeaderFunc(ctx)
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.becomeLeaderCalls++
+
+	if m.becomeResult {
+		m.currentRole = types.RoleLeader
+		m.leaderID = "test-node"
+		return m.becomeResult
+	}
+
 	if m.currentRole != types.RoleCandidate {
 		return false
 	}
@@ -1121,6 +1171,7 @@ func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
 	}
 	m.currentRole = types.RoleLeader
 	m.leaderID = "node1" // Self ID
+	m.lastRoleChange = time.Now()
 	return true
 }
 
@@ -1133,8 +1184,10 @@ func (m *mockStateManager) BecomeFollower(
 		m.becomeFollowerFunc(ctx, term, leaderID)
 		return
 	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	if term > m.currentTerm {
 		m.currentTerm = term
 		m.votedFor = "" // Reset vote when term increases
@@ -1143,6 +1196,7 @@ func (m *mockStateManager) BecomeFollower(
 	}
 	m.currentRole = types.RoleFollower
 	m.leaderID = leaderID
+	m.lastRoleChange = time.Now()
 }
 
 func (m *mockStateManager) CheckTermAndStepDown(
@@ -1156,23 +1210,24 @@ func (m *mockStateManager) CheckTermAndStepDown(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	prevTerm := m.currentTerm
-	steppedDown := false
 	if rpcTerm > m.currentTerm {
 		m.currentTerm = rpcTerm
 		m.currentRole = types.RoleFollower
 		m.leaderID = rpcLeader
 		m.votedFor = "" // Reset vote on term change
-		steppedDown = true
+		m.steppedDown = true
+		m.termChangeCount.Add(1)
+		m.metrics.ObserveTerm(rpcTerm)
 	} else if rpcTerm == m.currentTerm {
 		if m.currentRole != types.RoleFollower {
 			m.currentRole = types.RoleFollower
 			m.leaderID = rpcLeader // Update leader hint
-			steppedDown = true
+			m.steppedDown = true
 		} else if m.leaderID != rpcLeader && rpcLeader != "" {
 			m.leaderID = rpcLeader // Update leader hint if already follower
 		}
 	}
-	return steppedDown, prevTerm
+	return m.steppedDown, prevTerm
 }
 
 func (m *mockStateManager) GrantVote(
@@ -1184,11 +1239,24 @@ func (m *mockStateManager) GrantVote(
 		return m.grantVoteFunc(ctx, candidateID, term)
 	}
 
+	if m.grantVoteResult {
+		m.votedFor = candidateID
+		m.currentTerm = term
+		return m.grantVoteResult
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// If we've already voted in this term for someone else, reject
+	if m.currentTerm == term && m.votedFor != "" && m.votedFor != candidateID {
+		return false
+	}
+
 	if term < m.currentTerm {
 		return false // Stale term
 	}
+
 	if term > m.currentTerm { // New term
 		m.currentTerm = term
 		m.votedFor = ""                    // Reset vote for new term
@@ -1254,18 +1322,32 @@ func (m *mockStateManager) GetLastApplied() types.Index {
 func (m *mockStateManager) GetLastAppliedUnsafe() types.Index {
 	return m.lastApplied
 }
-
 func (m *mockStateManager) GetLeaderInfo() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.leaderID, m.leaderID, m.leaderID != ""
 }
-
 func (m *mockStateManager) GetLeaderInfoUnsafe() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
 	return m.leaderID, m.leaderID, m.leaderID != ""
 }
+func (m *mockStateManager) GetVotedFor() types.NodeID {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.votedFor
+}
+func (m *mockStateManager) GetVotedForUnsafe() types.NodeID {
+	return m.votedFor
+}
+
+func (m *mockStateManager) GetTimeSinceLastRoleChange() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return time.Since(m.lastRoleChange)
+}
+
 func (m *mockStateManager) Stop() {}
 
+// MockLogManager is a mock implementation of the LogManager interface.
 type mockLogManager struct {
 	lastIndex  types.Index
 	lastTerm   types.Term
@@ -1289,16 +1371,15 @@ type mockLogManager struct {
 	findLastEntryWithTermUnsafeFunc func(ctx context.Context, term types.Term, searchFromHint types.Index) (types.Index, error)
 	restoreFromSnapshotFunc         func(ctx context.Context, meta types.SnapshotMetadata) error
 	restoreFromSnapshotUnsafeFunc   func(ctx context.Context, meta types.SnapshotMetadata) error
+	getConsistentLastStateFunc      func() (types.Index, types.Term)
+	getFirstIndexFunc               func() types.Index
+	getFirstIndexUnsafeFunc         func() types.Index
+	getLastIndexUnsafeFunc          func() types.Index
+	getLastTermUnsafeFunc           func() types.Term
 }
 
-func newMockLogManager() *mockLogManager {
-	return &mockLogManager{
-		lastIndex:  0,
-		lastTerm:   0,
-		firstIndex: 1, // Default to 1 for non-empty log after initialization
-		entries:    make(map[types.Index]types.LogEntry),
-	}
-}
+// Ensure mockLogManager implements LogManager
+var _ LogManager = &mockLogManager{}
 
 func (m *mockLogManager) Initialize(ctx context.Context) error {
 	if m.initializeFunc != nil {
@@ -1308,24 +1389,36 @@ func (m *mockLogManager) Initialize(ctx context.Context) error {
 }
 
 func (m *mockLogManager) GetLastIndexUnsafe() types.Index {
+	if m.getLastIndexUnsafeFunc != nil {
+		return m.getLastIndexUnsafeFunc()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastIndex
 }
 
 func (m *mockLogManager) GetLastTermUnsafe() types.Term {
+	if m.getLastTermUnsafeFunc != nil {
+		return m.getLastTermUnsafeFunc()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastTerm
 }
 
 func (m *mockLogManager) GetConsistentLastState() (types.Index, types.Term) {
+	if m.getConsistentLastStateFunc != nil {
+		return m.getConsistentLastStateFunc()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastIndex, m.lastTerm
 }
 
 func (m *mockLogManager) GetFirstIndex() types.Index {
+	if m.getFirstIndexFunc != nil {
+		return m.getFirstIndexFunc()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.entries) == 0 && m.lastIndex == 0 { // Truly empty
@@ -1335,8 +1428,10 @@ func (m *mockLogManager) GetFirstIndex() types.Index {
 }
 
 func (m *mockLogManager) GetFirstIndexUnsafe() types.Index {
-	// Mock doesn't need separate unsafe implementation since it's already simple
-	return m.GetFirstIndex()
+	if m.getFirstIndexUnsafeFunc != nil {
+		return m.getFirstIndexUnsafeFunc()
+	}
+	return m.GetFirstIndex() // Mock doesn't need separate unsafe implementation since it's already simple
 }
 
 func (m *mockLogManager) GetTerm(ctx context.Context, index types.Index) (types.Term, error) {
@@ -1688,7 +1783,6 @@ func (m *mockLogManager) FindFirstIndexInTermUnsafe(
 	return 0, ErrNotFound
 }
 
-// NEW: GetLogStateForDebugging
 func (m *mockLogManager) GetLogStateForDebugging() LogDebugState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1791,6 +1885,13 @@ func (m *mockLogManager) Clear() {
 	m.firstIndex = 0
 	m.lastIndex = 0
 	m.lastTerm = 0
+}
+
+// newMockLogManager creates a new mockLogManager with default empty state.
+func newMockLogManager() *mockLogManager {
+	return &mockLogManager{
+		entries: make(map[types.Index]types.LogEntry),
+	}
 }
 
 type mockSnapshotManager struct {
@@ -2176,3 +2277,17 @@ func (m *mockReplicationManager) UpdatePeerAfterSnapshotSend(
 func (m *mockReplicationManager) SetPeerSnapshotInProgress(peerID types.NodeID, inProgress bool) {}
 
 func (m *mockReplicationManager) Stop() {}
+
+func WaitForCondition(t testing.TB, timeout, interval time.Duration, condition func() bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if condition() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Timeout waiting for condition to be met within %v: %s", timeout, description)
+		}
+		time.Sleep(interval) // Use real sleep for polling interval
+	}
+}
