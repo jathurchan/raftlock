@@ -523,6 +523,10 @@ func (m *mockNetworkManager) setWaitGroup(wg *sync.WaitGroup) {
 }
 
 type mockApplier struct {
+	mu         sync.Mutex
+	applied    map[types.Index][]byte
+	applyCalls int
+
 	restoreErr      error
 	snapshotData    []byte
 	applierRestored bool
@@ -1319,11 +1323,13 @@ func (m *mockStateManager) GetLastApplied() types.Index {
 func (m *mockStateManager) GetLastAppliedUnsafe() types.Index {
 	return m.lastApplied
 }
+
 func (m *mockStateManager) GetLeaderInfo() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.leaderID, m.leaderID, m.leaderID != ""
 }
+
 func (m *mockStateManager) GetLeaderInfoUnsafe() (currentLeader, lastKnownLeader types.NodeID, hasLeader bool) {
 	return m.leaderID, m.leaderID, m.leaderID != ""
 }
@@ -2274,7 +2280,12 @@ func (m *mockReplicationManager) SetPeerSnapshotInProgress(peerID types.NodeID, 
 
 func (m *mockReplicationManager) Stop() {}
 
-func WaitForCondition(t testing.TB, timeout, interval time.Duration, condition func() bool, description string) {
+func WaitForCondition(
+	t testing.TB,
+	timeout, interval time.Duration,
+	condition func() bool,
+	description string,
+) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {

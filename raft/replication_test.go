@@ -15,7 +15,9 @@ import (
 )
 
 // Test helper for creating a properly configured replication manager
-func setupTestReplicationManager(t *testing.T) (*replicationManager, *mockLogManager, *mockStateManager, *mockNetworkManager, *mockSnapshotManager, *mockClock) {
+func setupTestReplicationManager(
+	t *testing.T,
+) (*replicationManager, *mockLogManager, *mockStateManager, *mockNetworkManager, *mockSnapshotManager, *mockClock) {
 	t.Helper()
 
 	metrics := newMockMetrics()
@@ -463,11 +465,30 @@ func TestReplicationManager_InitializeLeaderState(t *testing.T) {
 			peerState, exists := rm.peerStates[peerID] // Fetch from peerStates map
 			testutil.AssertTrue(t, exists, "Peer state should exist for %s", peerID)
 
-			testutil.AssertEqual(t, types.Index(6), peerState.NextIndex, "NextIndex should be lastLogIndex + 1")
-			testutil.AssertEqual(t, types.Index(0), peerState.MatchIndex, "MatchIndex should start at 0")
+			testutil.AssertEqual(
+				t,
+				types.Index(6),
+				peerState.NextIndex,
+				"NextIndex should be lastLogIndex + 1",
+			)
+			testutil.AssertEqual(
+				t,
+				types.Index(0),
+				peerState.MatchIndex,
+				"MatchIndex should start at 0",
+			)
 			testutil.AssertFalse(t, peerState.IsActive, "IsActive should start false")
-			testutil.AssertFalse(t, peerState.SnapshotInProgress, "SnapshotInProgress should start false")
-			testutil.AssertEqual(t, types.Index(5), peerState.ReplicationLag, "ReplicationLag should be lastLogIndex")
+			testutil.AssertFalse(
+				t,
+				peerState.SnapshotInProgress,
+				"SnapshotInProgress should start false",
+			)
+			testutil.AssertEqual(
+				t,
+				types.Index(5),
+				peerState.ReplicationLag,
+				"ReplicationLag should be lastLogIndex",
+			)
 		}
 
 		// Check heartbeat state was reset
@@ -740,12 +761,14 @@ func TestReplicationManager_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 		stateMgr.mu.Unlock()
 
 		// Mock successful heartbeat responses
-		networkMgr.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-			return &types.AppendEntriesReply{
-				Term:    args.Term,
-				Success: true,
-			}, nil
-		})
+		networkMgr.setSendAppendEntriesFunc(
+			func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+				return &types.AppendEntriesReply{
+					Term:    args.Term,
+					Success: true,
+				}, nil
+			},
+		)
 
 		index, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
 
@@ -764,9 +787,11 @@ func TestReplicationManager_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		// Mock failed heartbeat responses
-		networkMgr.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-			return nil, errors.New("network unreachable")
-		})
+		networkMgr.setSendAppendEntriesFunc(
+			func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+				return nil, errors.New("network unreachable")
+			},
+		)
 
 		_, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
 
@@ -811,12 +836,14 @@ func TestReplicationManager_VerifyLeadershipAndGetCommitIndex(t *testing.T) {
 		rm.mu.Unlock()
 
 		// Mock higher term response
-		networkMgr.setSendAppendEntriesFunc(func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-			return &types.AppendEntriesReply{
-				Term:    args.Term + 1, // Higher term
-				Success: false,
-			}, nil
-		})
+		networkMgr.setSendAppendEntriesFunc(
+			func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+				return &types.AppendEntriesReply{
+					Term:    args.Term + 1, // Higher term
+					Success: false,
+				}, nil
+			},
+		)
 
 		_, err := rm.VerifyLeadershipAndGetCommitIndex(context.Background())
 
@@ -1206,7 +1233,11 @@ func TestReplicationManager_UpdatePeerAfterSnapshotSend(t *testing.T) {
 		testutil.AssertEqual(t, snapshotIndex+1, updatedState.NextIndex)
 		testutil.AssertFalse(t, updatedState.SnapshotInProgress)
 		testutil.AssertTrue(t, updatedState.IsActive)
-		testutil.AssertTrue(t, updatedState.LastActive.After(initialTime) || updatedState.LastActive.Equal(initialTime))
+		testutil.AssertTrue(
+			t,
+			updatedState.LastActive.After(initialTime) ||
+				updatedState.LastActive.Equal(initialTime),
+		)
 		testutil.AssertEqual(t, types.Index(5), updatedState.ReplicationLag) // 20 - 15 = 5
 	})
 
@@ -1756,7 +1787,12 @@ func TestReplicationManager_handleAppendError(t *testing.T) {
 		rm.mu.RLock()
 		peerState := rm.peerStates[peerID]
 		testutil.AssertFalse(t, peerState.IsActive, "Peer should be marked inactive after timeout")
-		testutil.AssertEqual(t, 1, peerState.ConsecutiveFailures, "Should increment consecutive failures")
+		testutil.AssertEqual(
+			t,
+			1,
+			peerState.ConsecutiveFailures,
+			"Should increment consecutive failures",
+		)
 		rm.mu.RUnlock()
 	})
 
@@ -1781,7 +1817,12 @@ func TestReplicationManager_handleAppendError(t *testing.T) {
 		rm.mu.RLock()
 		peerState := rm.peerStates[peerID]
 		testutil.AssertFalse(t, peerState.IsActive, "Peer should be marked inactive")
-		testutil.AssertEqual(t, 1, peerState.ConsecutiveFailures, "Should increment consecutive failures")
+		testutil.AssertEqual(
+			t,
+			1,
+			peerState.ConsecutiveFailures,
+			"Should increment consecutive failures",
+		)
 		rm.mu.RUnlock()
 	})
 
@@ -1806,7 +1847,12 @@ func TestReplicationManager_handleAppendError(t *testing.T) {
 		rm.mu.RLock()
 		peerState := rm.peerStates[peerID]
 		testutil.AssertFalse(t, peerState.IsActive, "Peer should be marked inactive")
-		testutil.AssertEqual(t, 1, peerState.ConsecutiveFailures, "Should increment consecutive failures")
+		testutil.AssertEqual(
+			t,
+			1,
+			peerState.ConsecutiveFailures,
+			"Should increment consecutive failures",
+		)
 		rm.mu.RUnlock()
 	})
 
@@ -1831,7 +1877,12 @@ func TestReplicationManager_handleAppendError(t *testing.T) {
 		rm.mu.RLock()
 		peerState := rm.peerStates[peerID]
 		testutil.AssertFalse(t, peerState.IsActive, "Peer should be marked inactive")
-		testutil.AssertEqual(t, 1, peerState.ConsecutiveFailures, "Should increment consecutive failures")
+		testutil.AssertEqual(
+			t,
+			1,
+			peerState.ConsecutiveFailures,
+			"Should increment consecutive failures",
+		)
 		rm.mu.RUnlock()
 	})
 
@@ -1856,7 +1907,12 @@ func TestReplicationManager_handleAppendError(t *testing.T) {
 		rm.mu.RLock()
 		peerState := rm.peerStates[peerID]
 		testutil.AssertFalse(t, peerState.IsActive, "Peer should be marked inactive")
-		testutil.AssertEqual(t, 1, peerState.ConsecutiveFailures, "Should increment consecutive failures")
+		testutil.AssertEqual(
+			t,
+			1,
+			peerState.ConsecutiveFailures,
+			"Should increment consecutive failures",
+		)
 		rm.mu.RUnlock()
 	})
 
@@ -1912,8 +1968,18 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 
 		// Should set NextIndex to last index with conflicting term + 1
 		// Last entry with term 2 is at index 4, so NextIndex should be 5
-		testutil.AssertEqual(t, types.Index(5), peerState.NextIndex, "Should set NextIndex to last conflicting term index + 1")
-		testutil.AssertEqual(t, types.Index(2), peerState.MatchIndex, "MatchIndex should remain unchanged")
+		testutil.AssertEqual(
+			t,
+			types.Index(5),
+			peerState.NextIndex,
+			"Should set NextIndex to last conflicting term index + 1",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(2),
+			peerState.MatchIndex,
+			"MatchIndex should remain unchanged",
+		)
 	})
 
 	t.Run("ConflictTermNotFoundInLeaderLog", func(t *testing.T) {
@@ -1945,8 +2011,18 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
 		// Should use ConflictIndex since ConflictTerm not found
-		testutil.AssertEqual(t, types.Index(3), peerState.NextIndex, "Should use ConflictIndex when ConflictTerm not found")
-		testutil.AssertEqual(t, types.Index(1), peerState.MatchIndex, "MatchIndex should remain unchanged")
+		testutil.AssertEqual(
+			t,
+			types.Index(3),
+			peerState.NextIndex,
+			"Should use ConflictIndex when ConflictTerm not found",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(1),
+			peerState.MatchIndex,
+			"MatchIndex should remain unchanged",
+		)
 	})
 
 	t.Run("ConflictTermOptimizationNotApplicable", func(t *testing.T) {
@@ -1977,7 +2053,12 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
 		// Should use ConflictIndex since optimization not applicable
-		testutil.AssertEqual(t, types.Index(1), peerState.NextIndex, "Should use ConflictIndex when optimization not applicable")
+		testutil.AssertEqual(
+			t,
+			types.Index(1),
+			peerState.NextIndex,
+			"Should use ConflictIndex when optimization not applicable",
+		)
 	})
 
 	t.Run("NoConflictTermUseConflictIndex", func(t *testing.T) {
@@ -2000,8 +2081,18 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
-		testutil.AssertEqual(t, types.Index(7), peerState.NextIndex, "Should use ConflictIndex when no ConflictTerm")
-		testutil.AssertEqual(t, types.Index(5), peerState.MatchIndex, "MatchIndex should remain unchanged")
+		testutil.AssertEqual(
+			t,
+			types.Index(7),
+			peerState.NextIndex,
+			"Should use ConflictIndex when no ConflictTerm",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(5),
+			peerState.MatchIndex,
+			"MatchIndex should remain unchanged",
+		)
 	})
 
 	t.Run("NoConflictInfoDecrementNextIndex", func(t *testing.T) {
@@ -2024,8 +2115,18 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
-		testutil.AssertEqual(t, types.Index(9), peerState.NextIndex, "Should decrement NextIndex when no conflict info")
-		testutil.AssertEqual(t, types.Index(5), peerState.MatchIndex, "MatchIndex should remain unchanged")
+		testutil.AssertEqual(
+			t,
+			types.Index(9),
+			peerState.NextIndex,
+			"Should decrement NextIndex when no conflict info",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(5),
+			peerState.MatchIndex,
+			"MatchIndex should remain unchanged",
+		)
 	})
 
 	t.Run("NextIndexNeverGoesBelowOne", func(t *testing.T) {
@@ -2048,7 +2149,12 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
-		testutil.AssertEqual(t, types.Index(1), peerState.NextIndex, "NextIndex should never go below 1")
+		testutil.AssertEqual(
+			t,
+			types.Index(1),
+			peerState.NextIndex,
+			"NextIndex should never go below 1",
+		)
 	})
 
 	t.Run("MatchIndexHintUpdated", func(t *testing.T) {
@@ -2072,8 +2178,18 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
-		testutil.AssertEqual(t, types.Index(7), peerState.NextIndex, "Should update NextIndex based on ConflictIndex")
-		testutil.AssertEqual(t, types.Index(5), peerState.MatchIndex, "Should update MatchIndex from hint")
+		testutil.AssertEqual(
+			t,
+			types.Index(7),
+			peerState.NextIndex,
+			"Should update NextIndex based on ConflictIndex",
+		)
+		testutil.AssertEqual(
+			t,
+			types.Index(5),
+			peerState.MatchIndex,
+			"Should update MatchIndex from hint",
+		)
 	})
 
 	t.Run("MatchIndexHintIgnoredIfLower", func(t *testing.T) {
@@ -2098,7 +2214,12 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
 		testutil.AssertEqual(t, types.Index(7), peerState.NextIndex, "Should update NextIndex")
-		testutil.AssertEqual(t, types.Index(8), peerState.MatchIndex, "Should not regress MatchIndex")
+		testutil.AssertEqual(
+			t,
+			types.Index(8),
+			peerState.MatchIndex,
+			"Should not regress MatchIndex",
+		)
 	})
 
 	t.Run("ZeroMatchIndexHintIgnored", func(t *testing.T) {
@@ -2123,6 +2244,11 @@ func TestReplicationManager_handleLogInconsistency(t *testing.T) {
 		rm.handleLogInconsistency(peerState, peerID, reply)
 
 		testutil.AssertEqual(t, types.Index(7), peerState.NextIndex, "Should update NextIndex")
-		testutil.AssertEqual(t, types.Index(5), peerState.MatchIndex, "Should ignore zero MatchIndex hint")
+		testutil.AssertEqual(
+			t,
+			types.Index(5),
+			peerState.MatchIndex,
+			"Should ignore zero MatchIndex hint",
+		)
 	})
 }

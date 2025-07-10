@@ -108,7 +108,9 @@ func testBasicElection(t *testing.T, cluster *TestCluster) {
 
 	// Trigger initial election with more aggressive time advancement
 	// The split vote recovery mechanism can create long delays, so we need to advance more time
-	cluster.tick(cluster.config.Options.ElectionTickCount * 5) // More aggressive initial advancement
+	cluster.tick(
+		cluster.config.Options.ElectionTickCount * 5,
+	) // More aggressive initial advancement
 	time.Sleep(100 * time.Millisecond)
 
 	// Now wait for leader with timeout, the WaitForLeader method will handle the advanced time progression
@@ -157,7 +159,12 @@ func testLeaderFailureRecovery(t *testing.T, cluster *TestCluster) {
 	time.Sleep(200 * time.Millisecond)
 	oldLeaderID := cluster.WaitForLeader(t, 20*time.Second)
 	t.Logf("Initial leader elected: %s", oldLeaderID)
-	_, _, _, err := cluster.GetNode(oldLeaderID).raft.Propose(context.Background(), []byte("cmd-before-failure"))
+	_, _, _, err := cluster.GetNode(
+		oldLeaderID,
+	).raft.Propose(
+		context.Background(),
+		[]byte("cmd-before-failure"),
+	)
 	testutil.AssertNoError(t, err)
 	cluster.tick(cluster.config.Options.HeartbeatTickCount * 5)
 	time.Sleep(100 * time.Millisecond)
@@ -179,7 +186,12 @@ func testLeaderFailureRecovery(t *testing.T, cluster *TestCluster) {
 	t.Logf("New leader elected: %s", newLeaderID)
 
 	// Propose a command to the new leader.
-	_, _, _, err = cluster.GetNode(newLeaderID).raft.Propose(context.Background(), []byte("cmd-after-failure"))
+	_, _, _, err = cluster.GetNode(
+		newLeaderID,
+	).raft.Propose(
+		context.Background(),
+		[]byte("cmd-after-failure"),
+	)
 	testutil.AssertNoError(t, err)
 	cluster.tick(cluster.config.Options.HeartbeatTickCount * 5)
 	time.Sleep(100 * time.Millisecond)
@@ -199,7 +211,12 @@ func testBasicSnapshotting(t *testing.T, cluster *TestCluster) {
 	// Propose enough commands to trigger a snapshot.
 	threshold := cluster.config.Options.SnapshotThreshold
 	for i := 0; i < threshold+1; i++ {
-		_, _, _, err := cluster.GetNode(leaderID).raft.Propose(context.Background(), []byte(fmt.Sprintf("cmd-%d", i+1)))
+		_, _, _, err := cluster.GetNode(
+			leaderID,
+		).raft.Propose(
+			context.Background(),
+			[]byte(fmt.Sprintf("cmd-%d", i+1)),
+		)
 		testutil.AssertNoError(t, err)
 		cluster.tick(2)
 	}
@@ -431,7 +448,14 @@ func (c *TestCluster) WaitForLeader(t *testing.T, timeout time.Duration) types.N
 				if !node.isShutdown.Load() {
 					term, isLeader := node.raft.GetState()
 					status := node.raft.Status()
-					t.Logf("Node %s: term=%d, isLeader=%t, role=%s, leaderID=%s", id, term, isLeader, status.Role, status.LeaderID)
+					t.Logf(
+						"Node %s: term=%d, isLeader=%t, role=%s, leaderID=%s",
+						id,
+						term,
+						isLeader,
+						status.Role,
+						status.LeaderID,
+					)
 				}
 			}
 			c.mu.RUnlock()
@@ -490,7 +514,12 @@ func (c *TestCluster) WaitForApplied(t *testing.T, expectedCount int, timeout ti
 }
 
 // WaitForAppliedSubset waits for the specified number of entries to be applied on a subset of nodes.
-func (c *TestCluster) WaitForAppliedSubset(t *testing.T, expectedCount int, timeout time.Duration, nodeIDs []types.NodeID) {
+func (c *TestCluster) WaitForAppliedSubset(
+	t *testing.T,
+	expectedCount int,
+	timeout time.Duration,
+	nodeIDs []types.NodeID,
+) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -505,7 +534,10 @@ func (c *TestCluster) WaitForAppliedSubset(t *testing.T, expectedCount int, time
 					t.Logf("Node %s has applied %d entries (expected %d)", id, count, expectedCount)
 				}
 			}
-			t.Fatalf("Timeout waiting for %d entries to be applied across specified nodes", expectedCount)
+			t.Fatalf(
+				"Timeout waiting for %d entries to be applied across specified nodes",
+				expectedCount,
+			)
 		}
 
 		select {
@@ -539,7 +571,12 @@ func (c *TestCluster) CheckStateConsistency(t *testing.T, expectedCount int) {
 		if !node.isShutdown.Load() {
 			referenceEntries = node.applier.GetAppliedEntries()
 			if len(referenceEntries) != expectedCount {
-				t.Fatalf("Node %s has %d applied entries, expected %d", id, len(referenceEntries), expectedCount)
+				t.Fatalf(
+					"Node %s has %d applied entries, expected %d",
+					id,
+					len(referenceEntries),
+					expectedCount,
+				)
 			}
 			break
 		}
@@ -548,18 +585,42 @@ func (c *TestCluster) CheckStateConsistency(t *testing.T, expectedCount int) {
 	for id, node := range c.nodes {
 		if !node.isShutdown.Load() {
 			entries := node.applier.GetAppliedEntries()
-			testutil.AssertEqual(t, len(referenceEntries), len(entries), "Applied entry count mismatch for node %s", id)
+			testutil.AssertEqual(
+				t,
+				len(referenceEntries),
+				len(entries),
+				"Applied entry count mismatch for node %s",
+				id,
+			)
 			for i, entry := range entries {
 				refEntry := referenceEntries[i]
-				testutil.AssertEqual(t, refEntry.CommandIndex, entry.CommandIndex, "Index mismatch at %d for node %s", i, id)
-				testutil.AssertEqual(t, refEntry.CommandTerm, entry.CommandTerm, "Term mismatch at %d for node %s", i, id)
+				testutil.AssertEqual(
+					t,
+					refEntry.CommandIndex,
+					entry.CommandIndex,
+					"Index mismatch at %d for node %s",
+					i,
+					id,
+				)
+				testutil.AssertEqual(
+					t,
+					refEntry.CommandTerm,
+					entry.CommandTerm,
+					"Term mismatch at %d for node %s",
+					i,
+					id,
+				)
 			}
 		}
 	}
 }
 
 // WaitForCondition waits for a condition to be true, with a timeout.
-func (c *TestCluster) WaitForCondition(timeout, interval time.Duration, condition func() bool, description string) {
+func (c *TestCluster) WaitForCondition(
+	timeout, interval time.Duration,
+	condition func() bool,
+	description string,
+) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if condition() {
@@ -607,7 +668,12 @@ func (a *TestApplier) Snapshot(ctx context.Context) (types.Index, []byte, error)
 }
 
 // RestoreSnapshot restores the in-memory store from a snapshot.
-func (a *TestApplier) RestoreSnapshot(ctx context.Context, lastIncludedIndex types.Index, lastIncludedTerm types.Term, data []byte) error {
+func (a *TestApplier) RestoreSnapshot(
+	ctx context.Context,
+	lastIncludedIndex types.Index,
+	lastIncludedTerm types.Term,
+	data []byte,
+) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.appliedEntries = make([]types.ApplyMsg, 0)
@@ -688,7 +754,10 @@ func (s *MemoryStorage) AppendLogEntries(ctx context.Context, entries []types.Lo
 }
 
 // GetLogEntries retrieves log entries from the in-memory log.
-func (s *MemoryStorage) GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error) {
+func (s *MemoryStorage) GetLogEntries(
+	ctx context.Context,
+	start, end types.Index,
+) ([]types.LogEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if start > end {
@@ -713,7 +782,10 @@ func (s *MemoryStorage) GetLogEntries(ctx context.Context, start, end types.Inde
 }
 
 // GetLogEntry retrieves a single log entry.
-func (s *MemoryStorage) GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error) {
+func (s *MemoryStorage) GetLogEntry(
+	ctx context.Context,
+	index types.Index,
+) (types.LogEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if index == 0 {
@@ -797,7 +869,11 @@ func (s *MemoryStorage) GetMetricsSummary() string {
 }
 
 // SaveSnapshot saves a snapshot to memory.
-func (s *MemoryStorage) SaveSnapshot(ctx context.Context, metadata types.SnapshotMetadata, data []byte) error {
+func (s *MemoryStorage) SaveSnapshot(
+	ctx context.Context,
+	metadata types.SnapshotMetadata,
+	data []byte,
+) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshotMeta = metadata
@@ -860,7 +936,11 @@ func (tnm *TestNetworkManager) Start() error { return nil }
 func (tnm *TestNetworkManager) Stop() error { return nil }
 
 // SendRequestVote sends a RequestVote RPC to a target peer.
-func (tnm *TestNetworkManager) SendRequestVote(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error) {
+func (tnm *TestNetworkManager) SendRequestVote(
+	ctx context.Context,
+	target types.NodeID,
+	args *types.RequestVoteArgs,
+) (*types.RequestVoteReply, error) {
 	tnm.mu.RLock()
 	handler, exists := tnm.handlers[target]
 	tnm.mu.RUnlock()
@@ -871,7 +951,11 @@ func (tnm *TestNetworkManager) SendRequestVote(ctx context.Context, target types
 }
 
 // SendAppendEntries sends an AppendEntries RPC to a target peer.
-func (tnm *TestNetworkManager) SendAppendEntries(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
+func (tnm *TestNetworkManager) SendAppendEntries(
+	ctx context.Context,
+	target types.NodeID,
+	args *types.AppendEntriesArgs,
+) (*types.AppendEntriesReply, error) {
 	tnm.mu.RLock()
 	handler, exists := tnm.handlers[target]
 	tnm.mu.RUnlock()
@@ -882,7 +966,11 @@ func (tnm *TestNetworkManager) SendAppendEntries(ctx context.Context, target typ
 }
 
 // SendInstallSnapshot sends an InstallSnapshot RPC to a target peer.
-func (tnm *TestNetworkManager) SendInstallSnapshot(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error) {
+func (tnm *TestNetworkManager) SendInstallSnapshot(
+	ctx context.Context,
+	target types.NodeID,
+	args *types.InstallSnapshotArgs,
+) (*types.InstallSnapshotReply, error) {
 	tnm.mu.RLock()
 	handler, exists := tnm.handlers[target]
 	tnm.mu.RUnlock()
@@ -897,7 +985,11 @@ func (tnm *TestNetworkManager) PeerStatus(peer types.NodeID) (types.PeerConnecti
 	tnm.mu.RLock()
 	defer tnm.mu.RUnlock()
 	_, connected := tnm.handlers[peer]
-	return types.PeerConnectionStatus{Connected: connected, LastActive: time.Now(), PendingRPCs: 0}, nil
+	return types.PeerConnectionStatus{
+		Connected:   connected,
+		LastActive:  time.Now(),
+		PendingRPCs: 0,
+	}, nil
 }
 
 // LocalAddr returns the local address of the test network manager.
