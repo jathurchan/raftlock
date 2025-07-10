@@ -523,10 +523,6 @@ func (m *mockNetworkManager) setWaitGroup(wg *sync.WaitGroup) {
 }
 
 type mockApplier struct {
-	mu         sync.Mutex
-	applied    map[types.Index][]byte
-	applyCalls int
-
 	restoreErr      error
 	snapshotData    []byte
 	applierRestored bool
@@ -854,9 +850,10 @@ func (mm *mockMetrics) IncCounter(name string, labels ...string) {
 	for i := 0; i < len(labels); i += 2 {
 		key += fmt.Sprintf(",%s=%s", labels[i], labels[i+1])
 	}
-	if name == "grpc_client_rpc_success_total" {
+	switch name {
+	case "grpc_client_rpc_success_total":
 		mm.grpcClientRPCSuccessTotal[key]++
-	} else if name == "grpc_client_rpc_failures_total" {
+	case "grpc_client_rpc_failures_total":
 		mm.grpcClientRPCFailuresTotal[key]++
 	}
 }
@@ -1355,7 +1352,6 @@ type mockLogManager struct {
 	entries    map[types.Index]types.LogEntry
 	mu         sync.Mutex
 
-	// Function overrides for testing
 	initializeFunc                  func(ctx context.Context) error
 	getTermFunc                     func(ctx context.Context, index types.Index) (types.Term, error)
 	getTermUnsafeFunc               func(ctx context.Context, index types.Index) (types.Term, error)
@@ -1578,9 +1574,9 @@ func (m *mockLogManager) appendEntriesInternal(entries []types.LogEntry) error {
 			m.lastIndex = entry.Index
 			m.lastTerm = entry.Term
 		}
-		if (m.firstIndex == 0 || m.firstIndex == 1 && len(m.entries) == 0) && entry.Index > 0 {
+		if m.firstIndex == 0 && entry.Index > 0 {
 			m.firstIndex = entry.Index
-		} else if entry.Index < m.firstIndex && entry.Index > 0 {
+		} else if entry.Index < m.firstIndex {
 			m.firstIndex = entry.Index
 		}
 	}

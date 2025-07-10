@@ -40,7 +40,7 @@ func setupSnapshotManager(
 		LogMgr:            logMgr,
 		NetworkMgr:        newMockNetworkManager(),
 		Metrics:           metrics,
-		Logger:            logger.NewStdLogger("debug"),
+		Logger:            logger.NewNoOpLogger(),
 		Clock:             clock,
 		IsShutdown:        new(atomic.Bool),
 		NotifyCommitCheck: func() {}, // will be overwritten

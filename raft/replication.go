@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,8 +198,11 @@ type replicationManager struct {
 	applyNotifyCh  chan<- struct{} // Signals Raft core to apply newly committed log entries
 	notifyCommitCh chan struct{}   // Triggers commit index evaluation after replication events
 
-	stopOnce sync.Once
-	stopCh   chan struct{}
+	triggerCommitCheck func()
+
+	stopOnce     sync.Once
+	stopCh       chan struct{}
+	commitLoopWg sync.WaitGroup // Add this for commitLoop goroutine synchronization
 }
 
 // NewReplicationManager constructs and initializes a new ReplicationManager instance
@@ -232,7 +235,10 @@ func NewReplicationManager(deps ReplicationManagerDeps) (ReplicationManager, err
 		applyNotifyCh:  deps.ApplyNotifyCh,
 		notifyCommitCh: make(chan struct{}, commitNotifyChannelSize),
 		stopCh:         make(chan struct{}),
+		commitLoopWg:   sync.WaitGroup{}, // Initialize WaitGroup
 	}
+
+	rm.triggerCommitCheck = rm.defaultTriggerCommitCheck
 
 	if rm.leaderLeaseEnabled {
 		electionTicks := rm.cfg.Options.ElectionTickCount
@@ -583,6 +589,9 @@ func (rm *replicationManager) sendSingleHeartbeatAndWait(
 
 // commitCheckLoop processes commit index advancement requests in background
 func (rm *replicationManager) commitCheckLoop() {
+	rm.commitLoopWg.Add(1)       // Increment counter when loop starts
+	defer rm.commitLoopWg.Done() // Decrement counter when loop exits
+
 	defer rm.logger.Debugw("Commit check loop terminated")
 
 	for {
@@ -592,7 +601,7 @@ func (rm *replicationManager) commitCheckLoop() {
 				rm.MaybeAdvanceCommitIndex()
 			}
 		case <-rm.stopCh:
-			return
+			return // Exit loop
 		}
 	}
 }
@@ -1220,7 +1229,7 @@ func (rm *replicationManager) handleAppendError(
 	}
 
 	// Log with appropriate level
-	logArgs := []interface{}{
+	logArgs := []any{
 		"AppendEntries RPC failed",
 		"peerID", peerID,
 		"term", term,
@@ -1579,9 +1588,7 @@ func (rm *replicationManager) calculateQuorumMatchIndex(matchIndices []types.Ind
 	}
 
 	// Sort in ascending order
-	sort.Slice(matchIndices, func(i, j int) bool {
-		return matchIndices[i] < matchIndices[j]
-	})
+	slices.Sort(matchIndices)
 
 	// The index at position (len - quorumSize) is the highest index
 	// replicated on at least quorumSize nodes
@@ -1639,8 +1646,17 @@ func (rm *replicationManager) triggerApplyNotify() {
 	}
 }
 
-// triggerCommitCheck triggers a commit index evaluation
-func (rm *replicationManager) triggerCommitCheck() {
+// defaultTriggerCommitCheck triggers a commit index evaluation
+func (rm *replicationManager) defaultTriggerCommitCheck() {
+	// Check for shutdown first
+	select {
+	case <-rm.stopCh:
+		rm.logger.Debugw("Commit check skipped: replication manager is stopping")
+		return
+	default:
+	}
+
+	// Only try to send if not shutting down
 	if rm.isShutdown.Load() {
 		return
 	}
@@ -1807,6 +1823,9 @@ func (rm *replicationManager) Stop() {
 		// Signal shutdown to background goroutines
 		close(rm.stopCh)
 
+		// Wait for commitCheckLoop to exit
+		rm.commitLoopWg.Wait() // Wait for the commitCheckLoop goroutine to finish
+
 		// Clean up state under lock
 		rm.mu.Lock()
 		defer rm.mu.Unlock()
@@ -1817,6 +1836,8 @@ func (rm *replicationManager) Stop() {
 		}
 
 		// Close commit notification channel
+		// Draining explicitly here is less critical now that we wait for the loop,
+		// but it doesn't hurt.
 		select {
 		case <-rm.notifyCommitCh:
 			// Drain any pending notifications
