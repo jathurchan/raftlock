@@ -19,10 +19,12 @@ func createTestRaftNode(
 ) (*raftNode, *mockStateManager, *mockLogManager, *mockElectionManager, *mockSnapshotManager, *mockReplicationManager, *mockNetworkManager, *mockApplier) {
 	t.Helper()
 
+	metrics := newMockMetrics()
+
 	nodeID := types.NodeID("node1")
 	mu := &sync.RWMutex{}
 
-	stateMgr := newMockStateManager()
+	stateMgr := newMockStateManager(metrics)
 	logMgr := newMockLogManager()
 	electionMgr := &mockElectionManager{}
 	snapshotMgr := newMockSnapshotManager()
@@ -32,7 +34,6 @@ func createTestRaftNode(
 	networkMgr := newMockNetworkManager()
 	applier := &mockApplier{}
 	mockLog := logger.NewNoOpLogger()
-	metrics := newMockMetrics()
 	clock := newMockClock()
 
 	return &raftNode{
