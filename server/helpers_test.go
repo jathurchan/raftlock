@@ -651,17 +651,23 @@ func (m *mockNetworkManager) SetPeerStatus(peerID types.NodeID, status types.Pee
 }
 
 // SetSendRequestVoteFunc sets a custom function for SendRequestVote.
-func (m *mockNetworkManager) SetSendRequestVoteFunc(f func(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error)) {
+func (m *mockNetworkManager) SetSendRequestVoteFunc(
+	f func(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error),
+) {
 	m.sendRequestVoteFunc = f
 }
 
 // SetSendAppendEntriesFunc sets a custom function for SendAppendEntries.
-func (m *mockNetworkManager) SetSendAppendEntriesFunc(f func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)) {
+func (m *mockNetworkManager) SetSendAppendEntriesFunc(
+	f func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error),
+) {
 	m.sendAppendEntriesFunc = f
 }
 
 // SetSendInstallSnapshotFunc sets a custom function for SendInstallSnapshot.
-func (m *mockNetworkManager) SetSendInstallSnapshotFunc(f func(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)) {
+func (m *mockNetworkManager) SetSendInstallSnapshotFunc(
+	f func(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error),
+) {
 	m.sendInstallSnapshotFunc = f
 }
 

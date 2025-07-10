@@ -1182,7 +1182,7 @@ func (nm *gRPCNetworkManager) ResetConnection(ctx context.Context, peerID types.
 	// Close existing connection if it exists
 	pc.mu.Lock()
 	if pc.conn != nil {
-		pc.conn.Close()
+		_ = pc.conn.Close()
 		pc.conn = nil
 	}
 	pc.connected.Store(false)
@@ -1247,7 +1247,7 @@ func (nm *gRPCNetworkManager) connectToPeerLocked(
 	defer client.mu.Unlock()
 
 	if client.conn != nil {
-		client.conn.Close()
+		_ = client.conn.Close()
 	}
 
 	dialKeepaliveParams := keepalive.ClientParameters{

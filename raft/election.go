@@ -933,7 +933,6 @@ func (em *electionManager) broadcastVoteRequests(
 			defer cancel()
 
 			em.sendVoteRequest(rpcCtx, targetPeerID, args, args.Term)
-
 		}(peerID)
 	}
 

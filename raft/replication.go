@@ -753,7 +753,6 @@ func (rm *replicationManager) checkLogConsistencyLocked(
 	prevLogIndex types.Index,
 	prevLogTerm types.Term,
 ) (bool, types.Index, types.Term) {
-
 	// If prevLogIndex is 0, it's always consistent (before any entries)
 	if prevLogIndex == 0 {
 		return true, 0, 0
@@ -804,7 +803,6 @@ func (rm *replicationManager) processEntriesLocked(
 	entries []types.LogEntry,
 	prevLogIndex types.Index,
 ) (types.Index, error) {
-
 	if len(entries) == 0 {
 		return prevLogIndex, nil
 	}
@@ -1098,7 +1096,6 @@ func (rm *replicationManager) getPrevLogInfo(
 	nextIndex types.Index,
 	term types.Term,
 ) (prevLogIndex types.Index, prevLogTerm types.Term, ok bool) {
-
 	prevLogIndex = nextIndex - 1
 	if prevLogIndex == 0 {
 		return 0, 0, true // No previous entry
@@ -1135,7 +1132,6 @@ func (rm *replicationManager) getEntriesForPeer(
 	nextIndex, lastLogIndex types.Index,
 	term types.Term,
 ) []types.LogEntry {
-
 	// Limit the number of entries per batch for performance
 	maxEntries := rm.cfg.Options.MaxLogEntriesPerRequest
 	if maxEntries <= 0 {
@@ -1220,7 +1216,7 @@ func (rm *replicationManager) handleAppendError(
 	isHeartbeat bool,
 	latency time.Duration,
 ) {
-	errType := "unknown"
+	var errType string
 	logLevel := "warn"
 
 	switch {
@@ -1280,7 +1276,11 @@ func (rm *replicationManager) handleAppendError(
 			// Reset the counter to avoid spamming reset requests
 			peerState.ConsecutiveFailures = 0
 			// Use a background context for the reset attempt so it doesn't block this goroutine
-			go rm.networkMgr.ResetConnection(context.Background(), peerID)
+			go func() {
+				if err := rm.networkMgr.ResetConnection(context.Background(), peerID); err != nil {
+					rm.logger.Warnw("Failed to reset connection", "peerID", peerID, "error", err)
+				}
+			}()
 		}
 	}
 
@@ -1329,7 +1329,6 @@ func (rm *replicationManager) handleAppendReply(
 		rm.mu.Lock()
 
 		if peerState, exists := rm.peerStates[peerID]; exists {
-
 			// Reset failure counter on any successful reply
 			peerState.ConsecutiveFailures = 0
 			peerState.IsActive = true
