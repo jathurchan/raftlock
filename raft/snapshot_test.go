@@ -12,17 +12,18 @@ import (
 
 	"github.com/jathurchan/raftlock/logger"
 	"github.com/jathurchan/raftlock/storage"
+	"github.com/jathurchan/raftlock/testutil"
 	"github.com/jathurchan/raftlock/types"
 )
 
 func setupSnapshotManager(
 	t *testing.T,
 ) (*snapshotManager, *mockStorage, *mockStateManager, *mockApplier, *mockReplicationStateUpdater) {
+	metrics := newMockMetrics()
 	mockStorage := newMockStorage()
-	stateMgr := newMockStateManager()
+	stateMgr := newMockStateManager(metrics)
 	applier := &mockApplier{}
 	logMgr := newMockLogManager()
-	metrics := newMockMetrics()
 	clock := newMockClock()
 	replicationUpdater := &mockReplicationStateUpdater{}
 
@@ -65,6 +66,8 @@ func TestRaftSnapshot_NoOpMethods(t *testing.T) {
 }
 
 func TestRaftSnapshot_NewSnapshotManager(t *testing.T) {
+	metrics := newMockMetrics()
+
 	newValidDeps := func() SnapshotManagerDeps {
 		return SnapshotManagerDeps{
 			Mu:                &sync.RWMutex{},
@@ -72,9 +75,9 @@ func TestRaftSnapshot_NewSnapshotManager(t *testing.T) {
 			Storage:           newMockStorage(),
 			Applier:           &mockApplier{},
 			LogMgr:            newMockLogManager(),
-			StateMgr:          newMockStateManager(),
+			StateMgr:          newMockStateManager(metrics),
 			NetworkMgr:        newMockNetworkManager(),
-			Metrics:           newMockMetrics(),
+			Metrics:           metrics,
 			Logger:            &logger.NoOpLogger{},
 			Clock:             newMockClock(),
 			IsShutdown:        &atomic.Bool{},
@@ -817,12 +820,12 @@ func setupSnapshotManagerForCompactionTest(
 	logCompactionMinEntries int,
 ) (*snapshotManager, *mockLogManager) {
 	t.Helper()
+	metrics := newMockMetrics()
 
 	mockStorage := newMockStorage()
-	stateMgr := newMockStateManager()
+	stateMgr := newMockStateManager(metrics)
 	applier := &mockApplier{}
 	logMgr := newMockLogManager()
-	metrics := newMockMetrics()
 	clock := newMockClock()
 	replicationUpdater := &mockReplicationStateUpdater{}
 
@@ -980,4 +983,133 @@ func TestRaftSnapshot_SnapshotManager_MaybeTriggerLogCompaction(t *testing.T) {
 			}
 		})
 	}
+}
+
+// setupSnapshotManagerForStopTest is a helper to prepare a snapshotManager with controllable internals for Stop() tests.
+func setupSnapshotManagerForStopTest(
+	t *testing.T,
+) (*snapshotManager, *mockClock, *atomic.Int32, *sync.WaitGroup) { // Use atomic.Int33 to match ElectionManager's concurrentOps
+	metrics := newMockMetrics()
+	mockStorage := newMockStorage()
+	stateMgr := newMockStateManager(metrics)
+	applier := &mockApplier{}
+	logMgr := newMockLogManager() // Make sure newMockLogManager is defined in helpers_test.go
+	mockClock := newMockClock()
+	replicationUpdater := &mockReplicationStateUpdater{}
+	isShutdown := new(atomic.Bool)
+
+	deps := SnapshotManagerDeps{
+		Mu: &sync.RWMutex{},
+		ID: "node1",
+		Config: Config{
+			Options: Options{SnapshotThreshold: 5, LogCompactionMinEntries: 3},
+		},
+		Storage:           mockStorage,
+		Applier:           applier,
+		PeerStateUpdater:  replicationUpdater,
+		StateMgr:          stateMgr,
+		LogMgr:            logMgr,
+		NetworkMgr:        newMockNetworkManager(),
+		Metrics:           metrics,
+		Logger:            logger.NewNoOpLogger(),
+		Clock:             mockClock,
+		IsShutdown:        isShutdown,
+		NotifyCommitCheck: func() {}, // will be overwritten or used by mock
+	}
+
+	smInterface, err := NewSnapshotManager(deps)
+	testutil.AssertNoError(t, err)
+	sm := smInterface.(*snapshotManager) // Cast to concrete type to access internals
+
+	return sm, mockClock, sm.snapshotOpsCounter, sm.snapshotOpsWg
+}
+
+func TestSnapshotManager_Stop(t *testing.T) {
+	t.Run("NoActiveOperations", func(t *testing.T) {
+		sm, _, opsCounter, _ := setupSnapshotManagerForStopTest(t)
+
+		opsCounter.Store(0) // Ensure no active operations
+
+		// Call Stop(). It should return immediately.
+		sm.Stop()
+
+		// Assertions: No panics, and the counter remains 0.
+		testutil.AssertEqual(t, int32(0), opsCounter.Load(), "Ops counter should remain 0")
+	})
+
+	t.Run("GracefulCompletion", func(t *testing.T) {
+		sm, _, opsCounter, wg := setupSnapshotManagerForStopTest(t)
+
+		opsCounter.Store(2) // Simulate 2 active operations starting
+		wg.Add(2)           // Add 2 to the WaitGroup counter
+
+		go func() {
+			defer func() { // Ensure atomic counter is decremented even if panics
+				wg.Done()
+				opsCounter.Add(-1)
+			}()
+
+			defer func() {
+				wg.Done()
+				opsCounter.Add(-1)
+			}()
+		}()
+
+		time.Sleep(1 * time.Millisecond)
+
+		sm.Stop()
+
+		testutil.AssertEqual(
+			t,
+			int32(0),
+			opsCounter.Load(),
+			"Ops counter should be 0 after graceful stop",
+		)
+	})
+
+	t.Run("Timeout", func(t *testing.T) {
+		sm, mockClock, opsCounter, wg := setupSnapshotManagerForStopTest(t)
+
+		opsCounter.Store(1) // Simulate 1 active operation
+		wg.Add(1)           // Add 1 to the WaitGroup counter (but never call Done())
+
+		// Launch a goroutine to explicitly advance the mock clock past the timeout
+		// so that the timer inside sm.Stop() expires.
+		go func() {
+			mockClock.Advance(
+				defaultSnapshotStopTimeout + time.Millisecond,
+			) // Advance mock clock past timeout
+		}()
+
+		// Call Stop(). It should wait until the mock clock is advanced by the goroutine
+		// and the timer inside Stop() fires, then exit.
+		sm.Stop()
+
+		// Assertions: Ops counter should remain its initial value (1), as operation timed out.
+		testutil.AssertEqual(
+			t,
+			int32(1),
+			opsCounter.Load(),
+			"Ops counter should remain 1 after timeout",
+		)
+	})
+
+	t.Run("MultipleCallsIdempotent", func(t *testing.T) {
+		sm, _, opsCounter, _ := setupSnapshotManagerForStopTest(t)
+
+		opsCounter.Store(0) // Ensure initial state is clean
+
+		// Call Stop() multiple times. Only the first call should execute the full logic.
+		sm.Stop()
+		sm.Stop()
+		sm.Stop()
+
+		// Assertions: No panics, and the counter remains 0, confirming idempotency.
+		testutil.AssertEqual(
+			t,
+			int32(0),
+			opsCounter.Load(),
+			"Ops counter should remain 0 after multiple idempotent stops",
+		)
+	})
 }

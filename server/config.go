@@ -72,7 +72,6 @@ func DefaultRaftLockServerConfig() RaftLockServerConfig {
 			FeatureFlags: raft.FeatureFlags{
 				EnableReadIndex:   raft.DefaultEnableReadIndex,
 				EnableLeaderLease: raft.DefaultEnableLeaderLease,
-				PreVoteEnabled:    raft.DefaultPreVoteEnabled,
 			}.WithExplicitFlags(),
 			TuningParams: raft.TuningParams{
 				MaxApplyBatchSize:    raft.DefaultMaxApplyBatchSize,

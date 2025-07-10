@@ -7,8 +7,8 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
-			PreVoteEnabled:    true,
-			explicitlySet:     false, // explicitly initialize as false
+			// PreVoteEnabled:    true,
+			explicitlySet: false, // explicitly initialize as false
 		}
 
 		if flags.explicitlySet {
@@ -26,7 +26,7 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
-			PreVoteEnabled:    true,
+			// PreVoteEnabled:    true,
 		}
 
 		returnedFlags := flags.WithExplicitFlags()
@@ -40,8 +40,8 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 		flags := FeatureFlags{
 			EnableReadIndex:   true,
 			EnableLeaderLease: false,
-			PreVoteEnabled:    true,
-			explicitlySet:     false,
+			// PreVoteEnabled:    true,
+			explicitlySet: false,
 		}
 
 		flags = flags.WithExplicitFlags()
@@ -52,8 +52,8 @@ func TestRaftFeatureFlags_WithExplicitFlags(t *testing.T) {
 		if flags.EnableLeaderLease {
 			t.Errorf("EnableLeaderLease should remain false")
 		}
-		if !flags.PreVoteEnabled {
-			t.Errorf("PreVoteEnabled should remain true")
-		}
+		// if !flags.PreVoteEnabled {
+		// 	t.Errorf("PreVoteEnabled should remain true")
+		// }
 	})
 }

@@ -94,11 +94,6 @@ func TestDefaultRaftLockServerConfig(t *testing.T) {
 			raft.DefaultEnableLeaderLease,
 		},
 		{
-			"PreVoteEnabled",
-			config.RaftConfig.FeatureFlags.PreVoteEnabled,
-			raft.DefaultPreVoteEnabled,
-		},
-		{
 			"MaxApplyBatchSize",
 			config.RaftConfig.TuningParams.MaxApplyBatchSize,
 			raft.DefaultMaxApplyBatchSize,

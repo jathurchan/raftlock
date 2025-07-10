@@ -552,13 +552,32 @@ func (m *mockStorage) GetMetricsSummary() string {
 	return ""
 }
 
-type mockNetworkManager struct{}
+type mockNetworkManager struct {
+	mu                      sync.Mutex
+	localAddrVal            string
+	peerStatusMap           map[types.NodeID]types.PeerConnectionStatus
+	sendRequestVoteFunc     func(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error)
+	sendAppendEntriesFunc   func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error)
+	sendInstallSnapshotFunc func(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error)
+	resetConnectionCalled   bool
+	resetConnectionPeerID   types.NodeID
+}
+
+// NewMockNetworkManager creates a new mockNetworkManager with default values.
+func NewMockNetworkManager() *mockNetworkManager {
+	return &mockNetworkManager{
+		localAddrVal:  "localhost:8080",
+		peerStatusMap: make(map[types.NodeID]types.PeerConnectionStatus),
+	}
+}
 
 func (m *mockNetworkManager) Start() error {
+	// No-op for mock
 	return nil
 }
 
 func (m *mockNetworkManager) Stop() error {
+	// No-op for mock
 	return nil
 }
 
@@ -567,7 +586,10 @@ func (m *mockNetworkManager) SendRequestVote(
 	target types.NodeID,
 	args *types.RequestVoteArgs,
 ) (*types.RequestVoteReply, error) {
-	return nil, nil
+	if m.sendRequestVoteFunc != nil {
+		return m.sendRequestVoteFunc(ctx, target, args)
+	}
+	return &types.RequestVoteReply{Term: args.Term, VoteGranted: true}, nil
 }
 
 func (m *mockNetworkManager) SendAppendEntries(
@@ -575,7 +597,10 @@ func (m *mockNetworkManager) SendAppendEntries(
 	target types.NodeID,
 	args *types.AppendEntriesArgs,
 ) (*types.AppendEntriesReply, error) {
-	return nil, nil
+	if m.sendAppendEntriesFunc != nil {
+		return m.sendAppendEntriesFunc(ctx, target, args)
+	}
+	return &types.AppendEntriesReply{Term: args.Term, Success: true}, nil
 }
 
 func (m *mockNetworkManager) SendInstallSnapshot(
@@ -583,15 +608,74 @@ func (m *mockNetworkManager) SendInstallSnapshot(
 	target types.NodeID,
 	args *types.InstallSnapshotArgs,
 ) (*types.InstallSnapshotReply, error) {
-	return nil, nil
+	if m.sendInstallSnapshotFunc != nil {
+		return m.sendInstallSnapshotFunc(ctx, target, args)
+	}
+	return &types.InstallSnapshotReply{Term: args.Term}, nil
 }
 
 func (m *mockNetworkManager) PeerStatus(peer types.NodeID) (types.PeerConnectionStatus, error) {
-	return types.PeerConnectionStatus{}, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	status, exists := m.peerStatusMap[peer]
+	if !exists {
+		return types.PeerConnectionStatus{Connected: false}, raft.ErrPeerNotFound
+	}
+	return status, nil
 }
 
 func (m *mockNetworkManager) LocalAddr() string {
-	return "localhost:8080"
+	return m.localAddrVal
+}
+
+func (m *mockNetworkManager) ResetConnection(ctx context.Context, peerID types.NodeID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resetConnectionCalled = true
+	m.resetConnectionPeerID = peerID
+	// In a real test, you might want to simulate a reconnection delay or success/failure.
+	// For now, it just records that it was called.
+	return nil
+}
+
+// SetLocalAddr sets the address returned by LocalAddr().
+func (m *mockNetworkManager) SetLocalAddr(addr string) {
+	m.localAddrVal = addr
+}
+
+// SetPeerStatus sets the connection status for a specific peer.
+func (m *mockNetworkManager) SetPeerStatus(peerID types.NodeID, status types.PeerConnectionStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.peerStatusMap[peerID] = status
+}
+
+// SetSendRequestVoteFunc sets a custom function for SendRequestVote.
+func (m *mockNetworkManager) SetSendRequestVoteFunc(
+	f func(ctx context.Context, target types.NodeID, args *types.RequestVoteArgs) (*types.RequestVoteReply, error),
+) {
+	m.sendRequestVoteFunc = f
+}
+
+// SetSendAppendEntriesFunc sets a custom function for SendAppendEntries.
+func (m *mockNetworkManager) SetSendAppendEntriesFunc(
+	f func(ctx context.Context, target types.NodeID, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error),
+) {
+	m.sendAppendEntriesFunc = f
+}
+
+// SetSendInstallSnapshotFunc sets a custom function for SendInstallSnapshot.
+func (m *mockNetworkManager) SetSendInstallSnapshotFunc(
+	f func(ctx context.Context, target types.NodeID, args *types.InstallSnapshotArgs) (*types.InstallSnapshotReply, error),
+) {
+	m.sendInstallSnapshotFunc = f
+}
+
+// WasResetConnectionCalled checks if ResetConnection was called and returns the peer ID.
+func (m *mockNetworkManager) WasResetConnectionCalled() (bool, types.NodeID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.resetConnectionCalled, m.resetConnectionPeerID
 }
 
 type mockProposalTracker struct {

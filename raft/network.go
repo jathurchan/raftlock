@@ -63,6 +63,10 @@ type NetworkManager interface {
 
 	// LocalAddr returns the local address (e.g., "host:port") or empty string if unavailable.
 	LocalAddr() string
+
+	// ResetConnection explicitly closes and re-establishes the connection to a peer.
+	// This is useful when the connection is suspected to be in a bad state.
+	ResetConnection(ctx context.Context, peerID types.NodeID) error
 }
 
 // gRPCNetworkManager implements the NetworkManager interface using gRPC
@@ -94,14 +98,15 @@ type gRPCNetworkManager struct {
 
 // peerConnection encapsulates the state for a gRPC connection to a single Raft peer.
 type peerConnection struct {
-	id         types.NodeID     // ID of the peer
-	addr       string           // Network address of the peer
-	client     proto.RaftClient // gRPC client stub
-	conn       *grpc.ClientConn // Underlying gRPC connection
-	pendingOps atomic.Int32     // Count of ongoing RPCs to this peer
-	lastError  error            // Last error encountered communicating with this peer
-	lastActive time.Time        // Timestamp of the last successful interaction
-	connected  atomic.Bool      // Indicates if the connection is believed to be active
+	mu         sync.Mutex // Protects conn and client fields during reset
+	id         types.NodeID
+	addr       string
+	client     proto.RaftClient
+	conn       *grpc.ClientConn
+	pendingOps atomic.Int32
+	lastError  error
+	lastActive time.Time
+	connected  atomic.Bool
 }
 
 // GRPCNetworkManagerOptions configures a gRPCNetworkManager.
@@ -262,8 +267,7 @@ func NewGRPCNetworkManager(
 	return nm, nil
 }
 
-// Start initializes the network manager by starting the gRPC server
-// and attempting initial connections to all configured peers.
+// Start initializes the network manager by starting its local gRPC server.
 func (nm *gRPCNetworkManager) Start() error {
 	nm.logger.Infow("Starting gRPC network manager", "address", nm.localAddr)
 
@@ -277,13 +281,22 @@ func (nm *gRPCNetworkManager) Start() error {
 		return nil
 	}
 
-	listener, err := net.Listen("tcp", nm.localAddr)
-	if err != nil {
-		nm.logger.Errorw("Failed to listen on local address", "address", nm.localAddr, "error", err)
-		return fmt.Errorf("failed to listen on %s: %w", nm.localAddr, err)
+	if nm.listener == nil {
+		l, err := net.Listen("tcp", nm.localAddr)
+		if err != nil {
+			nm.logger.Errorw(
+				"Failed to listen on local address",
+				"address",
+				nm.localAddr,
+				"error",
+				err,
+			)
+			return fmt.Errorf("failed to listen on %s: %w", nm.localAddr, err)
+		}
+		nm.listener = l
 	}
-	nm.listener = listener
-	actualAddr := listener.Addr().String()
+
+	actualAddr := nm.listener.Addr().String()
 	nm.logger.Infow("gRPC server listener started", "address", actualAddr)
 
 	go func() {
@@ -291,15 +304,13 @@ func (nm *gRPCNetworkManager) Start() error {
 		nm.serverStarted.Store(true)
 		close(nm.serverReady)
 
-		if err := nm.server.Serve(listener); err != nil {
+		if err := nm.server.Serve(nm.listener); err != nil {
 			if !nm.isShutdown.Load() && !errors.Is(err, grpc.ErrServerStopped) &&
 				!errors.Is(err, net.ErrClosed) {
 				nm.logger.Errorw(
 					"gRPC server encountered an error",
-					"address",
-					actualAddr,
-					"error",
-					err,
+					"address", actualAddr,
+					"error", err,
 				)
 			} else {
 				nm.logger.Infow("gRPC server stopped serving", "address", actualAddr)
@@ -311,41 +322,14 @@ func (nm *gRPCNetworkManager) Start() error {
 	case <-nm.serverReady:
 		nm.logger.Infow("gRPC server goroutine is running", "address", actualAddr)
 	case <-nm.clock.After(nm.opts.ServerStartTimeout):
-		nm.logger.Errorw(
-			"Timeout waiting for gRPC server goroutine to start",
-			"timeout",
-			nm.opts.ServerStartTimeout,
-		)
-		_ = listener.Close()
+		_ = nm.listener.Close()
 		return fmt.Errorf(
 			"timeout waiting for gRPC server to start listening after %v",
 			nm.opts.ServerStartTimeout,
 		)
-	case <-context.Background().Done():
-		nm.logger.Warnw("Shutdown requested during server startup")
-		_ = listener.Close()
-		return ErrShuttingDown
 	}
 
-	var wg sync.WaitGroup
-	for peerID, peerCfg := range nm.peers {
-		if peerID == nm.id {
-			continue // Skip self
-		}
-		wg.Add(1)
-		go func(id types.NodeID, cfg PeerConfig) {
-			defer wg.Done()
-			_, err := nm.getOrCreatePeerClient(id)
-			if err != nil {
-				nm.logger.Warnw("Failed initial connection attempt to peer",
-					"peer_id", id, "address", cfg.Address, "error", err)
-			}
-		}(peerID, peerCfg)
-	}
-	wg.Wait()
-
-	nm.logger.Infow("Network manager started successfully",
-		"self_id", nm.id, "peer_count", len(nm.peers)-1)
+	nm.logger.Infow("Network manager's server started successfully", "self_id", nm.id)
 	return nil
 }
 
@@ -428,7 +412,7 @@ func (nm *gRPCNetworkManager) SendRequestVote(
 		return nil, ErrShuttingDown
 	}
 
-	client, err := nm.getOrCreatePeerClient(target)
+	client, err := nm.getOrCreatePeerClient(ctx, target)
 	if err != nil {
 		return nil, fmt.Errorf("SendRequestVote: failed to get client for peer %s: %w", target, err)
 	}
@@ -533,7 +517,7 @@ func (nm *gRPCNetworkManager) SendAppendEntries(
 		return nil, ErrShuttingDown
 	}
 
-	client, err := nm.getOrCreatePeerClient(target)
+	client, err := nm.getOrCreatePeerClient(ctx, target)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"SendAppendEntries: failed to get client for peer %s: %w",
@@ -701,7 +685,7 @@ func (nm *gRPCNetworkManager) SendInstallSnapshot(
 		return nil, ErrShuttingDown
 	}
 
-	client, err := nm.getOrCreatePeerClient(target)
+	client, err := nm.getOrCreatePeerClient(ctx, target)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"SendInstallSnapshot: failed to get client for peer %s: %w",
@@ -841,108 +825,6 @@ func (nm *gRPCNetworkManager) LocalAddr() string {
 		return nm.listener.Addr().String()
 	}
 	return nm.localAddr
-}
-
-// getOrCreatePeerClient returns the client connection for a peer.
-// It handles thread-safe checking, creation, and connection establishment.
-func (nm *gRPCNetworkManager) getOrCreatePeerClient(peerID types.NodeID) (*peerConnection, error) {
-	nm.mu.RLock()
-	client, exists := nm.peerClients[peerID]
-	nm.mu.RUnlock()
-
-	if exists && client.connected.Load() {
-		return client, nil
-	}
-
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-
-	client, exists = nm.peerClients[peerID] // Another goroutine might have created/connected it
-	if exists && client.connected.Load() {
-		return client, nil
-	}
-
-	peerCfg, ok := nm.peers[peerID]
-	if !ok {
-		return nil, fmt.Errorf("peer %s not found in configuration: %w", peerID, ErrPeerNotFound)
-	}
-
-	if !exists {
-		client = &peerConnection{
-			id:   peerID,
-			addr: peerCfg.Address,
-		}
-		nm.peerClients[peerID] = client
-		nm.logger.Debugw(
-			"Created new peer connection state struct",
-			"peer_id",
-			peerID,
-			"address",
-			peerCfg.Address,
-		)
-	} else {
-		nm.logger.Debugw("Existing peer connection state struct found, attempting reconnect", "peer_id", peerID, "address", client.addr)
-	}
-
-	err := nm.connectToPeerLocked(client)
-	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
-
-// connectToPeerLocked establishes or re-establishes a gRPC connection to a peer.
-// Assumes nm.mu (write lock) is held by the caller.
-func (nm *gRPCNetworkManager) connectToPeerLocked(client *peerConnection) error {
-	if client.conn != nil {
-		nm.logger.Debugw("Closing existing gRPC connection before reconnecting",
-			"peer_id", client.id, "address", client.addr)
-		_ = client.conn.Close()
-		client.conn = nil
-		client.client = nil
-		client.connected.Store(false)
-	}
-
-	dialKeepaliveParams := keepalive.ClientParameters{
-		Time:                nm.opts.KeepaliveTime,
-		Timeout:             nm.opts.KeepaliveTimeout,
-		PermitWithoutStream: true,
-	}
-
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(
-			insecure.NewCredentials(),
-		), // TODO: Replace with secure credentials
-		grpc.WithKeepaliveParams(dialKeepaliveParams),
-		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "tcp", addr)
-		}),
-	}
-
-	nm.logger.Debugw("Attempting to connect to peer",
-		"peer_id", client.id, "address", client.addr, "timeout", nm.opts.DialTimeout)
-
-	conn, err := grpc.NewClient(client.addr, dialOpts...)
-	if err != nil {
-		client.lastError = err
-		client.connected.Store(false)
-		nm.logger.Warnw("Failed to connect to peer",
-			"peer_id", client.id, "address", client.addr, "error", err)
-		return fmt.Errorf("failed to connect to peer %s at %s: %w", client.id, client.addr, err)
-	}
-
-	client.conn = conn
-	client.client = proto.NewRaftClient(conn)
-	client.connected.Store(true)
-	client.lastError = nil
-	client.lastActive = nm.clock.Now()
-
-	nm.logger.Infow("Successfully connected to peer",
-		"peer_id", client.id, "address", client.addr)
-
-	return nil
 }
 
 // formatGRPCError converts gRPC status errors into more specific Raft or context errors.
@@ -1278,4 +1160,130 @@ func (h *grpcServerHandler) InstallSnapshot(
 	h.nm.metrics.IncCounter("grpc_server_rpc_success_total", "rpc", rpc)
 
 	return resp, nil
+}
+
+// ResetConnection forcefully closes the current gRPC connection to a peer
+// and attempts to establish a new one. This is useful for recovering from
+// persistent network errors where the gRPC client's internal reconnect
+// logic may not be sufficient.
+func (nm *gRPCNetworkManager) ResetConnection(ctx context.Context, peerID types.NodeID) error {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+
+	pc, exists := nm.peerClients[peerID]
+	if !exists {
+		// If no connection state exists, create it. This will trigger a connection attempt.
+		_, err := nm.getOrCreatePeerClientLocked(ctx, peerID)
+		return err
+	}
+
+	nm.logger.Infow("Explicitly resetting connection to peer", "peer_id", peerID)
+
+	// Close existing connection if it exists
+	pc.mu.Lock()
+	if pc.conn != nil {
+		_ = pc.conn.Close()
+		pc.conn = nil
+	}
+	pc.connected.Store(false)
+	pc.mu.Unlock()
+
+	// Attempt to reconnect immediately
+	return nm.connectToPeerLocked(ctx, pc)
+}
+
+// getOrCreatePeerClient retrieves an active client connection, creating and
+// connecting it if one doesn't exist or if the existing one is disconnected.
+func (nm *gRPCNetworkManager) getOrCreatePeerClient(
+	ctx context.Context,
+	peerID types.NodeID,
+) (*peerConnection, error) {
+	nm.mu.RLock()
+	client, exists := nm.peerClients[peerID]
+	nm.mu.RUnlock()
+
+	if exists && client.connected.Load() {
+		return client, nil
+	}
+
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	return nm.getOrCreatePeerClientLocked(ctx, peerID)
+}
+
+// getOrCreatePeerClientLocked is the lock-held version of getOrCreatePeerClient.
+func (nm *gRPCNetworkManager) getOrCreatePeerClientLocked(
+	ctx context.Context,
+	peerID types.NodeID,
+) (*peerConnection, error) {
+	client, exists := nm.peerClients[peerID]
+	if exists && client.connected.Load() {
+		return client, nil // Another goroutine connected it
+	}
+
+	peerCfg, ok := nm.peers[peerID]
+	if !ok {
+		return nil, fmt.Errorf("peer %s not found in configuration: %w", peerID, ErrPeerNotFound)
+	}
+
+	if !exists {
+		client = &peerConnection{id: peerID, addr: peerCfg.Address}
+		nm.peerClients[peerID] = client
+	}
+
+	if err := nm.connectToPeerLocked(ctx, client); err != nil {
+		return nil, fmt.Errorf("failed to connect to peer %s: %w", peerID, err)
+	}
+
+	return client, nil
+}
+
+// connectToPeerLocked establishes a gRPC connection. Assumes nm.mu is held.
+func (nm *gRPCNetworkManager) connectToPeerLocked(
+	ctx context.Context,
+	client *peerConnection,
+) error {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
+	if client.conn != nil {
+		_ = client.conn.Close()
+	}
+
+	dialKeepaliveParams := keepalive.ClientParameters{
+		Time:                nm.opts.KeepaliveTime,
+		Timeout:             nm.opts.KeepaliveTimeout,
+		PermitWithoutStream: true,
+	}
+
+	dialOpts := []grpc.DialOption{
+		grpc.WithTransportCredentials(
+			insecure.NewCredentials(),
+		), // TODO: Replace with secure credentials
+		grpc.WithKeepaliveParams(dialKeepaliveParams),
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", addr)
+		}),
+	}
+
+	nm.logger.Debugw("Attempting to connect to peer",
+		"peer_id", client.id, "address", client.addr, "timeout", nm.opts.DialTimeout)
+
+	conn, err := grpc.NewClient(client.addr, dialOpts...)
+	if err != nil {
+		client.lastError = err
+		client.connected.Store(false)
+		nm.logger.Warnw("Failed to connect to peer",
+			"peer_id", client.id, "address", client.addr, "error", err)
+		return fmt.Errorf("failed to connect to peer %s at %s: %w", client.id, client.addr, err)
+	}
+
+	client.conn = conn
+	client.client = proto.NewRaftClient(conn)
+	client.connected.Store(true)
+	client.lastError = nil
+	client.lastActive = nm.clock.Now()
+	nm.logger.Infow("Successfully connected to peer", "peer_id", client.id, "address", client.addr)
+	return nil
 }

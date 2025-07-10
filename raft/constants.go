@@ -10,15 +10,6 @@ const (
 	// unknownNodeID represents the absence of a node.
 	unknownNodeID = types.NodeID("")
 
-	// HeartbeatTickCount is the number of ticks between leader heartbeats (empty AppendEntries RPCs).
-	DefaultHeartbeatTickCount = 1
-
-	// ElectionTickCount is the number of ticks a follower waits without hearing from the leader before starting an election.
-	DefaultElectionTickCount = 10
-
-	// ElectionRandomizationFactor randomizes election timeouts to reduce split votes. Range: [0.0, 1.0].
-	DefaultElectionRandomizationFactor = 0.2
-
 	// MaxLogEntriesPerRequest limits the number of log entries sent in one AppendEntries RPC.
 	DefaultMaxLogEntriesPerRequest = 100
 
@@ -95,10 +86,6 @@ const (
 	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
 	logManagerOpTimeout = 500 * time.Millisecond
 
-	// electionManagerOpTimeout bounds the duration of electionManager operations
-	// such as requesting votes or updating election state, ensuring they complete promptly.
-	electionManagerOpTimeout = 1 * time.Second
-
 	// defaultSnapshotCaptureTimeout is the timeout for capturing snapshot data from the applier.
 	defaultSnapshotCaptureTimeout = 30 * time.Second
 
@@ -119,20 +106,45 @@ const (
 
 	// defaultSnapshotSendRPCTimeout is the timeout for sending the InstallSnapshot RPC to a follower.
 	defaultSnapshotSendRPCTimeout = 2 * time.Minute
+)
 
-	// defaultSnapshotStopTimeout is the timeout for completing snapshot-related operations during shutdown.
-	// Ensures the system can shut down gracefully without hanging on snapshot activity.
-	defaultSnapshotStopTimeout = 10 * time.Second
+// state.go
 
-	// defaultAppendEntriesTimeout is the maximum duration allowed for an AppendEntries RPC to complete.
-	defaultAppendEntriesTimeout = 2 * time.Second
+const (
+	// Timeout constants to prevent deadlocks in state operations
+	stateManagerOpTimeout   = 5 * time.Second
+	persistOperationTimeout = 3 * time.Second
+	stateTransitionTimeout  = 2 * time.Second
 
-	// defaultLogFetchTimeout bounds the time spent fetching log entries from storage or memory.
-	defaultLogFetchTimeout = 1 * time.Second
+	// Retry constants for persistence operations
+	maxPersistRetries = 3
+	basePersistDelay  = 10 * time.Millisecond
+	maxPersistDelay   = 100 * time.Millisecond
+)
 
-	// defaultReadIndexTimeout is the timeout for waiting on quorum confirmation in a ReadIndex operation.
-	defaultReadIndexTimeout = 1 * time.Second
+// election.go
 
-	// defaultTermFetchTimeout limits the time allowed for retrieving the term of a specific log index,
-	defaultTermFetchTimeout = 500 * time.Millisecond
+const (
+	DefaultElectionTickCount           = 50
+	DefaultHeartbeatTickCount          = 5
+	DefaultElectionRandomizationFactor = 2.0
+	maxConcurrentElections             = 3
+	voteRequestTimeout                 = 5 * time.Second
+	electionManagerOpTimeout           = 3 * time.Second
+	minElectionIntervalBase            = 50 * time.Millisecond
+	maxElectionBackoff                 = 1 * time.Second
+	splitVoteDetectionThreshold        = 3
+)
+
+// replication.go
+
+const (
+	defaultAppendEntriesTimeout = 10 * time.Second
+	defaultLogFetchTimeout      = 5 * time.Second
+	defaultTermFetchTimeout     = 2 * time.Second
+	defaultHeartbeatInterval    = 150 * time.Millisecond
+	defaultSnapshotStopTimeout  = 30 * time.Second
+
+	// Channel buffer sizes to prevent blocking
+	commitNotifyChannelSize = 16
 )

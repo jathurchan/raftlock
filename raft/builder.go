@@ -3,6 +3,7 @@ package raft
 import (
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 
@@ -70,6 +71,13 @@ func (b *RaftBuilder) WithStorage(storage storage.Storage) *RaftBuilder {
 	return b
 }
 
+func (b *RaftBuilder) WithListener(listener net.Listener) *RaftBuilder { // TODO
+	// This would require adding a listener field to the builder
+	// For now, we can just modify the test to set it on the built node.
+	// A more robust solution would add it to the builder pattern.
+	return b
+}
+
 // Build constructs a Raft with the configured values.
 // Returns an error if required components are missing or invalid.
 func (b *RaftBuilder) Build() (Raft, error) {
@@ -118,7 +126,20 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		fetchEntriesTimeout: fetchTimeout,
 	}
 
-	stateMgr := NewStateManager(mu, shutdownFlag, deps, b.config.ID, node.leaderChangeCh)
+	stateManagerDeps := StateManagerDeps{
+		ID:             b.config.ID,
+		Mu:             mu,
+		IsShutdown:     shutdownFlag,
+		LeaderChangeCh: node.leaderChangeCh,
+		Logger:         b.logger,
+		Metrics:        b.metrics,
+		Storage:        b.storage,
+		Clock:          b.clock,
+	}
+	stateMgr, err := NewStateManager(stateManagerDeps)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create state manager: %w", err)
+	}
 	logMgr := NewLogManager(mu, shutdownFlag, deps, b.config.ID)
 
 	node.stateMgr = stateMgr
@@ -148,7 +169,6 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		IsShutdown:        shutdownFlag,
 		NotifyCommitCheck: func() {}, // Will be updated later
 	}
-	var err error
 	node.snapshotMgr, err = NewSnapshotManager(snapshotDeps)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize snapshot manager: %w", err)
@@ -187,6 +207,7 @@ func (b *RaftBuilder) Build() (Raft, error) {
 		Metrics:           b.metrics,
 		Logger:            log,
 		Rand:              b.rand,
+		Clock:             b.clock,
 		Config:            b.config,
 	}
 	node.electionMgr, err = NewElectionManager(electionDeps)
