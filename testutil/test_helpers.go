@@ -10,6 +10,19 @@ import (
 	"testing"
 )
 
+func AssertNotEqual(t testing.TB, expected, actual any, msgAndArgs ...any) {
+	t.Helper()
+
+	if reflect.DeepEqual(expected, actual) {
+		t.Errorf(
+			"Expected objects to be not equal, but they were:\nExpected: %v\nActual  : %v%s",
+			expected,
+			actual,
+			formatMessage(msgAndArgs...),
+		)
+	}
+}
+
 func AssertLessThanEqual(t *testing.T, a, b uint64) {
 	t.Helper()
 	if a > b {
