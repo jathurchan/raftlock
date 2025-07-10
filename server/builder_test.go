@@ -242,7 +242,6 @@ func TestRaftLockServerBuilder_WithRaftConfig(t *testing.T) {
 			FeatureFlags: raft.FeatureFlags{
 				EnableReadIndex:   true,
 				EnableLeaderLease: false,
-				PreVoteEnabled:    true,
 			},
 		}
 
