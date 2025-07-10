@@ -986,7 +986,9 @@ func TestRaftSnapshot_SnapshotManager_MaybeTriggerLogCompaction(t *testing.T) {
 }
 
 // setupSnapshotManagerForStopTest is a helper to prepare a snapshotManager with controllable internals for Stop() tests.
-func setupSnapshotManagerForStopTest(t *testing.T) (*snapshotManager, *mockClock, *atomic.Int32, *sync.WaitGroup) { // Use atomic.Int33 to match ElectionManager's concurrentOps
+func setupSnapshotManagerForStopTest(
+	t *testing.T,
+) (*snapshotManager, *mockClock, *atomic.Int32, *sync.WaitGroup) { // Use atomic.Int33 to match ElectionManager's concurrentOps
 	metrics := newMockMetrics()
 	mockStorage := newMockStorage()
 	stateMgr := newMockStateManager(metrics)
@@ -1057,7 +1059,12 @@ func TestSnapshotManager_Stop(t *testing.T) {
 
 		sm.Stop()
 
-		testutil.AssertEqual(t, int32(0), opsCounter.Load(), "Ops counter should be 0 after graceful stop")
+		testutil.AssertEqual(
+			t,
+			int32(0),
+			opsCounter.Load(),
+			"Ops counter should be 0 after graceful stop",
+		)
 	})
 
 	t.Run("Timeout", func(t *testing.T) {
@@ -1069,7 +1076,9 @@ func TestSnapshotManager_Stop(t *testing.T) {
 		// Launch a goroutine to explicitly advance the mock clock past the timeout
 		// so that the timer inside sm.Stop() expires.
 		go func() {
-			mockClock.Advance(defaultSnapshotStopTimeout + time.Millisecond) // Advance mock clock past timeout
+			mockClock.Advance(
+				defaultSnapshotStopTimeout + time.Millisecond,
+			) // Advance mock clock past timeout
 		}()
 
 		// Call Stop(). It should wait until the mock clock is advanced by the goroutine
@@ -1077,7 +1086,12 @@ func TestSnapshotManager_Stop(t *testing.T) {
 		sm.Stop()
 
 		// Assertions: Ops counter should remain its initial value (1), as operation timed out.
-		testutil.AssertEqual(t, int32(1), opsCounter.Load(), "Ops counter should remain 1 after timeout")
+		testutil.AssertEqual(
+			t,
+			int32(1),
+			opsCounter.Load(),
+			"Ops counter should remain 1 after timeout",
+		)
 	})
 
 	t.Run("MultipleCallsIdempotent", func(t *testing.T) {
@@ -1091,6 +1105,11 @@ func TestSnapshotManager_Stop(t *testing.T) {
 		sm.Stop()
 
 		// Assertions: No panics, and the counter remains 0, confirming idempotency.
-		testutil.AssertEqual(t, int32(0), opsCounter.Load(), "Ops counter should remain 0 after multiple idempotent stops")
+		testutil.AssertEqual(
+			t,
+			int32(0),
+			opsCounter.Load(),
+			"Ops counter should remain 0 after multiple idempotent stops",
+		)
 	})
 }

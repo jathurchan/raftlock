@@ -303,9 +303,13 @@ func (em *electionManager) applyDefaults() {
 	}
 
 	if em.randomizationFactor < 1.0 {
-		em.logger.Warnw("ElectionRandomizationFactor should be at least 1.0 for good split vote prevention",
-			"provided", em.randomizationFactor,
-			"recommended", DefaultElectionRandomizationFactor)
+		em.logger.Warnw(
+			"ElectionRandomizationFactor should be at least 1.0 for good split vote prevention",
+			"provided",
+			em.randomizationFactor,
+			"recommended",
+			DefaultElectionRandomizationFactor,
+		)
 		em.randomizationFactor = DefaultElectionRandomizationFactor
 	}
 }
@@ -659,21 +663,37 @@ func (em *electionManager) recordElectionFailure() {
 	defer em.splitVoteDetector.mu.Unlock()
 
 	// TEMPORARY DEBUG LOGS:
-	em.logger.Debugw("recordElectionFailure: (Inside lock) BEFORE increment", "attempts", em.splitVoteDetector.electionAttempts)
+	em.logger.Debugw(
+		"recordElectionFailure: (Inside lock) BEFORE increment",
+		"attempts",
+		em.splitVoteDetector.electionAttempts,
+	)
 
 	em.splitVoteDetector.consecutiveFails++
 	em.splitVoteDetector.lastFailTime = em.clock.Now()
 	em.splitVoteDetector.electionAttempts++ // This is the critical line that increments
 
 	// TEMPORARY DEBUG LOGS:
-	em.logger.Debugw("recordElectionFailure: (Inside lock) AFTER increment", "attempts", em.splitVoteDetector.electionAttempts)
+	em.logger.Debugw(
+		"recordElectionFailure: (Inside lock) AFTER increment",
+		"attempts",
+		em.splitVoteDetector.electionAttempts,
+	)
 
 	if em.splitVoteDetector.electionAttempts > 10 {
 		// TEMPORARY DEBUG LOGS:
-		em.logger.Debugw("recordElectionFailure: (Inside lock) Attempts > 10, resetting...", "attempts_before_reset", em.splitVoteDetector.electionAttempts)
+		em.logger.Debugw(
+			"recordElectionFailure: (Inside lock) Attempts > 10, resetting...",
+			"attempts_before_reset",
+			em.splitVoteDetector.electionAttempts,
+		)
 		em.splitVoteDetector.electionAttempts = 5
 		// TEMPORARY DEBUG LOGS:
-		em.logger.Debugw("recordElectionFailure: (Inside lock) Attempts AFTER reset", "attempts_after_reset", em.splitVoteDetector.electionAttempts)
+		em.logger.Debugw(
+			"recordElectionFailure: (Inside lock) Attempts AFTER reset",
+			"attempts_after_reset",
+			em.splitVoteDetector.electionAttempts,
+		)
 	}
 
 	em.logger.Infow("Election failure recorded",
@@ -689,7 +709,11 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 	if em.isShutdown.Load() {
 		em.logger.Debugw("Cannot become leader: node shutting down", "nodeID", em.id)
 		// If shutting down, the node should step down to follower
-		em.stateMgr.BecomeFollower(context.Background(), currentTerm, unknownNodeID) // Use currentTerm
+		em.stateMgr.BecomeFollower(
+			context.Background(),
+			currentTerm,
+			unknownNodeID,
+		) // Use currentTerm
 		em.resetElectionState("shutting down")
 		return
 	}
@@ -800,10 +824,30 @@ func (em *electionManager) recordVote(from types.NodeID, granted bool) {
 		return
 	}
 
-	em.logger.Debugw("recordVote: BEFORE increment", "from", from, "nodeID", em.id, "voteCount_before", em.voteCount, "term", em.voteTerm)
+	em.logger.Debugw(
+		"recordVote: BEFORE increment",
+		"from",
+		from,
+		"nodeID",
+		em.id,
+		"voteCount_before",
+		em.voteCount,
+		"term",
+		em.voteTerm,
+	)
 	em.votesReceived[from] = true
 	em.voteCount++
-	em.logger.Debugw("recordVote: AFTER increment", "from", from, "nodeID", em.id, "voteCount_after", em.voteCount, "term", em.voteTerm)
+	em.logger.Debugw(
+		"recordVote: AFTER increment",
+		"from",
+		from,
+		"nodeID",
+		em.id,
+		"voteCount_after",
+		em.voteCount,
+		"term",
+		em.voteTerm,
+	)
 
 	em.logger.Infow("Real vote recorded - DETAILED",
 		"from", from,

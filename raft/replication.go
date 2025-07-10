@@ -440,7 +440,9 @@ func (rm *replicationManager) HasValidLease(ctx context.Context) bool {
 }
 
 // VerifyLeadershipAndGetCommitIndex verifies leadership by reaching a quorum
-func (rm *replicationManager) VerifyLeadershipAndGetCommitIndex(ctx context.Context) (types.Index, error) {
+func (rm *replicationManager) VerifyLeadershipAndGetCommitIndex(
+	ctx context.Context,
+) (types.Index, error) {
 	if rm.isShutdown.Load() {
 		return 0, ErrShuttingDown
 	}
@@ -492,7 +494,10 @@ func (rm *replicationManager) VerifyLeadershipAndGetCommitIndex(ctx context.Cont
 }
 
 // sendHeartbeatsAndCountResponses sends heartbeats and waits for responses
-func (rm *replicationManager) sendHeartbeatsAndCountResponses(ctx context.Context, term types.Term) int {
+func (rm *replicationManager) sendHeartbeatsAndCountResponses(
+	ctx context.Context,
+	term types.Term,
+) int {
 	rm.mu.RLock()
 	peerIDs := make([]types.NodeID, 0, len(rm.peerStates))
 	for peerID := range rm.peerStates {
@@ -577,7 +582,10 @@ func (rm *replicationManager) sendSingleHeartbeatAndWait(
 			"replyTerm", reply.Term,
 			"peerID", peerID)
 		go func() {
-			stepCtx, stepCancel := context.WithTimeout(context.Background(), defaultTermFetchTimeout)
+			stepCtx, stepCancel := context.WithTimeout(
+				context.Background(),
+				defaultTermFetchTimeout,
+			)
 			defer stepCancel()
 			rm.stateMgr.CheckTermAndStepDown(stepCtx, reply.Term, peerID)
 		}()
@@ -851,7 +859,11 @@ func (rm *replicationManager) processEntriesLocked(
 		defer cancel()
 
 		if err := rm.logMgr.TruncateSuffixUnsafe(truncateCtx, conflictIndex); err != nil {
-			return prevLogIndex, fmt.Errorf("failed to truncate log from index %d: %w", conflictIndex, err)
+			return prevLogIndex, fmt.Errorf(
+				"failed to truncate log from index %d: %w",
+				conflictIndex,
+				err,
+			)
 		}
 
 		rm.logger.Infow("Truncated conflicting entries",
@@ -1258,7 +1270,13 @@ func (rm *replicationManager) handleAppendError(
 
 		// If we have multiple consecutive failures, try to reset the connection
 		if peerState.ConsecutiveFailures > 3 { // Threshold for resetting connection
-			rm.logger.Warnw("Multiple consecutive failures to peer, requesting connection reset", "peerID", peerID, "failures", peerState.ConsecutiveFailures)
+			rm.logger.Warnw(
+				"Multiple consecutive failures to peer, requesting connection reset",
+				"peerID",
+				peerID,
+				"failures",
+				peerState.ConsecutiveFailures,
+			)
 			// Reset the counter to avoid spamming reset requests
 			peerState.ConsecutiveFailures = 0
 			// Use a background context for the reset attempt so it doesn't block this goroutine

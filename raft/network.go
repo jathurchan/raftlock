@@ -284,7 +284,13 @@ func (nm *gRPCNetworkManager) Start() error {
 	if nm.listener == nil {
 		l, err := net.Listen("tcp", nm.localAddr)
 		if err != nil {
-			nm.logger.Errorw("Failed to listen on local address", "address", nm.localAddr, "error", err)
+			nm.logger.Errorw(
+				"Failed to listen on local address",
+				"address",
+				nm.localAddr,
+				"error",
+				err,
+			)
 			return fmt.Errorf("failed to listen on %s: %w", nm.localAddr, err)
 		}
 		nm.listener = l
@@ -299,7 +305,8 @@ func (nm *gRPCNetworkManager) Start() error {
 		close(nm.serverReady)
 
 		if err := nm.server.Serve(nm.listener); err != nil {
-			if !nm.isShutdown.Load() && !errors.Is(err, grpc.ErrServerStopped) && !errors.Is(err, net.ErrClosed) {
+			if !nm.isShutdown.Load() && !errors.Is(err, grpc.ErrServerStopped) &&
+				!errors.Is(err, net.ErrClosed) {
 				nm.logger.Errorw(
 					"gRPC server encountered an error",
 					"address", actualAddr,
@@ -1187,7 +1194,10 @@ func (nm *gRPCNetworkManager) ResetConnection(ctx context.Context, peerID types.
 
 // getOrCreatePeerClient retrieves an active client connection, creating and
 // connecting it if one doesn't exist or if the existing one is disconnected.
-func (nm *gRPCNetworkManager) getOrCreatePeerClient(ctx context.Context, peerID types.NodeID) (*peerConnection, error) {
+func (nm *gRPCNetworkManager) getOrCreatePeerClient(
+	ctx context.Context,
+	peerID types.NodeID,
+) (*peerConnection, error) {
 	nm.mu.RLock()
 	client, exists := nm.peerClients[peerID]
 	nm.mu.RUnlock()
@@ -1202,7 +1212,10 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClient(ctx context.Context, peerID 
 }
 
 // getOrCreatePeerClientLocked is the lock-held version of getOrCreatePeerClient.
-func (nm *gRPCNetworkManager) getOrCreatePeerClientLocked(ctx context.Context, peerID types.NodeID) (*peerConnection, error) {
+func (nm *gRPCNetworkManager) getOrCreatePeerClientLocked(
+	ctx context.Context,
+	peerID types.NodeID,
+) (*peerConnection, error) {
 	client, exists := nm.peerClients[peerID]
 	if exists && client.connected.Load() {
 		return client, nil // Another goroutine connected it
@@ -1226,7 +1239,10 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClientLocked(ctx context.Context, p
 }
 
 // connectToPeerLocked establishes a gRPC connection. Assumes nm.mu is held.
-func (nm *gRPCNetworkManager) connectToPeerLocked(ctx context.Context, client *peerConnection) error {
+func (nm *gRPCNetworkManager) connectToPeerLocked(
+	ctx context.Context,
+	client *peerConnection,
+) error {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 

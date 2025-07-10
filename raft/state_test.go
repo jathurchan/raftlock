@@ -45,7 +45,9 @@ func createTestStateManager(t *testing.T) (*stateManager, *mockStorage, *mockMet
 	return sm.(*stateManager), storage, metrics
 }
 
-func createTestStateManagerWithShutdown(t *testing.T) (*stateManager, *mockStorage, *mockMetrics, *atomic.Bool) {
+func createTestStateManagerWithShutdown(
+	t *testing.T,
+) (*stateManager, *mockStorage, *mockMetrics, *atomic.Bool) {
 	t.Helper()
 
 	sm, storage, metrics := createTestStateManager(t)
@@ -610,7 +612,11 @@ func TestStateManager_CheckTermAndStepDown_LowerOrEqualTerm(t *testing.T) {
 	sm.role = types.RoleLeader
 
 	// Test with lower term
-	steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 3, types.NodeID("leader"))
+	steppedDown, prevTerm := sm.CheckTermAndStepDown(
+		context.Background(),
+		3,
+		types.NodeID("leader"),
+	)
 	testutil.AssertFalse(t, steppedDown)
 	testutil.AssertEqual(t, types.Term(5), prevTerm)
 
@@ -630,7 +636,11 @@ func TestStateManager_CheckTermAndStepDown_ShuttingDown(t *testing.T) {
 	sm.currentTerm = 3
 	isShutdown.Store(true)
 
-	steppedDown, prevTerm := sm.CheckTermAndStepDown(context.Background(), 5, types.NodeID("leader"))
+	steppedDown, prevTerm := sm.CheckTermAndStepDown(
+		context.Background(),
+		5,
+		types.NodeID("leader"),
+	)
 
 	testutil.AssertFalse(t, steppedDown)
 	testutil.AssertEqual(t, types.Term(3), prevTerm)
