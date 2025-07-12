@@ -560,6 +560,14 @@ func (em *electionManager) processVoteReply(
 	em.recordVote(fromPeerID, reply.VoteGranted)
 
 	if em.hasQuorum() {
+		currentTerm, currentRole, _ := em.stateMgr.GetState()
+		if currentRole == types.RoleLeader && currentTerm == voteTerm {
+			em.logger.Debugw("Already leader, ignoring redundant quorum achievement",
+				"nodeID", em.id,
+				"term", voteTerm)
+			return
+		}
+
 		em.logger.Infow("Vote quorum achieved, becoming leader",
 			"nodeID", em.id,
 			"term", voteTerm,
