@@ -4,11 +4,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jathurchan/raftlock/server"
 )
 
 const (
@@ -94,7 +94,7 @@ type Config struct {
 // DefaultConfig returns a Config instance with default values.
 func DefaultConfig() *Config {
 	return &Config{
-		ServerAddrs:         []string{"localhost:8081", "localhost:8082", "localhost:8083"},
+		ServerAddrs:         []string{"localhost:8080", "localhost:8089", "localhost:8090"},
 		ContainerNames:      []string{"raftlock-node1", "raftlock-node2", "raftlock-node3"},
 		UseDocker:           true,
 		UncontestedOps:      1000,
@@ -130,7 +130,7 @@ func (c *Config) Validate() error {
 	}
 
 	for i, addr := range c.ServerAddrs {
-		if err := validateAddress(addr); err != nil {
+		if err := server.ValidateAddress(addr); err != nil {
 			return fmt.Errorf("invalid server address %d (%s): %w", i, addr, err)
 		}
 	}
@@ -310,33 +310,6 @@ func parseConfig() (*Config, error) {
 	cfg.ContainerNames = generateContainerNames(containerPrefix, len(cfg.ServerAddrs))
 
 	return cfg, nil
-}
-
-// validateAddress checks if a server address is in valid host:port format.
-func validateAddress(addr string) error {
-	if addr == "" {
-		return errors.New("address cannot be empty")
-	}
-
-	host, portStr, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("invalid host:port format: %w", err)
-	}
-
-	if host == "" {
-		return errors.New("host cannot be empty")
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return fmt.Errorf("invalid port number: %w", err)
-	}
-
-	if port <= 0 || port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535, got %d", port)
-	}
-
-	return nil
 }
 
 // parseServerAddresses splits a comma-separated string into individual addresses.

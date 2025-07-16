@@ -31,7 +31,7 @@ type AppConfig struct {
 	EnablePprof bool
 	ShowVersion bool
 
-	ServerConfig server.RaftLockServerConfig
+	ServerConfig server.RaftLockServerConfig // This struct holds the server-specific config
 }
 
 // main is the entry point of the application.
@@ -78,7 +78,7 @@ func run() error {
 
 	appLogger.Infow("RaftLock server started",
 		"nodeID", raftServer.GetNodeID(),
-		"listenAddress", cfg.ServerConfig.ListenAddress,
+		"clientAPIAddress", cfg.ServerConfig.ClientAPIAddress, // Log the new client API address
 	)
 
 	waitForShutdown(appLogger)
@@ -87,6 +87,7 @@ func run() error {
 
 // parseAndValidateFlags parses CLI flags into AppConfig and validates required fields.
 func parseAndValidateFlags() (*AppConfig, error) {
+	// Initialize with default server config
 	cfg := &AppConfig{
 		ServerConfig: server.DefaultRaftLockServerConfig(),
 	}
@@ -102,8 +103,14 @@ func parseAndValidateFlags() (*AppConfig, error) {
 	flag.StringVar(
 		&cfg.ServerConfig.ListenAddress,
 		"listen",
-		"0.0.0.0:8080",
-		"gRPC listen address",
+		cfg.ServerConfig.ListenAddress,
+		"gRPC listen address for Raft internal communication",
+	)
+	flag.StringVar(
+		&cfg.ServerConfig.ClientAPIAddress,
+		"client-api-listen",
+		cfg.ServerConfig.ClientAPIAddress,
+		"gRPC listen address for client API requests",
 	)
 	flag.StringVar(
 		&cfg.ServerConfig.DataDir,
@@ -208,6 +215,7 @@ func parseAndValidateFlags() (*AppConfig, error) {
 	if cfg.ServerConfig.NodeID == "" {
 		return nil, errors.New("--node-id is required")
 	}
+
 	if peersStr == "" {
 		return nil, errors.New("--peers is required")
 	}
@@ -228,6 +236,10 @@ func parseAndValidateFlags() (*AppConfig, error) {
 	}
 
 	cfg.ServerConfig.Peers = peers
+
+	if err := cfg.ServerConfig.Validate(); err != nil {
+		return nil, fmt.Errorf("server configuration validation failed: %w", err)
+	}
 
 	return cfg, nil
 }
@@ -259,7 +271,8 @@ func buildServer(cfg *AppConfig, appLogger logger.Logger) (server.RaftLockServer
 
 	return server.NewRaftLockServerBuilder().
 		WithNodeID(cfg.ServerConfig.NodeID).
-		WithListenAddress(cfg.ServerConfig.ListenAddress).
+		WithListenAddress(cfg.ServerConfig.ListenAddress). // Raft internal listen address
+		WithClientAPIAddress(cfg.ServerConfig.ClientAPIAddress).
 		WithPeers(cfg.ServerConfig.Peers).
 		WithDataDir(cfg.ServerConfig.DataDir).
 		WithRaftConfig(cfg.ServerConfig.RaftConfig).

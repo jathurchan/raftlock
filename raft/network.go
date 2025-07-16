@@ -1265,6 +1265,7 @@ func (nm *gRPCNetworkManager) connectToPeerLocked(
 			var d net.Dialer
 			return d.DialContext(ctx, "tcp", addr)
 		}),
+		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"pick_first"}`),
 	}
 
 	nm.logger.Debugw("Attempting to connect to peer",

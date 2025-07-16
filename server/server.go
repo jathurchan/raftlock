@@ -123,6 +123,7 @@ func NewRaftLockServer(config RaftLockServerConfig) (RaftLockServer, error) {
 
 	server.logger.Infow("RaftLockServer initialized",
 		"listenAddress", config.ListenAddress,
+		"clientAPIAddress", config.ClientAPIAddress,
 		"peerCount", len(config.Peers)-1,
 		"dataDir", config.DataDir)
 
@@ -296,10 +297,10 @@ func (s *raftLockServer) initializeNetworkManager() error {
 
 // initializeAndStartGRPCServer sets up the gRPC server and begins serving requests.
 func (s *raftLockServer) initializeAndStartGRPCServer() error {
-	s.logger.Infow("Initializing gRPC server", "address", s.config.ListenAddress)
+	s.logger.Infow("Initializing gRPC server for client API", "address", s.config.ClientAPIAddress)
 
 	var err error
-	s.listener, err = net.Listen("tcp", s.config.ListenAddress)
+	s.listener, err = net.Listen("tcp", s.config.ClientAPIAddress)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddress, err)
 	}
@@ -324,14 +325,14 @@ func (s *raftLockServer) initializeAndStartGRPCServer() error {
 	s.taskWg.Add(1)
 	go func() {
 		defer s.taskWg.Done()
-		s.logger.Infow("gRPC server listening", "address", s.listener.Addr().String())
+		s.logger.Infow("Client API gRPC server listening", "address", s.listener.Addr().String())
 
 		if err := s.grpcServer.Serve(s.listener); err != nil &&
 			!errors.Is(err, grpc.ErrServerStopped) &&
 			!s.shutdownStarted.Load() {
-			s.logger.Errorw("gRPC server error", "error", err)
+			s.logger.Errorw("Client API gRPC server error", "error", err)
 		} else {
-			s.logger.Infow("gRPC server stopped")
+			s.logger.Infow("Client API gRPC server stopped")
 		}
 	}()
 

@@ -46,7 +46,7 @@ func newClientPool(addrs []string, poolSize int) *clientPool {
 		pools:               make([][]*grpcConnection, len(addrs)),
 		poolSize:            poolSize,
 		healthStatus:        make(map[string]bool),
-		healthCheckInterval: 30 * time.Second,
+		healthCheckInterval: 30 * time.Second, // Default health check interval
 	}
 }
 
@@ -111,13 +111,17 @@ func (p *clientPool) closePartialConnections(serverIndex, connectionIndex int) {
 // validateClusterHealth checks the health of each server and updates internal health tracking.
 // Returns an error if the cluster does not have quorum.
 func (p *clientPool) validateClusterHealth(ctx context.Context) error {
-	p.Lock()
-	defer p.Unlock()
-
 	var healthyNodes int32
 	var wg sync.WaitGroup
 
-	for i, pool := range p.pools {
+	p.RLock()
+	poolsCopy := make([][]*grpcConnection, len(p.pools))
+	for i := range p.pools {
+		poolsCopy[i] = p.pools[i]
+	}
+	p.RUnlock()
+
+	for i, pool := range poolsCopy {
 		wg.Add(1)
 		go func(serverIndex int, connections []*grpcConnection) {
 			defer wg.Done()
@@ -130,7 +134,10 @@ func (p *clientPool) validateClusterHealth(ctx context.Context) error {
 
 				if _, err := connections[0].client.Health(healthCtx, &pb.HealthRequest{}); err == nil {
 					atomic.AddInt32(&healthyNodes, 1)
+
+					p.Lock()
 					p.healthStatus[addr] = true
+					p.Unlock()
 
 					// Mark all connections as healthy
 					for _, conn := range connections {
@@ -139,7 +146,9 @@ func (p *clientPool) validateClusterHealth(ctx context.Context) error {
 						}
 					}
 				} else {
+					p.Lock()
 					p.healthStatus[addr] = false
+					p.Unlock()
 
 					// Mark all connections as unhealthy
 					for _, conn := range connections {
@@ -154,8 +163,10 @@ func (p *clientPool) validateClusterHealth(ctx context.Context) error {
 
 	wg.Wait()
 
+	p.Lock()
 	p.healthyNodes = int(healthyNodes)
 	p.lastHealthCheck = time.Now()
+	p.Unlock()
 
 	requiredNodes := (len(p.addrs) / 2) + 1
 	if p.healthyNodes < requiredNodes {
@@ -231,6 +242,11 @@ func (p *clientPool) findLeader() (pb.RaftLockClient, string) {
 	p.RLock()
 	defer p.RUnlock()
 
+	// Use a longer timeout for leader discovery to account for Raft stabilization
+	// This timeout should ideally be configurable or derived from benchmark's HealthCheckTimeout
+	// For now, hardcode to 10 seconds, matching default HealthCheckTimeout
+	leaderDiscoveryTimeout := 10 * time.Second
+
 	for i, pool := range p.pools {
 		if len(pool) == 0 {
 			continue
@@ -241,7 +257,8 @@ func (p *clientPool) findLeader() (pb.RaftLockClient, string) {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// Use the longer timeout for the GetStatus call
+		ctx, cancel := context.WithTimeout(context.Background(), leaderDiscoveryTimeout) // UPDATED CONTEXT TIMEOUT
 		resp, err := conn.client.GetStatus(ctx, &pb.GetStatusRequest{})
 		cancel()
 
