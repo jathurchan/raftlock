@@ -176,7 +176,7 @@ func parseAndValidateFlags() (*AppConfig, error) {
 	flag.IntVar(
 		&cfg.ServerConfig.RaftConfig.Options.ElectionTickCount,
 		"election-ticks",
-		10,
+		24,
 		"Election timeout ticks",
 	)
 	flag.IntVar(
