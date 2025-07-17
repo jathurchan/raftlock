@@ -1,7 +1,10 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/jathurchan/raftlock/lock"
@@ -17,6 +20,10 @@ type RaftLockServerConfig struct {
 
 	// ListenAddress is the gRPC server's bind address (e.g., "0.0.0.0:8080").
 	ListenAddress string
+
+	// ClientAPIAddress is the network address exposed to external clients
+	// for accessing the public API (e.g., "127.0.0.1:9090").
+	ClientAPIAddress string
 
 	// Peers maps all known Raft nodes by NodeID, including this node itself.
 	Peers map[types.NodeID]raft.PeerConfig
@@ -54,8 +61,9 @@ type RaftLockServerConfig struct {
 // Callers must explicitly set NodeID, Peers, DataDir, and RaftConfig.ID.
 func DefaultRaftLockServerConfig() RaftLockServerConfig {
 	return RaftLockServerConfig{
-		ListenAddress: "0.0.0.0:8080",
-		Peers:         make(map[types.NodeID]raft.PeerConfig),
+		ListenAddress:    "0.0.0.0:8080",
+		ClientAPIAddress: "0.0.0.0:8090",
+		Peers:            make(map[types.NodeID]raft.PeerConfig),
 		RaftConfig: raft.Config{
 			Options: raft.Options{
 				ElectionTickCount:           raft.DefaultElectionTickCount,
@@ -188,6 +196,17 @@ func (c *RaftLockServerConfig) Validate() error {
 		}
 	}
 
+	if c.ClientAPIAddress == "" {
+		return errors.New("client API address cannot be empty")
+	}
+	if err := ValidateAddress(c.ClientAPIAddress); err != nil {
+		return fmt.Errorf("invalid client API address: %w", err)
+	}
+
+	if c.ListenAddress == c.ClientAPIAddress {
+		return errors.New("raft listen address and client api address must be different")
+	}
+
 	return nil
 }
 
@@ -204,4 +223,31 @@ func NewRaftLockServerConfigError(msg string) *RaftLockServerConfigError {
 // Error implements the error interface.
 func (e *RaftLockServerConfigError) Error() string {
 	return "server config error: " + e.Message
+}
+
+// ValidateAddress checks if a server address is in valid host:port format.
+func ValidateAddress(addr string) error {
+	if addr == "" {
+		return errors.New("address cannot be empty")
+	}
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid host:port format: %w", err)
+	}
+
+	if host == "" {
+		return errors.New("host cannot be empty")
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("invalid port number: %w", err)
+	}
+
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", port)
+	}
+
+	return nil
 }
