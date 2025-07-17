@@ -1,3 +1,4 @@
+data
 *.pb.go
 *.out
 .DS_Store

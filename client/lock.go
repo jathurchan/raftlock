@@ -94,6 +94,20 @@ func (h *lockHandle) Acquire(ctx context.Context, ttl time.Duration, wait bool) 
 		Wait:     wait,
 	}
 
+	if wait {
+		if deadline, ok := ctx.Deadline(); ok {
+			remainingTime := time.Until(deadline)
+			req.WaitTimeout = max(remainingTime, time.Second)
+		} else {
+			// This duration should be within the server's accepted range (1s - 10m0s)
+			req.WaitTimeout = 30 * time.Second
+		}
+	} else {
+		// If not waiting, WaitTimeout is logically ignored by the server,
+		// but the server's validation still requires it to be >= 1s if present.
+		req.WaitTimeout = time.Second
+	}
+
 	result, err := h.client.Acquire(ctx, req)
 	if err != nil {
 		return err
