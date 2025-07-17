@@ -1,0 +1,111 @@
+services:
+  # Node 1 - Bootstrap node
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: raftlock-node1
+    hostname: node1
+    ports:
+      - "8080:8080"   # Client API
+      - "8081:8081"   # Raft internal
+    volumes:
+      - node1_data:/app/data
+    command:
+      - "--node-id=node1"
+      - "--listen=0.0.0.0:8081"
+      - "--client-api-listen=0.0.0.0:8080"
+      - "--peers=node1=node1:8081,node2=node2:8082,node3=node3:8083"
+      - "--data-dir=/app/data"
+      - "--log-level=info"
+      - "--election-ticks=10"
+      - "--heartbeat-ticks=1"
+    networks:
+      - raftlock_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Node 2
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: raftlock-node2
+    hostname: node2
+    ports:
+      - "8089:8089"   # Client API
+      - "8082:8082"   # Raft internal
+    volumes:
+      - node2_data:/app/data
+    command:
+      - "--node-id=node2"
+      - "--listen=0.0.0.0:8082"
+      - "--client-api-listen=0.0.0.0:8089"
+      - "--peers=node1=node1:8081,node2=node2:8082,node3=node3:8083"
+      - "--data-dir=/app/data"
+      - "--log-level=info"
+      - "--election-ticks=10"
+      - "--heartbeat-ticks=1"
+    networks:
+      - raftlock_network
+    depends_on:
+      node1:
+        condition: service_started  # Changed from service_healthy to avoid circular dependencies
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=:8089"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # Node 3
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: raftlock-node3
+    hostname: node3
+    ports:
+      - "8090:8090"   # Client API
+      - "8083:8083"   # Raft internal
+    volumes:
+      - node3_data:/app/data
+    command:
+      - "--node-id=node3"
+      - "--listen=0.0.0.0:8083"
+      - "--client-api-listen=0.0.0.0:8090"
+      - "--peers=node1=node1:8081,node2=node2:8082,node3=node3:8083"
+      - "--data-dir=/app/data"
+      - "--log-level=info"
+      - "--election-ticks=10"
+      - "--heartbeat-ticks=1"
+    networks:
+      - raftlock_network
+    depends_on:
+      - node1
+      - node2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=:8090"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+volumes:
+  node1_data:
+    driver: local
+  node2_data:
+    driver: local
+  node3_data:
+    driver: local
+
+networks:
+  raftlock_network:
+    driver: bridge
