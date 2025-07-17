@@ -16,10 +16,11 @@ import (
 type RaftLockServerBuilder struct {
 	config RaftLockServerConfig
 
-	hasNodeID     bool // True if NodeID was set.
-	hasListenAddr bool // True if ListenAddr was set.
-	hasPeers      bool // True if peers were set.
-	hasDataDir    bool // True if DataDir was set.
+	hasNodeID        bool // True if NodeID was set.
+	hasListenAddr    bool // True if ListenAddr was set.
+	hasClientAPIAddr bool // True if ClientAPIAddr was set.
+	hasPeers         bool // True if peers were set.
+	hasDataDir       bool // True if DataDir was set.
 }
 
 // NewRaftLockServerBuilder returns a ServerBuilder preloaded with default configuration values.
@@ -41,6 +42,14 @@ func (b *RaftLockServerBuilder) WithNodeID(nodeID types.NodeID) *RaftLockServerB
 func (b *RaftLockServerBuilder) WithListenAddress(address string) *RaftLockServerBuilder {
 	b.config.ListenAddress = address
 	b.hasListenAddr = true
+	return b
+}
+
+// WithClientAPIAddress sets the address for the client-facing API.
+// If not set, a default address is used.
+func (b *RaftLockServerBuilder) WithClientAPIAddress(address string) *RaftLockServerBuilder {
+	b.config.ClientAPIAddress = address
+	b.hasClientAPIAddr = true
 	return b
 }
 

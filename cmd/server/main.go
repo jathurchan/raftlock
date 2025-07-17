@@ -78,7 +78,7 @@ func run() error {
 
 	appLogger.Infow("RaftLock server started",
 		"nodeID", raftServer.GetNodeID(),
-		"listenAddress", cfg.ServerConfig.ListenAddress,
+		"clientAPIAddress", cfg.ServerConfig.ClientAPIAddress,
 	)
 
 	waitForShutdown(appLogger)
@@ -104,6 +104,12 @@ func parseAndValidateFlags() (*AppConfig, error) {
 		"listen",
 		"0.0.0.0:8080",
 		"gRPC listen address",
+	)
+	flag.StringVar(
+		&cfg.ServerConfig.ClientAPIAddress,
+		"client-api-listen",
+		cfg.ServerConfig.ClientAPIAddress,
+		"gRPC listen address for client API requests",
 	)
 	flag.StringVar(
 		&cfg.ServerConfig.DataDir,
@@ -229,6 +235,10 @@ func parseAndValidateFlags() (*AppConfig, error) {
 
 	cfg.ServerConfig.Peers = peers
 
+	if err := cfg.ServerConfig.Validate(); err != nil {
+		return nil, fmt.Errorf("server configuration validation failed: %w", err)
+	}
+
 	return cfg, nil
 }
 
@@ -259,7 +269,8 @@ func buildServer(cfg *AppConfig, appLogger logger.Logger) (server.RaftLockServer
 
 	return server.NewRaftLockServerBuilder().
 		WithNodeID(cfg.ServerConfig.NodeID).
-		WithListenAddress(cfg.ServerConfig.ListenAddress).
+		WithListenAddress(cfg.ServerConfig.ListenAddress). // Raft internal listen address
+		WithClientAPIAddress(cfg.ServerConfig.ClientAPIAddress).
 		WithPeers(cfg.ServerConfig.Peers).
 		WithDataDir(cfg.ServerConfig.DataDir).
 		WithRaftConfig(cfg.ServerConfig.RaftConfig).
