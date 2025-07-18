@@ -284,6 +284,7 @@ type mockRaft struct {
 	leaderChangeCh chan types.NodeID
 	proposeFunc    func(ctx context.Context, cmd []byte) (types.Index, types.Term, bool, error)
 	readIndexFunc  func(ctx context.Context) (types.Index, error)
+	tickFunc       func(ctx context.Context)
 }
 
 func (m *mockRaft) SetNetworkManager(nm raft.NetworkManager) {}
@@ -292,7 +293,11 @@ func (m *mockRaft) Start() error { return nil }
 
 func (m *mockRaft) Stop(ctx context.Context) error { return nil }
 
-func (m *mockRaft) Tick(ctx context.Context) {}
+func (m *mockRaft) Tick(ctx context.Context) {
+	if m.tickFunc != nil {
+		m.tickFunc(ctx)
+	}
+}
 
 func (m *mockRaft) Propose(
 	ctx context.Context,

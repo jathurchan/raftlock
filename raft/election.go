@@ -716,13 +716,19 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 
 	if em.isShutdown.Load() {
 		em.logger.Debugw("Cannot become leader: node shutting down", "nodeID", em.id)
-		// If shutting down, the node should step down to follower
 		em.stateMgr.BecomeFollower(
 			context.Background(),
 			currentTerm,
 			unknownNodeID,
-		) // Use currentTerm
+		)
 		em.resetElectionState("shutting down")
+		return
+	}
+
+	if role == types.RoleLeader && currentTerm == term {
+		em.logger.Debugw("Already leader for this term, ignoring redundant becomeLeader call",
+			"nodeID", em.id, "term", term)
+		em.resetElectionState("already leader for term")
 		return
 	}
 

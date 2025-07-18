@@ -197,13 +197,14 @@ func (c *RaftLockServerConfig) Validate() error {
 	}
 
 	if c.ClientAPIAddress == "" {
-		return errors.New("client API address cannot be empty")
+		return NewRaftLockServerConfigError("ClientAPIAddress cannot be empty")
 	}
 	if err := ValidateAddress(c.ClientAPIAddress); err != nil {
 		return fmt.Errorf("invalid client API address: %w", err)
 	}
 
-	if c.ListenAddress == c.ClientAPIAddress {
+	if (c.ListenAddress != "127.0.0.1:0") && (c.ListenAddress != "localhost:0") &&
+		(c.ListenAddress == c.ClientAPIAddress) {
 		return errors.New("raft listen address and client api address must be different")
 	}
 
@@ -245,7 +246,7 @@ func ValidateAddress(addr string) error {
 		return fmt.Errorf("invalid port number: %w", err)
 	}
 
-	if port <= 0 || port > 65535 {
+	if port < 0 || port > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535, got %d", port)
 	}
 

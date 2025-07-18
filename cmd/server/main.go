@@ -108,7 +108,7 @@ func parseAndValidateFlags() (*AppConfig, error) {
 	flag.StringVar(
 		&cfg.ServerConfig.ClientAPIAddress,
 		"client-api-listen",
-		cfg.ServerConfig.ClientAPIAddress,
+		"127.0.0.1:9090",
 		"gRPC listen address for client API requests",
 	)
 	flag.StringVar(
@@ -176,7 +176,7 @@ func parseAndValidateFlags() (*AppConfig, error) {
 	flag.IntVar(
 		&cfg.ServerConfig.RaftConfig.Options.ElectionTickCount,
 		"election-ticks",
-		10,
+		24,
 		"Election timeout ticks",
 	)
 	flag.IntVar(
