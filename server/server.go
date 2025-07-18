@@ -996,7 +996,7 @@ func (s *raftLockServer) parseAcquireProposal(data any) (any, error) {
 	lockInfo, ok := data.(*types.LockInfo)
 	if !ok {
 		s.logger.Errorw("Unexpected data type", "type", fmt.Sprintf("%T", data))
-		return nil, fmt.Errorf("unexpected result type from acquire proposal")
+		return nil, status.Error(codes.Internal, "unexpected result type from acquire proposal")
 	}
 	return lockInfo, nil
 }

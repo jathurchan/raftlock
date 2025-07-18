@@ -34,6 +34,7 @@ func TestDefaultRaftLockServerConfig(t *testing.T) {
 		{"HealthCheckTimeout", config.HealthCheckTimeout, DefaultHealthCheckTimeout},
 		{"EnableLeaderRedirect", config.EnableLeaderRedirect, true},
 		{"RedirectTimeout", config.RedirectTimeout, DefaultRedirectTimeout},
+		{"ClientAPIAddress", config.ClientAPIAddress, "0.0.0.0:8090"},
 	}
 
 	for _, tt := range tests {
@@ -138,6 +139,7 @@ func TestDefaultRaftLockServerConfig(t *testing.T) {
 
 func TestRaftLockServerConfig_Validate_ValidConfig(t *testing.T) {
 	config := createValidConfig()
+	config.ClientAPIAddress = "localhost:8090"
 
 	if err := config.Validate(); err != nil {
 		t.Errorf("Expected valid config to pass validation, got error: %v", err)
@@ -161,6 +163,11 @@ func TestRaftLockServerConfig_Validate_RequiredFields(t *testing.T) {
 			expectedErrMsg: "ListenAddress cannot be empty",
 		},
 		{
+			name:           "empty ClientAPIAddress",
+			modifyConfig:   func(c *RaftLockServerConfig) { c.ClientAPIAddress = "" },
+			expectedErrMsg: "ClientAPIAddress cannot be empty",
+		},
+		{
 			name:           "empty DataDir",
 			modifyConfig:   func(c *RaftLockServerConfig) { c.DataDir = "" },
 			expectedErrMsg: "DataDir cannot be empty",
@@ -175,6 +182,7 @@ func TestRaftLockServerConfig_Validate_RequiredFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := createValidConfig()
+			config.ClientAPIAddress = "localhost:8090"
 			tt.modifyConfig(&config)
 
 			err := config.Validate()
@@ -215,6 +223,7 @@ func TestRaftLockServerConfig_Validate_PeerValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := createValidConfig()
+			config.ClientAPIAddress = "localhost:8090"
 			tt.modifyConfig(&config)
 
 			err := config.Validate()
@@ -226,6 +235,7 @@ func TestRaftLockServerConfig_Validate_PeerValidation(t *testing.T) {
 func TestRaftLockServerConfig_Validate_RaftConfigValidation(t *testing.T) {
 	t.Run("RaftConfig.ID mismatch", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.RaftConfig.ID = "different-id"
 
 		err := config.Validate()
@@ -234,6 +244,7 @@ func TestRaftLockServerConfig_Validate_RaftConfigValidation(t *testing.T) {
 
 	t.Run("empty RaftConfig.ID allowed", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.RaftConfig.ID = ""
 
 		if err := config.Validate(); err != nil {
@@ -278,6 +289,7 @@ func TestRaftLockServerConfig_Validate_TimeoutValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := createValidConfig()
+			config.ClientAPIAddress = "localhost:8090"
 			tt.modifyConfig(&config)
 
 			err := config.Validate()
@@ -317,6 +329,7 @@ func TestRaftLockServerConfig_Validate_IntegerValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := createValidConfig()
+			config.ClientAPIAddress = "localhost:8090"
 			tt.modifyConfig(&config)
 
 			err := config.Validate()
@@ -328,6 +341,7 @@ func TestRaftLockServerConfig_Validate_IntegerValues(t *testing.T) {
 func TestRaftLockServerConfig_Validate_RateLimiting(t *testing.T) {
 	t.Run("disabled rate limiting ignores invalid values", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.EnableRateLimit = false
 		config.RateLimit = 0
 		config.RateLimitBurst = 0
@@ -372,6 +386,7 @@ func TestRaftLockServerConfig_Validate_RateLimiting(t *testing.T) {
 	for _, tt := range rateLimitTests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := createValidConfig()
+			config.ClientAPIAddress = "localhost:8090"
 			tt.modifyConfig(&config)
 
 			err := config.Validate()
@@ -381,6 +396,7 @@ func TestRaftLockServerConfig_Validate_RateLimiting(t *testing.T) {
 
 	t.Run("valid rate limiting configuration", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.EnableRateLimit = true
 		config.RateLimit = 100
 		config.RateLimitBurst = 200
@@ -395,6 +411,7 @@ func TestRaftLockServerConfig_Validate_RateLimiting(t *testing.T) {
 func TestRaftLockServerConfig_Validate_LeaderRedirect(t *testing.T) {
 	t.Run("disabled leader redirect ignores invalid timeout", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.EnableLeaderRedirect = false
 		config.RedirectTimeout = 0
 
@@ -408,6 +425,7 @@ func TestRaftLockServerConfig_Validate_LeaderRedirect(t *testing.T) {
 
 	t.Run("enabled leader redirect requires valid timeout", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.EnableLeaderRedirect = true
 		config.RedirectTimeout = 0
 
@@ -417,6 +435,7 @@ func TestRaftLockServerConfig_Validate_LeaderRedirect(t *testing.T) {
 
 	t.Run("valid leader redirect configuration", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 		config.EnableLeaderRedirect = true
 		config.RedirectTimeout = 5 * time.Second
 
@@ -429,10 +448,11 @@ func TestRaftLockServerConfig_Validate_LeaderRedirect(t *testing.T) {
 func TestRaftLockServerConfig_Validate_EdgeCases(t *testing.T) {
 	t.Run("minimal valid configuration", func(t *testing.T) {
 		config := RaftLockServerConfig{
-			NodeID:        "test-node",
-			ListenAddress: ":8080",
+			NodeID:           "test-node",
+			ListenAddress:    "localhost:8080",
+			ClientAPIAddress: "localhost:8090",
 			Peers: map[types.NodeID]raft.PeerConfig{
-				"test-node": {Address: ":8080"},
+				"test-node": {Address: "localhost:8080"},
 			},
 			DataDir:              "/tmp/test",
 			RequestTimeout:       time.Millisecond,
@@ -453,6 +473,7 @@ func TestRaftLockServerConfig_Validate_EdgeCases(t *testing.T) {
 
 	t.Run("configuration with many peers", func(t *testing.T) {
 		config := createValidConfig()
+		config.ClientAPIAddress = "localhost:8090"
 
 		// Add many peers
 		for i := 3; i <= 10; i++ {
@@ -505,8 +526,9 @@ func TestRaftLockServerConfigError(t *testing.T) {
 
 func createValidConfig() RaftLockServerConfig {
 	return RaftLockServerConfig{
-		NodeID:        "node1",
-		ListenAddress: "localhost:8080",
+		NodeID:           "node1",
+		ListenAddress:    "localhost:8080",
+		ClientAPIAddress: "localhost:8090",
 		Peers: map[types.NodeID]raft.PeerConfig{
 			"node1": {ID: "node1", Address: "localhost:8080"},
 			"node2": {ID: "node2", Address: "localhost:8081"},

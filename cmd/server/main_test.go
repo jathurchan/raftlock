@@ -431,7 +431,7 @@ func TestParseAndValidateFlags_Defaults(t *testing.T) {
 			)
 			testutil.AssertEqual(
 				t,
-				10,
+				24,
 				cfg.ServerConfig.RaftConfig.Options.ElectionTickCount,
 				"Default election ticks",
 			)
@@ -915,6 +915,7 @@ func createValidServerConfig(
 	cfg.DataDir = dataDir
 	cfg.Peers = peers
 	cfg.ListenAddress = "localhost:8080"
+	cfg.ClientAPIAddress = "127.0.0.1:9090"
 	cfg.RequestTimeout = 30 * time.Second
 	cfg.ShutdownTimeout = 30 * time.Second
 	cfg.MaxRequestSize = 4 * 1024 * 1024
