@@ -160,7 +160,12 @@ func (p *PaymentProcessor) processPaymentWithRetries(
 
 	for attempt := 1; attempt <= p.config.MaxRetries; attempt++ {
 		if attempt > 1 {
-			fmt.Printf("\n🔄 Retry attempt %d/%d for '%s'...\n", attempt, p.config.MaxRetries, lockID)
+			fmt.Printf(
+				"\n🔄 Retry attempt %d/%d for '%s'...\n",
+				attempt,
+				p.config.MaxRetries,
+				lockID,
+			)
 
 			select {
 			case <-time.After(p.config.RetryDelay):
@@ -215,7 +220,10 @@ func (p *PaymentProcessor) attemptPaymentProcessing(
 	}
 
 	acquireDuration := time.Since(acquireStart)
-	fmt.Printf("✅ Lock acquired in %v (current ownership)\n", acquireDuration.Round(time.Millisecond))
+	fmt.Printf(
+		"✅ Lock acquired in %v (current ownership)\n",
+		acquireDuration.Round(time.Millisecond),
+	)
 
 	// Step 2: Display lock information if verbose mode is enabled
 	if p.config.Verbose {
@@ -223,7 +231,12 @@ func (p *PaymentProcessor) attemptPaymentProcessing(
 	}
 
 	// Step 3: Simulate actual payment processing work
-	fmt.Printf("💳 Processing payment of %.2f %s for '%s'...\n", p.config.Amount, p.config.Currency, p.config.PaymentID)
+	fmt.Printf(
+		"💳 Processing payment of %.2f %s for '%s'...\n",
+		p.config.Amount,
+		p.config.Currency,
+		p.config.PaymentID,
+	)
 
 	err = p.simulatePaymentProcessing(ctx)
 	if err != nil {
@@ -236,7 +249,10 @@ func (p *PaymentProcessor) attemptPaymentProcessing(
 	err = handle.Release(ctx)
 	if err != nil {
 		if errors.Is(err, client.ErrNotLockOwner) {
-			return fmt.Errorf("lost ownership of lock '%s' during processing (possible TTL expiration)", lockID)
+			return fmt.Errorf(
+				"lost ownership of lock '%s' during processing (possible TTL expiration)",
+				lockID,
+			)
 		}
 		return fmt.Errorf("failed to release lock '%s': %w", lockID, err)
 	}
@@ -395,9 +411,20 @@ func parseFlags() (*PaymentConfig, error) {
 		fmt.Fprintf(os.Stderr, "  # Basic payment processing\n")
 		fmt.Fprintf(os.Stderr, "  %s --payment-id payment123 --client-id client001\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Wait for lock with custom amount and higher failure rate\n")
-		fmt.Fprintf(os.Stderr, "  %s --payment-id payment456 --client-id client002 --wait --amount 250.50 --failure-rate 0.2\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Connect to multiple servers with verbose output and longer processing time\n")
-		fmt.Fprintf(os.Stderr, "  %s --servers localhost:8080,localhost:8081,localhost:8082 --payment-id payment789 --client-id client003 --verbose --processing-time 5000\n\n", os.Args[0])
+		fmt.Fprintf(
+			os.Stderr,
+			"  %s --payment-id payment456 --client-id client002 --wait --amount 250.50 --failure-rate 0.2\n\n",
+			os.Args[0],
+		)
+		fmt.Fprintf(
+			os.Stderr,
+			"  # Connect to multiple servers with verbose output and longer processing time\n",
+		)
+		fmt.Fprintf(
+			os.Stderr,
+			"  %s --servers localhost:8080,localhost:8081,localhost:8082 --payment-id payment789 --client-id client003 --verbose --processing-time 5000\n\n",
+			os.Args[0],
+		)
 		fmt.Fprintf(os.Stderr, "OPTIONS:\n")
 		flag.PrintDefaults()
 	}

@@ -203,7 +203,8 @@ func (c *RaftLockServerConfig) Validate() error {
 		return fmt.Errorf("invalid client API address: %w", err)
 	}
 
-	if (c.ListenAddress != "127.0.0.1:0") && (c.ListenAddress != "localhost:0") && (c.ListenAddress == c.ClientAPIAddress) {
+	if (c.ListenAddress != "127.0.0.1:0") && (c.ListenAddress != "localhost:0") &&
+		(c.ListenAddress == c.ClientAPIAddress) {
 		return errors.New("raft listen address and client api address must be different")
 	}
 
