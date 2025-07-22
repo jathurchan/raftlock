@@ -2074,23 +2074,33 @@ func (s *raftLockServer) submitRaftProposal(
 
 // requireLeader ensures that this server is currently the Raft leader.
 func (s *raftLockServer) requireLeader(method string) error {
-	if s.isLeader.Load() {
+	_, isLeader := s.raftNode.GetState()
+	if isLeader {
+		s.isLeader.Store(true)
 		return nil
 	}
 
 	s.metrics.IncrLeaderRedirect(method)
 
-	leaderID := s.currentLeaderID.Load().(types.NodeID)
-	leaderAddr := s.GetLeaderAddress()
-
-	if leaderAddr == "" {
+	leaderID := s.raftNode.GetLeaderID()
+	if leaderID == "" {
 		s.logger.Warnw(
-			"RequireLeader check failed: not leader and leader address is unknown",
+			"RequireLeader check failed: not leader and leader is unknown",
 			"method",
 			method,
 		)
 		return ErrNoLeader
 	}
+
+	peerConfig, ok := s.config.Peers[leaderID]
+	if !ok || peerConfig.Address == "" {
+		s.logger.Errorw(
+			"Could not find address for known leader",
+			"leaderID", leaderID,
+		)
+		return ErrNoLeader
+	}
+	leaderAddr := peerConfig.Address
 
 	s.logger.Infow(
 		"RequireLeader check failed: not leader, redirecting",

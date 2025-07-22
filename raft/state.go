@@ -68,10 +68,10 @@ type StateManager interface {
 	// used for pre-vote flows. Persists term and vote.
 	BecomeCandidateForTerm(ctx context.Context, term types.Term) bool
 
-	// BecomeLeader transitions from Candidate to Leader.
+	// BecomeLeaderUnsafe transitions from Candidate to Leader.
 	// Updates leader ID, metrics, and triggers notifications.
 	// Does not persist state (term already persisted by candidacy).
-	BecomeLeader(ctx context.Context) bool
+	BecomeLeaderUnsafe(ctx context.Context) bool
 
 	// BecomeFollower transitions to Follower with given term and leader.
 	// If term is higher, updates and persists new term; otherwise, just updates state.
@@ -440,15 +440,12 @@ func (sm *stateManager) BecomeCandidate(ctx context.Context, reason ElectionReas
 	return true
 }
 
-// BecomeLeader transitions to leader state with validation
-func (sm *stateManager) BecomeLeader(ctx context.Context) bool {
+// BecomeLeaderUnsafe transitions to leader state with validation
+func (sm *stateManager) BecomeLeaderUnsafe(ctx context.Context) bool {
 	if sm.isShutdown.Load() {
 		sm.logger.Debugw("Cannot become leader: node shutting down", "nodeID", sm.id)
 		return false
 	}
-
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	currentTerm, currentRole, _ := sm.GetStateUnsafe()
 

@@ -129,7 +129,7 @@ const (
 	DefaultHeartbeatTickCount          = 5
 	DefaultElectionRandomizationFactor = 2.0
 	maxConcurrentElections             = 3
-	voteRequestTimeout                 = 5 * time.Second
+	voteRequestTimeout                 = 15 * time.Second
 	electionManagerOpTimeout           = 3 * time.Second
 	minElectionIntervalBase            = 50 * time.Millisecond
 	maxElectionBackoff                 = 1 * time.Second

@@ -342,7 +342,7 @@ func (pt *proposalTracker) handleCancelledProposal(
 
 func (pt *proposalTracker) deliverAppliedResult(
 	entry *proposalEntry,
-	data interface{},
+	data any,
 	err error,
 	now time.Time,
 	duration time.Duration,
@@ -362,7 +362,7 @@ func (pt *proposalTracker) deliverAppliedResult(
 		"error", result.Error,
 		"duration", result.Duration)
 
-	pt.sendResult(entry, result)
+	go pt.sendResult(entry, result)
 }
 
 // HandleSnapshotApplied is invoked when a snapshot has been applied to the state machine.
@@ -652,29 +652,6 @@ func (pt *proposalTracker) sendResult(entry *proposalEntry, result types.Proposa
 			"op",
 			entry.Operation,
 		)
-		select {
-		case entry.ResultCh <- result:
-			pt.logger.Debugw(
-				"Sent proposal result (blocking with context)",
-				"id",
-				entry.ID,
-				"op",
-				entry.Operation,
-			)
-		case <-entry.Context.Done():
-			// Context cancelled before or during send; result likely not delivered.
-			pt.logger.Warnw(
-				"Context cancelled before result could be sent",
-				"id",
-				entry.ID,
-				"op",
-				entry.Operation,
-				"error",
-				entry.Context.Err(),
-				"resultErrorIfNotSent",
-				result.Error,
-			)
-		}
 	}
 }
 

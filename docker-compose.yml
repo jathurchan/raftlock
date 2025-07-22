@@ -18,7 +18,7 @@ services:
       - "--peers=node1=node1:8081,node2=node2:8082,node3=node3:8083"
       - "--data-dir=/app/data"
       - "--log-level=info"
-      - "--election-ticks=10"
+      - "--election-ticks=50"
       - "--heartbeat-ticks=1"
     networks:
       - raftlock_network
@@ -49,7 +49,7 @@ services:
       - "--peers=node1=node1:8081,node2=node2:8082,node3=node3:8083"
       - "--data-dir=/app/data"
       - "--log-level=info"
-      - "--election-ticks=10"
+      - "--election-ticks=50"
       - "--heartbeat-ticks=1"
     networks:
       - raftlock_network
@@ -83,7 +83,7 @@ services:
       - "--peers=node1=node1:8081,node2=node2:8082,node3=node3:8083"
       - "--data-dir=/app/data"
       - "--log-level=info"
-      - "--election-ticks=10"
+      - "--election-ticks=50"
       - "--heartbeat-ticks=1"
     networks:
       - raftlock_network

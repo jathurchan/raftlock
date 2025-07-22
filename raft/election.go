@@ -712,7 +712,10 @@ func (em *electionManager) recordElectionFailure() {
 
 // becomeLeader transitions to leader role with enhanced logging
 func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
-	currentTerm, role, _ := em.stateMgr.GetState() // Get current state early
+	em.mu.Lock()
+	defer em.mu.Unlock()
+
+	currentTerm, role, _ := em.stateMgr.GetStateUnsafe()
 
 	if em.isShutdown.Load() {
 		em.logger.Debugw("Cannot become leader: node shutting down", "nodeID", em.id)
@@ -728,7 +731,6 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 	if role == types.RoleLeader && currentTerm == term {
 		em.logger.Debugw("Already leader for this term, ignoring redundant becomeLeader call",
 			"nodeID", em.id, "term", term)
-		em.resetElectionState("already leader for term")
 		return
 	}
 
@@ -738,36 +740,23 @@ func (em *electionManager) becomeLeader(ctx context.Context, term types.Term) {
 		"currentTerm", currentTerm,
 		"currentRole", role.String())
 
-	if term != currentTerm {
-		em.logger.Warnw("Cannot become leader: term changed during election",
-			"expectedTerm", term,
-			"currentTerm", currentTerm,
+	if term != currentTerm || role != types.RoleCandidate {
+		em.logger.Warnw("Cannot become leader: state is inconsistent.",
+			"expectedTerm", term, "currentTerm", currentTerm,
+			"expectedRole", "Candidate", "currentRole", role.String(),
 			"nodeID", em.id)
-		// Step down to Follower using the current (authoritative) term
-		em.stateMgr.BecomeFollower(context.Background(), currentTerm, unknownNodeID)
-		em.resetElectionState("term changed")
-		return
-	}
-
-	if role != types.RoleCandidate {
-		em.logger.Warnw("Cannot become leader: no longer a candidate",
-			"nodeID", em.id,
-			"role", role.String(),
-			"term", currentTerm)
-		// Step down to Follower using the current (authoritative) term
-		em.stateMgr.BecomeFollower(context.Background(), currentTerm, unknownNodeID)
-		em.resetElectionState("not a candidate")
+		// Do not step down here, let the normal Raft process handle it.
 		return
 	}
 
 	leaderCtx, cancel := context.WithTimeout(ctx, electionManagerOpTimeout)
 	defer cancel()
 
-	if !em.stateMgr.BecomeLeader(leaderCtx) {
+	if !em.stateMgr.BecomeLeaderUnsafe(leaderCtx) {
 		em.logger.Errorw("FAILED TO TRANSITION TO LEADER STATE",
 			"nodeID", em.id,
 			"term", currentTerm)
-		// Step down to Follower using the current (authoritative) term
+		// The state manager failed, so we should step down.
 		em.stateMgr.BecomeFollower(context.Background(), currentTerm, unknownNodeID)
 		em.resetElectionState("failed to become leader")
 		em.recordElectionFailure()

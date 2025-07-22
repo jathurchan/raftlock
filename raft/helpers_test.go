@@ -1148,7 +1148,7 @@ func (m *mockStateManager) BecomeCandidateForTerm(ctx context.Context, term type
 	return true
 }
 
-func (m *mockStateManager) BecomeLeader(ctx context.Context) bool {
+func (m *mockStateManager) BecomeLeaderUnsafe(ctx context.Context) bool {
 	if m.becomeLeaderFunc != nil {
 		return m.becomeLeaderFunc(ctx)
 	}
