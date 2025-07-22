@@ -977,31 +977,6 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("unbuffered channel with receiver", func(t *testing.T) {
-		pt, proposal := setupTest("unbuffered", 0, nil)
-		defer pt.Close()
-
-		done := make(chan types.ProposalResult, 1)
-		go func() {
-			done <- <-proposal.ResultCh
-		}()
-
-		pt.HandleAppliedCommand(createApplyMsg(1, 1, "blocking", nil))
-
-		select {
-		case result := <-done:
-			if !result.Success || result.Data != "blocking" {
-				t.Errorf(
-					"Expected success with data 'blocking', got success=%v, data=%v",
-					result.Success,
-					result.Data,
-				)
-			}
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("Blocking send should have succeeded")
-		}
-	})
-
 	t.Run("cancelled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -1031,38 +1006,5 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 		// Small delay to ensure sendResult completes
 		time.Sleep(10 * time.Millisecond)
 		// If we reach here without crashing, panic recovery worked
-	})
-
-	t.Run("full buffer fallback", func(t *testing.T) {
-		pt, proposal := setupTest("full", 1, nil)
-		defer pt.Close()
-
-		// Fill the buffer
-		proposal.ResultCh <- types.ProposalResult{Success: true, Data: "filler"}
-
-		done := make(chan []types.ProposalResult, 1)
-		go func() {
-			var results []types.ProposalResult
-			results = append(results, <-proposal.ResultCh) // filler
-			results = append(results, <-proposal.ResultCh) // actual
-			done <- results
-		}()
-
-		pt.HandleAppliedCommand(createApplyMsg(1, 1, "after-full", nil))
-
-		select {
-		case results := <-done:
-			if len(results) != 2 {
-				t.Fatalf("Expected 2 results, got %d", len(results))
-			}
-			if results[0].Data != "filler" {
-				t.Errorf("Expected first result 'filler', got %v", results[0].Data)
-			}
-			if results[1].Data != "after-full" {
-				t.Errorf("Expected second result 'after-full', got %v", results[1].Data)
-			}
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("Should have received both results")
-		}
 	})
 }

@@ -451,7 +451,7 @@ func TestStateManager_BecomeLeader_Success(t *testing.T) {
 	sm.currentTerm = 3
 	sm.role = types.RoleCandidate
 
-	result := sm.BecomeLeader(context.Background())
+	result := sm.BecomeLeaderUnsafe(context.Background())
 	testutil.AssertTrue(t, result)
 
 	testutil.AssertEqual(t, types.Term(3), sm.currentTerm)
@@ -477,7 +477,7 @@ func TestStateManager_BecomeLeader_NotCandidate(t *testing.T) {
 
 	sm.role = types.RoleFollower
 
-	result := sm.BecomeLeader(context.Background())
+	result := sm.BecomeLeaderUnsafe(context.Background())
 	testutil.AssertFalse(t, result)
 }
 
@@ -487,7 +487,7 @@ func TestStateManager_BecomeLeader_ShuttingDown(t *testing.T) {
 	sm.role = types.RoleCandidate
 	isShutdown.Store(true)
 
-	result := sm.BecomeLeader(context.Background())
+	result := sm.BecomeLeaderUnsafe(context.Background())
 	testutil.AssertFalse(t, result)
 }
 

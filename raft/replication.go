@@ -307,9 +307,6 @@ func (rm *replicationManager) InitializeLeaderState() {
 		return
 	}
 
-	rm.mu.Lock()
-	defer rm.mu.Unlock()
-
 	rm.logger.Infow("Initializing leader state for replication",
 		"nodeID", rm.id,
 		"peerCount", len(rm.peers)-1)
@@ -362,7 +359,7 @@ func (rm *replicationManager) Propose(
 		return 0, 0, false, ErrShuttingDown
 	}
 
-	currentTerm, role, leaderID := rm.stateMgr.GetState()
+	currentTerm, role, leaderID := rm.stateMgr.GetStateUnsafe()
 	if role != types.RoleLeader || leaderID != rm.id {
 		rm.logger.Debugw("Propose rejected: not leader",
 			"role", role.String(),
@@ -385,7 +382,7 @@ func (rm *replicationManager) Propose(
 	appendCtx, cancel := context.WithTimeout(ctx, defaultLogFetchTimeout)
 	defer cancel()
 
-	err = rm.logMgr.AppendEntries(appendCtx, []types.LogEntry{entry})
+	err = rm.logMgr.AppendEntriesUnsafe(appendCtx, []types.LogEntry{entry})
 	if err != nil {
 		rm.logger.Errorw("Failed to append proposed entry",
 			"error", err,
@@ -410,7 +407,7 @@ func (rm *replicationManager) SendHeartbeats(ctx context.Context) {
 		return
 	}
 
-	term, role, leaderID := rm.stateMgr.GetState()
+	term, role, leaderID := rm.stateMgr.GetStateUnsafe()
 	if role != types.RoleLeader || leaderID != rm.id {
 		return // Only leaders send heartbeats
 	}
@@ -951,12 +948,10 @@ func (rm *replicationManager) replicateToAllPeers(term types.Term, isHeartbeat b
 		return
 	}
 
-	rm.mu.RLock()
 	peerIDs := make([]types.NodeID, 0, len(rm.peerStates))
 	for peerID := range rm.peerStates {
 		peerIDs = append(peerIDs, peerID)
 	}
-	rm.mu.RUnlock()
 
 	commitIndex := rm.stateMgr.GetCommitIndex()
 

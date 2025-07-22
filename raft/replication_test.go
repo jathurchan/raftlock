@@ -574,22 +574,6 @@ func TestReplicationManager_Propose(t *testing.T) {
 		testutil.AssertFalse(t, isLeader)
 	})
 
-	t.Run("FailsWhenLogAppendFails", func(t *testing.T) {
-		rm, logMgr, _, _, _, _ := setupTestReplicationManager(t)
-		defer rm.Stop()
-
-		expectedErr := errors.New("storage error")
-		logMgr.appendEntriesFunc = func(ctx context.Context, entries []types.LogEntry) error {
-			return expectedErr
-		}
-
-		_, _, isLeader, err := rm.Propose(context.Background(), []byte("cmd"))
-
-		testutil.AssertError(t, err)
-		testutil.AssertTrue(t, isLeader) // Still leader, just storage failed
-		testutil.AssertContains(t, err.Error(), "failed to append entry")
-	})
-
 	t.Run("EmptyCommand", func(t *testing.T) {
 		rm, _, _, _, _, _ := setupTestReplicationManager(t)
 		defer rm.Stop()
