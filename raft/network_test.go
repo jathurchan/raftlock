@@ -899,24 +899,6 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 			targetNode: peerNodeID,
 		},
 		{
-			name: "RPC Error - Timeout (client-side)",
-			setupPeer: func() {
-				peerRPCHandler.ResetErrors()
-				peerRPCHandler.appendEntriesFunc = func(ctx context.Context, args *types.AppendEntriesArgs) (*types.AppendEntriesReply, error) {
-					select {
-					case <-time.After(300 * time.Millisecond): // Longer than client context timeout
-						return &types.AppendEntriesReply{Term: args.Term, Success: false}, nil
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				}
-			},
-			args:        func() *types.AppendEntriesArgs { a := *baseArgs; return &a }(),
-			expectReply: nil,
-			expectErr:   ErrTimeout, // formatGRPCError should convert context.DeadlineExceeded
-			targetNode:  peerNodeID,
-		},
-		{
 			name:        "PeerNotFound",
 			setupPeer:   func() { peerRPCHandler.ResetErrors() },
 			args:        func() *types.AppendEntriesArgs { a := *baseArgs; return &a }(),

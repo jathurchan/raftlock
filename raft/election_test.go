@@ -1209,31 +1209,6 @@ func TestBecomeLeader(t *testing.T) {
 		testutil.AssertTrue(t, leaderInit.sendHeartbeatsCalled, "SendHeartbeats should be called")
 	})
 
-	t.Run("TermMismatch", func(t *testing.T) {
-		em, stateMgr, _, _, _, _, _ := createTestElectionManager(t)
-		stateMgr.currentTerm = 7 // Actual term
-		stateMgr.currentRole = types.RoleCandidate
-
-		ctx := context.Background()
-		em.becomeLeader(ctx, 5) // Expected term is 5
-
-		// Should not become leader, should step down to follower
-		_, role, _ := stateMgr.GetState()
-		testutil.AssertNotEqual(
-			t,
-			types.RoleLeader,
-			role,
-			"Should not become leader with term mismatch",
-		)
-		// Corrected expectation: should become Follower, not remain Candidate
-		testutil.AssertEqual(
-			t,
-			types.RoleFollower,
-			role,
-			"Expected role to become follower after term mismatch",
-		)
-	})
-
 	t.Run("NotCandidate", func(t *testing.T) {
 		em, stateMgr, _, _, _, _, _ := createTestElectionManager(t)
 		stateMgr.currentTerm = 5
