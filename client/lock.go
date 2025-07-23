@@ -113,15 +113,82 @@ func (h *lockHandle) Acquire(ctx context.Context, ttl time.Duration, wait bool) 
 		return err
 	}
 
-	if !result.Acquired {
+	if result.Acquired {
+		h.lock = result.Lock
+		return nil
+	}
+
+	// If not acquired and wait is false, return immediately
+	if !wait {
 		if result.Error != nil {
 			return ErrorFromCode(result.Error.Code)
 		}
 		return ErrLockHeld
 	}
 
-	h.lock = result.Lock
-	return nil
+	// If wait is true, check if we got a recoverable error
+	if result.Error != nil {
+		errCode := ErrorFromCode(result.Error.Code)
+		// Only proceed with polling if the lock is held by another client
+		if errCode != ErrLockHeld {
+			return errCode
+		}
+	}
+
+	// Start polling for lock acquisition
+	return h.pollForLockAcquisition(ctx, ttl)
+}
+
+// pollForLockAcquisition polls using GetLockInfo until the client becomes the lock owner,
+// the context is canceled, or a non-recoverable error occurs.
+func (h *lockHandle) pollForLockAcquisition(ctx context.Context, ttl time.Duration) error {
+	// Use exponential backoff for polling
+	backoff := defaultInitialBackoff
+	maxBackoff := defaultMaxBackoff
+	multiplier := defaultBackoffMultiplier
+
+	ticker := time.NewTicker(backoff)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// Check current lock status
+			lockInfoReq := &GetLockInfoRequest{
+				LockID:         h.lockID,
+				IncludeWaiters: false, // We only need basic info
+			}
+
+			lockInfo, err := h.client.GetLockInfo(ctx, lockInfoReq)
+			if err != nil {
+				// Non-recoverable error, stop polling
+				return err
+			}
+
+			// Check if we are now the owner
+			if lockInfo.OwnerID == h.clientID {
+				// We now own the lock! Create the Lock object and return success
+				h.lock = &Lock{
+					LockID:      h.lockID,
+					OwnerID:     h.clientID,
+					Version:     lockInfo.Version,
+					AcquiredAt:  lockInfo.AcquiredAt,
+					ExpiresAt:   lockInfo.ExpiresAt,
+				}
+				return nil
+			}
+
+			// Lock still held by someone else, continue polling with backoff
+			// Increase backoff duration for next iteration
+			backoff = time.Duration(float64(backoff) * multiplier)
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			ticker.Reset(backoff)
+		}
+	}
 }
 
 // Release releases the lock if it's currently held.
