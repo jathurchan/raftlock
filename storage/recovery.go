@@ -48,13 +48,33 @@ const (
 
 // recoveryService defines an interface for storage recovery operations.
 type recoveryService interface {
+	// CheckForRecoveryMarkers checks for the presence of recovery or snapshot marker files
+	// to determine if a recovery operation is necessary.
 	CheckForRecoveryMarkers() (bool, error)
+
+	// PerformRecovery executes the full recovery procedure, including snapshot recovery
+	// and consistency checks.
 	PerformRecovery() error
+
+	// CreateRecoveryMarker creates a file that indicates the system is in a recovery state,
+	// including system metadata like PID and timestamp.
 	CreateRecoveryMarker() error
+
+	// CleanupTempFiles removes any temporary files left over from interrupted or incomplete operations.
 	CleanupTempFiles() error
+
+	// RemoveRecoveryMarker deletes the recovery marker file once recovery has been successfully completed.
 	RemoveRecoveryMarker() error
+
+	// CreateSnapshotRecoveryMarker writes a marker indicating that a snapshot operation is in progress,
+	// including snapshot metadata such as last included index and term.
 	CreateSnapshotRecoveryMarker(metadata types.SnapshotMetadata) error
+
+	// UpdateSnapshotMarkerStatus updates the snapshot marker file with additional status information,
+	// such as whether the snapshot data has been committed.
 	UpdateSnapshotMarkerStatus(status string) error
+
+	// RemoveSnapshotRecoveryMarker deletes the snapshot marker file once the snapshot operation is complete.
 	RemoveSnapshotRecoveryMarker() error
 }
 

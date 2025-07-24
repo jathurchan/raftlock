@@ -33,7 +33,6 @@ func NewSystemInfo() systemInfo {
 }
 
 // NewSystemInfoWithResolver creates a new SystemInfo instance with a custom hostname resolver.
-// This is primarily useful for testing or specialized environments.
 func NewSystemInfoWithResolver(resolver hostnameResolver) systemInfo {
 	if resolver == nil {
 		resolver = os.Hostname

@@ -69,9 +69,10 @@ func TestRWOperationLocker_TimeoutAndSlowOps(t *testing.T) {
 	var slowOpLogged, timeoutLogged bool
 	mockLogger := logger.NewNoOpLogger().(*logger.NoOpLogger)
 	mockLogger.WarnwFunc = func(msg string, keysAndValues ...any) {
-		if msg == "Slow storage operation" {
+		switch msg {
+		case "Slow storage operation":
 			slowOpLogged = true
-		} else if msg == "Lock acquisition timed out" {
+		case "Lock acquisition timed out":
 			timeoutLogged = true
 		}
 	}
