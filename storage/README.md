@@ -39,8 +39,8 @@ graph TB
         end
 
         subgraph "Internal Services"
-            LogServices[Log (Appender, Reader, Rewriter)]
-            SnapshotServices[Snapshot (Writer, Reader)]
+            LogServices[Log - Appender, Reader, Rewriter]
+            SnapshotServices[Snapshot - Writer, Reader]
             MetadataService[MetadataService]
             IndexService[IndexService]
             RecoveryService[RecoveryService]
@@ -48,7 +48,7 @@ graph TB
 
         subgraph "Low-Level Components"
             Locker[RWOperationLocker]
-            Serializer[Serializer (JSON/Binary)]
+            Serializer[Serializer - JSON/Binary]
             FileSystem[FileSystem Abstraction]
         end
     end
