@@ -1833,12 +1833,9 @@ func (m *mockLogManager) restoreFromSnapshotInternal(meta types.SnapshotMetadata
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Update cached state to reflect the snapshot
 	m.lastIndex = meta.LastIncludedIndex
 	m.lastTerm = meta.LastIncludedTerm
 
-	// The snapshot manager should have already truncated the log,
-	// so we just update our state to be consistent
 	return nil
 }
 

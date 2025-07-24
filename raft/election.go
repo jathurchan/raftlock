@@ -97,7 +97,7 @@ type electionManager struct {
 	metrics           Metrics
 	logger            logger.Logger
 	rand              Rand
-	clock             Clock // Use the clock interface for time operations
+	clock             Clock
 
 	electionTickCount   int     // Base number of ticks before an election timeout
 	randomizationFactor float64 // Randomization percentage to avoid election collisions
@@ -144,7 +144,7 @@ type ElectionManagerDeps struct {
 	Metrics           Metrics
 	Logger            logger.Logger
 	Rand              Rand
-	Clock             Clock // Added clock dependency
+	Clock             Clock
 	Config            Config
 }
 
@@ -287,8 +287,7 @@ func (em *electionManager) applyDefaults() {
 		em.electionTickCount = DefaultElectionTickCount
 	}
 
-	// Enhanced validation for cluster size
-	minElectionTicks := len(em.peers) * 8 // 8 ticks per node minimum
+	minElectionTicks := len(em.peers) * MinElectionTicksPerNode
 	if em.electionTickCount < minElectionTicks {
 		em.logger.Warnw("ElectionTickCount may be too low for cluster size",
 			"provided", em.electionTickCount,
@@ -302,7 +301,7 @@ func (em *electionManager) applyDefaults() {
 			"heartbeatTicks", DefaultHeartbeatTickCount)
 	}
 
-	if em.randomizationFactor < 1.0 {
+	if em.randomizationFactor < MinRandomizationFactor {
 		em.logger.Warnw(
 			"ElectionRandomizationFactor should be at least 1.0 for good split vote prevention",
 			"provided",
@@ -314,30 +313,26 @@ func (em *electionManager) applyDefaults() {
 	}
 }
 
-// Enhanced randomization algorithm with exponential distribution
+// resetElectionTimeoutPeriod computes a new election timeout with exponential randomization,
+// cluster-size jitter, and a node-specific offset to reduce split votes and sync elections.
 func (em *electionManager) resetElectionTimeoutPeriod() {
 	em.timerMu.Lock()
 	defer em.timerMu.Unlock()
 
 	min := float64(em.electionTickCount)
-	max := min * (1.0 + em.randomizationFactor*2.0)
+	max := min * (1.0 + em.randomizationFactor*ElectionTimeoutMaxFactor)
 
-	// Use exponential randomization for better distribution
 	randomFactor := em.rand.Float64()
-	exponentialFactor := math.Pow(randomFactor, 2.0)
+	exponentialFactor := math.Pow(randomFactor, ElectionTimeoutExponent)
 	randomized := min + exponentialFactor*(max-min)
 
-	// Add cluster-size-based jitter
-	clusterSizeJitter := float64(len(em.peers)) * em.rand.Float64() * 2.0
+	clusterSizeJitter := float64(len(em.peers)) * em.rand.Float64() * ClusterSizeJitterFactor
 	randomized += clusterSizeJitter
 
-	// Add node-specific deterministic component
 	var nodeComponentValue float64
-	if len(em.peers) > 0 { // Ensure there are peers before performing modulo operation
-		nodeComponentValue = float64((em.nodeBasedSeed%int64(len(em.peers)))+1) * 2.0
+	if len(em.peers) > 0 {
+		nodeComponentValue = float64((em.nodeBasedSeed%int64(len(em.peers)))+1) * NodeComponentFactor
 	} else {
-		// If there are no peers (empty map), this component should not involve division by zero.
-		// Setting it to 0.0 is a sensible default for a cluster without other peers.
 		nodeComponentValue = 0.0
 	}
 	randomized += nodeComponentValue
@@ -411,7 +406,8 @@ func (em *electionManager) Tick(ctx context.Context) {
 	}
 }
 
-// Enhanced election timeout handling with split vote detection and recovery
+// defaultHandleElectionTimeout triggers a new election if the node is a follower,
+// no election is in progress, and the minimum retry interval has passed.
 func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	if em.isShutdown.Load() {
 		em.logger.Debugw("Election timeout ignored: node shutting down", "nodeID", em.id)
@@ -428,10 +424,9 @@ func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	lastElection := em.lastElectionTime.Load()
 	electionCount := em.electionCount.Load()
 
-	// Be more aggressive with timing when pre-vote is enabled
 	minIntervalBase := int64(minElectionIntervalBase.Milliseconds())
 
-	minInterval := minIntervalBase + int64(electionCount*25)
+	minInterval := minIntervalBase + int64(electionCount*ElectionRetryBackoffStepMS)
 	maxInterval := int64(maxElectionBackoff.Milliseconds())
 	if minInterval > maxInterval {
 		minInterval = maxInterval
@@ -479,6 +474,7 @@ func (em *electionManager) defaultHandleElectionTimeout(ctx context.Context) {
 	em.startElection(ctx)
 }
 
+// trackElectionAttempt records the current election attempt for split vote analysis.
 func (em *electionManager) trackElectionAttempt(currentTerm types.Term) {
 	em.splitVoteDetector.mu.Lock()
 	defer em.splitVoteDetector.mu.Unlock()
@@ -490,11 +486,12 @@ func (em *electionManager) trackElectionAttempt(currentTerm types.Term) {
 
 	em.splitVoteDetector.electionAttempts++
 
-	if em.splitVoteDetector.electionAttempts > 10 {
-		em.splitVoteDetector.electionAttempts = 5 // Partial reset
+	if em.splitVoteDetector.electionAttempts > MaxElectionAttemptsBeforeReset {
+		em.splitVoteDetector.electionAttempts = ElectionAttemptResetValue
 	}
 }
 
+// resetElectionState resets the election state to idle and clears any ongoing vote tracking or timeouts.
 func (em *electionManager) resetElectionState(reason string) {
 	em.logger.Infow("Resetting election state",
 		"nodeID", em.id,
@@ -508,6 +505,7 @@ func (em *electionManager) resetElectionState(reason string) {
 	em.resetElectionTimeoutPeriod()
 }
 
+// processVoteReply handles a reply to a RequestVote RPC.
 func (em *electionManager) processVoteReply(
 	fromPeerID types.NodeID,
 	voteTerm types.Term,
@@ -580,7 +578,8 @@ func (em *electionManager) processVoteReply(
 	}
 }
 
-// Enhanced real election with improved error handling
+// defaultStartElection initiates a new election by transitioning the node to the candidate role,
+// preparing vote request arguments, and broadcasting RequestVote RPCs to all peers.
 func (em *electionManager) defaultStartElection(ctx context.Context) {
 	if em.isShutdown.Load() {
 		em.logger.Debugw("Election aborted: node shutting down", "nodeID", em.id)
@@ -670,38 +669,12 @@ func (em *electionManager) recordElectionFailure() {
 	em.splitVoteDetector.mu.Lock()
 	defer em.splitVoteDetector.mu.Unlock()
 
-	// TEMPORARY DEBUG LOGS:
-	em.logger.Debugw(
-		"recordElectionFailure: (Inside lock) BEFORE increment",
-		"attempts",
-		em.splitVoteDetector.electionAttempts,
-	)
-
 	em.splitVoteDetector.consecutiveFails++
 	em.splitVoteDetector.lastFailTime = em.clock.Now()
-	em.splitVoteDetector.electionAttempts++ // This is the critical line that increments
+	em.splitVoteDetector.electionAttempts++
 
-	// TEMPORARY DEBUG LOGS:
-	em.logger.Debugw(
-		"recordElectionFailure: (Inside lock) AFTER increment",
-		"attempts",
-		em.splitVoteDetector.electionAttempts,
-	)
-
-	if em.splitVoteDetector.electionAttempts > 10 {
-		// TEMPORARY DEBUG LOGS:
-		em.logger.Debugw(
-			"recordElectionFailure: (Inside lock) Attempts > 10, resetting...",
-			"attempts_before_reset",
-			em.splitVoteDetector.electionAttempts,
-		)
-		em.splitVoteDetector.electionAttempts = 5
-		// TEMPORARY DEBUG LOGS:
-		em.logger.Debugw(
-			"recordElectionFailure: (Inside lock) Attempts AFTER reset",
-			"attempts_after_reset",
-			em.splitVoteDetector.electionAttempts,
-		)
+	if em.splitVoteDetector.electionAttempts > MaxElectionAttemptsBeforeReset {
+		em.splitVoteDetector.electionAttempts = ElectionAttemptResetValue
 	}
 
 	em.logger.Infow("Election failure recorded",
@@ -817,7 +790,7 @@ func (em *electionManager) recordVote(from types.NodeID, granted bool) {
 	}
 
 	em.voteMu.Lock()
-	defer em.voteMu.Unlock() // Corrected from em.mu.Unlock()
+	defer em.voteMu.Unlock()
 
 	if em.votesReceived[from] {
 		em.logger.Debugw("Vote already recorded from this peer",
@@ -1120,17 +1093,12 @@ func (em *electionManager) Stop() {
 	em.stopOnce.Do(func() {
 		em.logger.Infow("Stopping election manager", "nodeID", em.id)
 
-		// Signal all background operations to stop.
 		close(em.stopCh)
 
-		// Use a real-time timer as a safeguard against deadlock during shutdown.
-		// This is crucial because the main Raft logic might be paused, and we don't
-		// want to rely on the mock clock in tests for shutdown.
-		timeout := time.NewTimer(2 * time.Second)
+		timeout := time.NewTimer(ElectionManagerStopTimeout)
 		defer timeout.Stop()
 
-		// Periodically check if all operations have completed.
-		ticker := time.NewTicker(10 * time.Millisecond)
+		ticker := time.NewTicker(ElectionManagerStopPollInterval)
 		defer ticker.Stop()
 
 		for {

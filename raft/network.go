@@ -1189,7 +1189,7 @@ func (nm *gRPCNetworkManager) ResetConnection(ctx context.Context, peerID types.
 	pc.mu.Unlock()
 
 	// Attempt to reconnect immediately
-	return nm.connectToPeerLocked(ctx, pc)
+	return nm.connectToPeerLocked(pc)
 }
 
 // getOrCreatePeerClient retrieves an active client connection, creating and
@@ -1231,7 +1231,7 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClientLocked(
 		nm.peerClients[peerID] = client
 	}
 
-	if err := nm.connectToPeerLocked(ctx, client); err != nil {
+	if err := nm.connectToPeerLocked(client); err != nil {
 		return nil, fmt.Errorf("failed to connect to peer %s: %w", peerID, err)
 	}
 
@@ -1240,7 +1240,6 @@ func (nm *gRPCNetworkManager) getOrCreatePeerClientLocked(
 
 // connectToPeerLocked establishes a gRPC connection. Assumes nm.mu is held.
 func (nm *gRPCNetworkManager) connectToPeerLocked(
-	ctx context.Context,
 	client *peerConnection,
 ) error {
 	client.mu.Lock()
