@@ -331,7 +331,9 @@ func (em *electionManager) resetElectionTimeoutPeriod() {
 
 	var nodeComponentValue float64
 	if len(em.peers) > 0 {
-		nodeComponentValue = float64((em.nodeBasedSeed%int64(len(em.peers)))+1) * NodeComponentFactor
+		nodeComponentValue = float64(
+			(em.nodeBasedSeed%int64(len(em.peers)))+1,
+		) * NodeComponentFactor
 	} else {
 		nodeComponentValue = 0.0
 	}
