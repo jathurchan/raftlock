@@ -45,20 +45,7 @@ message Lock {
   int64 version = 3; // Fencing token
   google.protobuf.Timestamp acquired_at = 4;
   google.protobuf.Timestamp expires_at = 5;
-  LockMode mode = 6;
-  map<string, string> metadata = 7;
-}
-```
-
-### Lock Modes
-
-RaftLock supports different locking modes, allowing for flexibility in resource access patterns.
-
-```protobuf
-enum LockMode {
-  LOCK_MODE_UNSPECIFIED = 0; // Default unspecified lock mode
-  EXCLUSIVE = 1;             // Only one owner allowed
-  SHARED = 2;                // Multiple owners allowed (e.g., for read locks)
+  map<string, string> metadata = 6;
 }
 ```
 
@@ -66,8 +53,8 @@ enum LockMode {
 
 The API uses standard Google Protocol Buffer well-known types for time:
 
-* `google.protobuf.Timestamp`: For absolute points in time (e.g., expires_at).
-* `google.protobuf.Duration`: For time durations (e.g., ttl, wait_timeout).
+* `google.protobuf.Timestamp`: For absolute points in time (e.g., expires\_at).
+* `google.protobuf.Duration`: For time durations (e.g., ttl, wait\_timeout).
 
 ### Adaptive Backoff
 
@@ -79,13 +66,12 @@ message BackoffAdvice {
   google.protobuf.Duration max_backoff = 2;
   double multiplier = 3;
   double jitter_factor = 4;
-  google.protobuf.Duration estimated_availability_in = 5; // Estimate for when lock might be free
 }
 ```
 
 ### Structured Error Handling
 
-Operations return detailed error information using the ErrorDetail message, which includes a machine-readable ErrorCode and a descriptive message.
+Operations return detailed error information using the `ErrorDetail` message, which includes a machine-readable `ErrorCode` and a descriptive message.
 
 ```protobuf
 message ErrorDetail {
@@ -96,7 +82,7 @@ message ErrorDetail {
 
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
-  OK = 1; // success is implicit by lack of ErrorDetail
+  OK = 1;
 
   // Lock-specific errors
   LOCK_HELD = 101;
@@ -125,33 +111,34 @@ enum ErrorCode {
 
 ## Code Generation
 
-The Go gRPC code can be generated from the proto/raftlock.proto file.
+The Go gRPC code can be generated from the `proto/raftlock.proto` file.
 
 **Prerequisites**:
 
 * `protoc` (Protocol Buffer compiler)
 * `protoc-gen-go` (Go plugin for protoc)
 * `protoc-gen-go-grpc` (Go gRPC plugin for protoc)
+
 Ensure these are installed and in your system's `PATH`. You can install the Go plugins via:
 
-```Bash
+```bash
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ```
 
 **Command (from the repository root)**:
 
-```Bash
+```bash
 protoc --proto_path=. \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
   proto/raftlock.proto
 ```
 
-This command will generate the following files in the proto/ directory:
+This command will generate the following files in the `proto/` directory:
 
 * `raftlock.pb.go`: Contains the Go struct definitions for all messages.
-* `raftlock_grpc.pb.go`: Contains the Go interface definitions and client/server stubs for the RaftLock gRPC service.
+* `raftlock_grpc.pb.go`: Contains the Go interface definitions and client/server stubs for the `RaftLock` gRPC service.
 
 ## Versioning
 
@@ -160,11 +147,5 @@ The RaftLock gRPC API aims to follow semantic versioning principles.
 * **MAJOR** version incremented for backward-incompatible API changes.
 * **MINOR** version incremented for new, backward-compatible functionality.
 * **PATCH** version incremented for backward-compatible bug fixes.
+
 Current API Version: `v1.0.0`
-
-## Future Considerations
-
-* **TLS Encryption**: Secure communication.
-* **Authentication**: Implement client authentication mechanisms (e.g. JWT, API keys).
-* **Authorization**: Define and enforce access controls for lock operations based on authenticated client identity.
-* **Rate Limiting**: Protect the service from abuse by implementing request rate limiting.
