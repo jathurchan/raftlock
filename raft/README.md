@@ -6,12 +6,14 @@ The `raft` package offers a robust, custom-built implementation of the Raft cons
 
 Raft is a consensus algorithm that enables a cluster of nodes to maintain a consistent, replicated log of operations despite node failures and network partitions. This implementation provides:
 
-* **Leader Election**: Automatic selection of a single leader to coordinate operations
-* **Log Replication**: Reliable propagation of operations across all cluster nodes
-* **Safety Guarantees**: Once committed, operations are durable and consistently ordered
-* **Fault Tolerance**: Operates correctly as long as a majority of nodes remain available
+* **Leader Election**: Automatic selection of a single leader to coordinate operations.
+* **Log Replication**: Reliable propagation of operations across all cluster nodes.
+* **Safety Guarantees**: Once committed, operations are durable and consistently ordered.
+* **Fault Tolerance**: Operates correctly as long as a majority of nodes remain available.
 
 The module is designed with modularity in mind—application-specific logic is provided through the `Applier` interface, while networking, storage, and other concerns are abstracted through well-defined interfaces.
+
+-----
 
 ## Key Features
 
@@ -26,9 +28,8 @@ This Raft implementation includes the following key features:
 
 ### Performance Optimizations
 
-* **ReadIndex Protocol:** [Mechanism](#optimizations) for linearizable reads (`ReadIndex` method) without the overhead of full log replication for every read request, ensuring data consistency with reduced latency.
-* **Leader Lease:** [Time-based optimization](#optimizations) (enabled by `EnableLeaderLease` flag) that allows the leader to serve `ReadIndex` requests even faster under stable network conditions by relying on a time-based lease, further reducing read latency.
-* **PreVote Protocol:** [Optional Enhancement](#optimizations) (enabled by `PreVoteEnabled` flag) that helps prevent unnecessary elections and term increments in networks prone to transient partitions, improving cluster stability.
+* **ReadIndex Protocol:** Mechanism for linearizable reads (`ReadIndex` method) without the overhead of full log replication for every read request, ensuring data consistency with reduced latency.
+* **Leader Lease:** Time-based optimization (enabled by `EnableLeaderLease` flag) that allows the leader to serve `ReadIndex` requests even faster under stable network conditions by relying on a time-based lease, further reducing read latency.
 * **Batched Operations:** Log entries can be batched for replication (`MaxLogEntriesPerRequest`) and application to the state machine (`MaxApplyBatchSize`), improving throughput for write-heavy workloads.
 
 ### Production-Ready Features
@@ -37,6 +38,8 @@ This Raft implementation includes the following key features:
 * **Configurable Timeouts and Intervals:** Key timing parameters like election timeouts, heartbeat intervals, and RPC timeouts are configurable to adapt to various network environments and performance requirements.
 * **Graceful Shutdown:** Provides a `Stop()` method for clean resource cleanup and completion of ongoing operations.
 * **Modular and Testable Design:** Core components are abstracted via interfaces (e.g., `Storage`, `NetworkManager`, `Applier`, `Clock`, `Rand`), promoting flexibility and simplifying unit testing.
+
+-----
 
 ## Architecture
 
@@ -128,10 +131,10 @@ graph TB
 
 The central orchestrator of the Raft system. Implements both the public Raft API and the internal `rpcHandler` interface.
 
-* Manages node lifecycle (`Start` / `Stop`)
-* Routes RPCs to internal managers
-* Propagates ticks for time-driven operations
-* Manages client-facing communication channels
+* Manages node lifecycle (`Start` / `Stop`).
+* Routes RPCs to internal managers.
+* Propagates ticks for time-driven operations.
+* Manages client-facing communication channels.
 
 #### `StateManager` (`state.go`)
 
@@ -139,113 +142,118 @@ Maintains both **volatile** and **persistent** state of the Raft node.
 
 **Volatile state:**
 
-* Current role: Leader / Follower / Candidate
-* Current leader ID
-* Commit index and last applied index
+* Current role: Leader / Follower / Candidate.
+* Current leader ID.
+* Commit index and last applied index.
 
 **Persistent state:**
 
-* Current term
-* Voted-for candidate
-* Interfaces with storage for durability
+* Current term.
+* Voted-for candidate.
+* Interfaces with storage for durability.
 
 #### `LogManager` (`log.go`)
 
 Abstraction layer over the Raft log, ensuring consistency and efficient access.
 
-* Append log entries with conflict detection
-* Retrieve entries by index or range
-* Truncate log to resolve conflicts or compact
-* Lookup terms and manage log bounds
+* Append log entries with conflict detection.
+* Retrieve entries by index or range.
+* Truncate log to resolve conflicts or compact.
+* Lookup terms and manage log bounds.
 
 #### `ElectionManager` (`election.go`)
 
 Coordinates leader elections with timing and voting mechanisms.
 
-* Randomized timeouts to reduce vote splitting
-* Supports PreVote protocol
-* Broadcasts vote requests and handles responses
-* Manages term updates and role transitions
+* Randomized timeouts to reduce vote splitting.
+* Broadcasts vote requests and handles responses.
+* Manages term updates and role transitions.
 
 #### `ReplicationManager` (`replication.go`)
 
 Handles log replication to followers, including batching and optimizations.
 
-* Manages heartbeats to maintain leadership
-* Coordinates `AppendEntries` RPCs (with batching)
-* Tracks per-follower progress (`NextIndex`, `MatchIndex`)
-* Supports `ReadIndex` with optional leader lease
-* Advances commit index via follower acknowledgments
+* Manages heartbeats to maintain leadership.
+* Coordinates `AppendEntries` RPCs (with batching).
+* Tracks per-follower progress (`NextIndex`, `MatchIndex`).
+* Supports `ReadIndex` with optional leader lease.
+* Advances commit index via follower acknowledgments.
 
 #### `SnapshotManager` (`snapshot.go`)
 
 Manages the lifecycle of Raft snapshots for compaction and synchronization.
 
-* Triggers automatic snapshots based on log size
-* Captures application state via `Applier`
-* Persists snapshots and tracks metadata
-* Handles `InstallSnapshot` RPCs for lagging followers
-* Compacts log after successful snapshot
+* Triggers automatic snapshots based on log size.
+* Captures application state via `Applier`.
+* Persists snapshots and tracks metadata.
+* Handles `InstallSnapshot` RPCs for lagging followers.
+* Compacts log after successful snapshot.
 
 ### Key External Interfaces
 
 #### Public API
 
-* **`Raft`** (`api.go`)  
-  The main interface exposed to applications, providing Raft control and observability.  
-  **Key methods:**
-  * `Start`, `Stop` – Node lifecycle
-  * `Tick` – Advances Raft's internal clock
-  * `Propose` – Submits commands for consensus
-  * `ReadIndex` – Executes linearizable reads
-  * `Status`, `ApplyChannel`, `LeaderChangeChannel` – State introspection and event streams
+* **`Raft`** (`api.go`)
+    The main interface exposed to applications, providing Raft control and observability.
+    **Key methods:**
 
-* **`rpcHandler`** (`api.go`)  
-  Handles inbound Raft RPCs from peer nodes:
+  * `Start`, `Stop` – Node lifecycle.
+  * `Tick` – Advances Raft's internal clock.
+  * `Propose` – Submits commands for consensus.
+  * `ReadIndex` – Executes linearizable reads.
+  * `Status`, `ApplyChannel`, `LeaderChangeChannel` – State introspection and event streams.
+
+* **`rpcHandler`** (`api.go`)
+    Handles inbound Raft RPCs from peer nodes:
+
   * `RequestVote`
   * `AppendEntries`
   * `InstallSnapshot`
 
 #### Application Integration
 
-* **`Applier`** (`applier.go`)  
-  Application-implemented interface to bridge Raft with the state machine.  
-  * Applies committed log entries
-  * Creates and restores snapshots
+* **`Applier`** (`applier.go`)
+    Application-implemented interface to bridge Raft with the state machine.
+  * Applies committed log entries.
+  * Creates and restores snapshots.
 
 #### Other Dependencies
 
-* **`NetworkManager`** (`network.go`)  
-  Abstracts peer communication.  
-  * Default: `gRPCNetworkManager`  
-  * Replaceable for simulation or alternative protocols
+* **`NetworkManager`** (`network.go`)
+    Abstracts peer communication.
 
-* **`Storage`** (`storage/api.go`)  
-  Interface for persisting Raft's critical state:  
+  * Default: `gRPCNetworkManager`.
+  * Replaceable for simulation or alternative protocols.
+
+* **`Storage`** (`storage/api.go`)
+    Interface for persisting Raft's critical state:
+
   * Current term
   * Voted-for candidate
   * Log entries
   * Snapshots
 
-* **`Clock`** (`clock.go`)  
-  Time abstraction to enable mockable timing in tests.
+* **`Clock`** (`clock.go`)
+    Time abstraction to enable mockable timing in tests.
 
-* **`Rand`** (`rand.go`)  
-  Provides randomness for election jittering (used by `ElectionManager`).
+* **`Rand`** (`rand.go`)
+    Provides randomness for election jittering (used by `ElectionManager`).
 
-* **`Metrics`** (`metrics.go`)  
-  Captures Raft metrics for observability and diagnostics.
+* **`Metrics`** (`metrics.go`)
+    Captures Raft metrics for observability and diagnostics.
 
-* **`Logger`** (`logger/logger.go`)  
-  Structured logging interface used throughout the Raft stack.
+* **`Logger`** (`logger/logger.go`)
+    Structured logging interface used throughout the Raft stack.
 
 This modular, interface-driven design allows for highly flexible and testable Raft deployments. Individual components can be mocked or swapped to suit diverse application or infrastructure needs.
+
+-----
 
 ## Quick Start
 
 This guide demonstrates how to configure, build, and operate a Raft node using our custom implementation. The example shows a simple key-value store built on top of the Raft consensus algorithm.
 
-### 1. Implement Your Application State Machine
+### 1\. Implement Your Application State Machine
 
 First, implement the `raft.Applier` interface to define how your application processes committed commands:
 
@@ -281,7 +289,7 @@ func NewKeyValueStore(logger logger.Logger) *KeyValueStore {
 }
 
 // Apply processes committed commands from the Raft log
-func (kv *KeyValueStore) Apply(ctx context.Context, index types.Index, command []byte) error {
+func (kv *KeyValueStore) Apply(ctx context.Context, index types.Index, command []byte) (any, error) {
     kv.mu.Lock()
     defer kv.mu.Unlock()
 
@@ -299,7 +307,7 @@ func (kv *KeyValueStore) Apply(ctx context.Context, index types.Index, command [
     }
 
     kv.lastAppliedIndex = index
-    return nil
+    return nil, nil
 }
 
 // Snapshot creates a point-in-time snapshot of the state machine
@@ -339,7 +347,7 @@ func (kv *KeyValueStore) Get(key string) (string, bool) {
 }
 ```
 
-## 2. Configure and Build the Raft Node
+### 2\. Configure and Build the Raft Node
 
 Create a function to configure and build your Raft node:
 
@@ -359,7 +367,6 @@ func createRaftNode(nodeID types.NodeID, listenAddr string, peers map[types.Node
         FeatureFlags: raft.FeatureFlags{
             EnableReadIndex:   true,
             EnableLeaderLease: true,
-            PreVoteEnabled:    true,
         }.WithExplicitFlags(),
     }
 
@@ -400,7 +407,7 @@ func createRaftNode(nodeID types.NodeID, listenAddr string, peers map[types.Node
 }
 ```
 
-### 3. Start and Operate the Raft Node
+### 3\. Start and Operate the Raft Node
 
 The main function demonstrates how to start a node and interact with it:
 
@@ -475,29 +482,7 @@ func main() {
 }
 ```
 
-### Running a Multi-Node Cluster
-
-To run a complete cluster, start each node with different configurations:
-
-```bash
-# Terminal 1 - Node 1
-go run main.go -node-id=node-1 -listen=localhost:8001 -data-dir=/tmp/raft-node1
-
-# Terminal 2 - Node 2  
-go run main.go -node-id=node-2 -listen=localhost:8002 -data-dir=/tmp/raft-node2
-
-# Terminal 3 - Node 3
-go run main.go -node-id=node-3 -listen=localhost:8003 -data-dir=/tmp/raft-node3
-```
-
-### Expected Behavior
-
-* One node will be elected leader and handle proposals
-* Commands are replicated to all nodes before being applied
-* State persists across node restarts
-* If the leader fails, a new election occurs automatically
-
-This example provides a foundation for building distributed systems that require strong consistency and fault tolerance.
+-----
 
 ## Configuration (`config.go`)
 
@@ -520,7 +505,7 @@ type Options struct {
 }
 ```
 
-*[Source: `raft/config.go`]*
+*Source: `raft/config.go`*
 
 ### Feature Flags
 
@@ -530,12 +515,11 @@ Toggles for enabling/disabling specific Raft protocol optimizations:
 type FeatureFlags struct {
     EnableReadIndex   bool // Enables ReadIndex protocol for linearizable reads (default: true).
     EnableLeaderLease bool // Enables leader lease for faster ReadIndex (default: true).
-    PreVoteEnabled    bool // Enables PreVote phase to prevent needless elections (default: true).
 }
 ```
 
 Call `WithExplicitFlags()` on a `FeatureFlags` struct to mark that these have been intentionally set by the user, preventing them from being overridden by internal defaults if the struct itself was provided.
-*[Source: `raft/config.go`]*
+*Source: `raft/config.go`*
 
 ### Tuning Parameters
 
@@ -548,7 +532,9 @@ type TuningParams struct {
 }
 ```
 
-*[Source: `raft/config.go`]*
+*Source: `raft/config.go`*
+
+-----
 
 ## Error Handling
 
@@ -567,7 +553,9 @@ var (
 )
 ```
 
-*[Source: `raft/errors.go`]*
+*Source: `raft/errors.go`*
+
+-----
 
 ## Monitoring and Observability
 
@@ -604,6 +592,35 @@ fmt.Printf("Snapshot: Index=%d, Term=%d\n",
 
 The `types.RaftStatus` struct provides a comprehensive view of the node's state.
 
+-----
+
+## Testing
+
+The `raft` package is extensively tested to ensure correctness and stability. The testing strategy is divided into two main categories: unit tests and integration tests.
+
+### Unit Tests
+
+Unit tests are designed to verify the functionality of individual components in isolation. Each manager (`ElectionManager`, `LogManager`, `ReplicationManager`, `SnapshotManager`, `StateManager`) has its own set of tests that use mock objects to simulate dependencies. This approach allows for focused testing of specific logic without the overhead of a full cluster.
+
+Key aspects of the unit testing strategy include:
+
+* **Mocking Dependencies:** Interfaces like `Storage`, `NetworkManager`, and `Applier` are replaced with mock implementations (`mockStorage`, `mockNetworkManager`, `mockApplier`) that allow for precise control over their behavior and for verifying that they are used correctly.
+* **Time Control:** A mock `Clock` is used to control time-based events, such as election timeouts and heartbeats, in a deterministic way.
+* **Coverage:** The unit tests aim for high code coverage, ensuring that all major code paths, including error handling and edge cases, are exercised.
+
+### Integration and Fault-Tolerance Tests
+
+Integration tests (`raft_integration_test.go`) are designed to validate the behavior of the entire Raft cluster. These tests create a multi-node cluster and subject it to various scenarios, including:
+
+* **Leader Election:** Verifying that a single leader is elected in a stable cluster.
+* **Command Replication:** Ensuring that commands proposed to the leader are correctly replicated to all followers and applied to their state machines in the same order.
+* **Leader Failure and Recovery:** Testing the cluster's ability to elect a new leader and continue operating after the current leader fails.
+* **Snapshotting and Log Compaction:** Verifying that snapshots are created when the log size exceeds a certain threshold and that the log is correctly compacted afterward.
+
+These tests are crucial for ensuring that the different components of the Raft implementation work together correctly and that the system is resilient to failures.
+
+-----
+
 ## Optimizations
 
 ### ReadIndex for Linearizable Reads
@@ -632,18 +649,3 @@ config.FeatureFlags = raft.FeatureFlags{
     EnableLeaderLease: true,
 }.WithExplicitFlags()
 ```
-
-### PreVote Protocol
-
-Enable `PreVoteEnabled` in `FeatureFlags` (`raft/config.go`) to reduce disruptive elections in unstable networks. Candidates will first "pre-vote" to check if they can win before incrementing their term.
-
-```go
-// In your Raft Config:
-config.FeatureFlags = raft.FeatureFlags{
-    PreVoteEnabled: true,
-}.WithExplicitFlags()
-```
-
----
-
-For detailed implementation notes and algorithm specifics, refer to the original Raft paper: "In Search of an Understandable Consensus Algorithm" by Diego Ongaro and John Ousterhout.
