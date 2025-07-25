@@ -31,10 +31,11 @@ jobs:
           cache: true
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.58.1
-          args: --timeout=5m
+          version: latest
+          args: |
+            --timeout=5m
 
   unit-test:
     name: Unit Tests
