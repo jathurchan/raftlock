@@ -1,101 +1,41 @@
-name: CI
+name: CI Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
       - 'proto/**'
+      - '.github/workflows/**'
   pull_request:
+    branches: [main, dev]
     paths:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
       - 'proto/**'
-  workflow_dispatch: # Allows the workflow to be run manually
+      - '.github/workflows/**'
+  workflow_dispatch: # Allows manual workflow runs
+
+env:
+  GO_VERSION: '1.22'
 
 jobs:
-  lint:
-    name:  Lint
+  setup:
+    name: Setup & Prepare
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-          cache: true
-
-      - name: Run linter
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.58.1
-          args: --timeout=5m
-
-  unit-test:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    needs: lint # This job will only run if the 'lint' job succeeds
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache: true
-
-      - name: Verify dependencies
-        run: go mod verify
-
-      - name: Run unit tests
-        run: go test -v -race ./...
-
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
-    needs: unit-test # This job will only run if 'unit-test' succeeds
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache: true
-
-      - name: Run tests with coverage
-        run: |
-          go test -race -coverprofile=coverage.tmp.out -covermode=atomic ./...
-          # Exclude generated protobuf files, test utilities, and examples from the final report
-          grep -vE '\.pb\.go:|/testutil/|/examples/' coverage.tmp.out > coverage.out
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
-          fail_ci_if_error: true
-          verbose: true
-
-  integration-test:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: unit-test # This job will only run if 'unit-test' succeeds
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install Protobuf Compiler
@@ -114,8 +54,118 @@ jobs:
                  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
                  $(find . -name '*.proto')
 
+      - name: Force Go to recognize new packages
+        run: go list ./...
+
       - name: Tidy dependencies after codegen
         run: go mod tidy
 
+      - name: Verify no uncommitted changes
+        run: |
+          if ! git diff --quiet; then
+            echo "❌ Generated files are not up to date. Please run 'go mod tidy' and commit the changes."
+            git diff
+            exit 1
+          fi
+
+      - name: Upload workspace artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-${{ github.sha }}
+          path: .
+          retention-days: 1
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Download workspace artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-${{ github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --timeout=10m
+          skip-cache: true
+
+  test:
+    name: Unit Tests & Coverage
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Download workspace artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-${{ github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run tests and generate coverage
+        run: |
+          go test -v -timeout=5m ./... -coverprofile=coverage.tmp.out -covermode=atomic
+          grep -vE '\.pb\.go:|/testutil/|/examples/' coverage.tmp.out > coverage.out
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          fail_ci_if_error: true
+          verbose: true
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-integration-tests')
+    steps:
+      - name: Download workspace artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-${{ github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
       - name: Run integration tests
-        run: go test -v -race -tags=integration ./raft -run=TestRaftIntegration
+        run: go test -v -timeout=10m -tags=integration ./raft -run=TestRaftIntegration
+
+  verify-build:
+    name: Verify Build
+    runs-on: ${{ matrix.os }}
+    needs: setup
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go-version: ['1.21', '1.22']
+    steps:
+      - name: Download workspace artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-${{ github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Build project
+        run: go build -v ./...
