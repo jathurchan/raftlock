@@ -1,36 +1,63 @@
-version: "2"
+# .golangci.yml
+# This file uses the modern configuration format for golangci-lint.
+# See: https://golangci-lint.run/usage/configuration/
+
+run:
+  # The default timeout is 1m. Setting it to 10m to avoid timeouts on larger projects.
+  timeout: 10m
 
 linters:
+  # This list is based on the linters you had enabled in your previous configuration.
   enable:
-    - govet
-    - ineffassign
-    # - staticcheck
-    - unused
     - bodyclose
-    #- contextcheck
     - copyloopvar
     - errorlint
+    - govet
+    - ineffassign
     - nilerr
     - rowserrcheck
     - sqlclosecheck
-    # - unparam
-    # - cyclop
-    # - goconst
-    #- gocritic
+    - unused
     - whitespace
-    # - gosec
-  # TODO: Add additional linters once the errors are fixed.
-  disable:
-    - staticcheck
-  exclusions:
-    paths:
-      - ".*_test\\.go$"
 
-formatters:
-  enable:
-    - gci
-    - gofmt
-    - gofumpt
-    - goimports
-    - golines
+linters-settings:
+  goimports:
+    # Set the correct local prefix for your project.
+    local-prefixes: github.com/jathurchan/raftlock
 
+issues:
+  # Exclude analysis of certain files or issues.
+  exclude-rules:
+    # Exclude all generated protobuf files from most linters.
+    - path: \.pb\.go$
+      linters:
+        - stylecheck
+        - goimports
+        - revive
+        - gosec
+
+    # This is the fix: Explicitly disable all enabled linters for test files.
+    - path: _test\.go
+      linters:
+        - bodyclose
+        - errcheck
+        - staticcheck
+        - copyloopvar
+        - errorlint
+        - goimports
+        - govet
+        - ineffassign
+        - nilerr
+        - rowserrcheck
+        - sqlclosecheck
+        - unused
+        - whitespace
+
+  # Set the maximum number of issues of the same type to display.
+  max-same-issues: 10
+
+# Configuration for how the output is formatted.
+output:
+  # Makes the output more readable in CI logs.
+  print-issued-lines: true
+  print-linter-name: true

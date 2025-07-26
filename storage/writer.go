@@ -199,9 +199,7 @@ func (a *defaultLogAppender) Append(
 		return appendResult{}, err
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
-			// Error path is handled by rollback
-		}
+		_ = file.Close()
 	}()
 
 	offsets, _, err := a.writer.WriteEntriesToFile(ctx, file, startOffset, entries)
