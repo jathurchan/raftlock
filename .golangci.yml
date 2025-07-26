@@ -1,5 +1,3 @@
-version: 2
-
 run:
   timeout: 5m
 
@@ -18,10 +16,6 @@ linters:
 
   disable:
     - staticcheck   # Temporarily disabled, can be re-enabled later
-
-linters-settings:
-  golines:
-    max-len: 120
 
 issues:
   exclude-rules:

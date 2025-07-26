@@ -442,7 +442,7 @@ func TestConcurrentAccess(t *testing.T) {
 		for i := range goroutines {
 			go func() {
 				defer wg.Done()
-				for j := 0; j < iterations; j++ {
+				for range iterations {
 					f, err := fs.AppendFile(appendFile)
 					testutil.AssertNoError(t, err)
 					_, err = f.Write([]byte{byte('A' + i)})
