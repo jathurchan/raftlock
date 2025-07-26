@@ -29,7 +29,29 @@ jobs:
         run: |
           go test -v -timeout=5m ./... -coverprofile=coverage.tmp.out -covermode=atomic
           grep -vE '\.pb\.go:|/testutil/|/examples/' coverage.tmp.out > coverage.out
+      - name: ✅ Show test results and coverage %
+        run: |
+          echo "### ✅ Test Results:"
+          grep -E '^(=== RUN|--- (PASS|FAIL))' test-output.txt \
+            | sed -E 's/=== RUN +/Running: /; s/--- PASS: /✅ Passed: /; s/--- FAIL: /❌ Failed: /' \
+            || echo "No test results found in output."
 
+          echo ""
+          echo "### 📊 Total Coverage:"
+          go tool cover -func=coverage.out | grep total \
+            || echo "Coverage data not found or 'total' line missing."
+
+      - name: Generate coverage report
+        if: success() || failure()
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage report as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.html
+          
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
