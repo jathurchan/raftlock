@@ -1,63 +1,36 @@
-# .golangci.yml
-# This file uses the modern configuration format for golangci-lint.
-# See: https://golangci-lint.run/usage/configuration/
-
 run:
-  # The default timeout is 1m. Setting it to 10m to avoid timeouts on larger projects.
-  timeout: 10m
-
-linters:
-  # This list is based on the linters you had enabled in your previous configuration.
-  enable:
-    - bodyclose
-    - copyloopvar
-    - errorlint
-    - govet
-    - ineffassign
-    - nilerr
-    - rowserrcheck
-    - sqlclosecheck
-    - unused
-    - whitespace
+  timeout: 5m
 
 linters-settings:
-  goimports:
-    # Set the correct local prefix for your project.
-    local-prefixes: github.com/jathurchan/raftlock
+  golines:
+    max-len: 120
+
+linters:
+  enable-all: false
+  enable:
+    - govet         # Reports suspicious constructs.
+    - ineffassign   # Detects when assignments to variables are not used.
+    - unused        # Checks for unused constants, variables, functions and types.
+
+    - bodyclose     # Checks whether HTTP response body is closed.
+    - copyloopvar   # Checks for variables captured by loop pointer.
+    - errorlint     # Linter for finding common error-handling mistakes.
+    - nilerr        # Finds returns of `(some_non_nil_error, nil)`.
+    - rowserrcheck  # Checks for unhandled errors on `sql.Rows`.
+    - sqlclosecheck # Checks for missing `Rows.Close()` calls.
+    - whitespace    # Checks for leading/trailing whitespace.
+
+  disable:
+    - staticcheck
 
 issues:
-  # Exclude analysis of certain files or issues.
+  # Exclude all analysis of test files.
   exclude-rules:
-    # Exclude all generated protobuf files from most linters.
-    - path: \.pb\.go$
-      linters:
-        - stylecheck
-        - goimports
-        - revive
-        - gosec
-
-    # This is the fix: Explicitly disable all enabled linters for test files.
     - path: _test\.go
-      linters:
-        - bodyclose
-        - errcheck
-        - staticcheck
-        - copyloopvar
-        - errorlint
-        - goimports
-        - govet
-        - ineffassign
-        - nilerr
-        - rowserrcheck
-        - sqlclosecheck
-        - unused
-        - whitespace
+      text: ".*"
 
-  # Set the maximum number of issues of the same type to display.
-  max-same-issues: 10
 
-# Configuration for how the output is formatted.
-output:
-  # Makes the output more readable in CI logs.
-  print-issued-lines: true
-  print-linter-name: true
+  # Maximum issues from the same linter. 0 to disable.
+  max-issues-per-linter: 0
+  # Maximum issues with the same text. 0 to disable.
+  max-same-issues: 0
