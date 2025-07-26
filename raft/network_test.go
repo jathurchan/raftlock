@@ -808,7 +808,6 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 					"[%s] Reply VoteGranted mismatch",
 					tc.name,
 				)
-			} else if err == nil && reply != nil {
 			}
 		})
 	}
