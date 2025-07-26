@@ -1,36 +1,32 @@
+version: 2
+
 run:
   timeout: 5m
+
+linters:
+  enable:
+    - govet         # Reports suspicious constructs
+    - ineffassign   # Detects unused assignments
+    - unused        # Finds unused variables, functions, types
+    - bodyclose     # Ensures HTTP response bodies are closed
+    - copyloopvar   # Checks loop variable captures in closures
+    - errorlint     # Detects common error-handling issues
+    - nilerr        # Finds `return err, nil` situations
+    - rowserrcheck  # Ensures `Rows.Err()` is checked
+    - sqlclosecheck # Ensures `Rows.Close()` is called
+    - whitespace    # Detects trailing/leading whitespace
+
+  disable:
+    - staticcheck   # Temporarily disabled, can be re-enabled later
 
 linters-settings:
   golines:
     max-len: 120
 
-linters:
-  enable-all: false
-  enable:
-    - govet         # Reports suspicious constructs.
-    - ineffassign   # Detects when assignments to variables are not used.
-    - unused        # Checks for unused constants, variables, functions and types.
-
-    - bodyclose     # Checks whether HTTP response body is closed.
-    - copyloopvar   # Checks for variables captured by loop pointer.
-    - errorlint     # Linter for finding common error-handling mistakes.
-    - nilerr        # Finds returns of `(some_non_nil_error, nil)`.
-    - rowserrcheck  # Checks for unhandled errors on `sql.Rows`.
-    - sqlclosecheck # Checks for missing `Rows.Close()` calls.
-    - whitespace    # Checks for leading/trailing whitespace.
-
-  disable:
-    - staticcheck
-
 issues:
-  # Exclude all analysis of test files.
   exclude-rules:
     - path: _test\.go
       text: ".*"
 
-
-  # Maximum issues from the same linter. 0 to disable.
   max-issues-per-linter: 0
-  # Maximum issues with the same text. 0 to disable.
   max-same-issues: 0

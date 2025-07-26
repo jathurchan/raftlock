@@ -203,7 +203,7 @@ func TestClientError_Unwrap(t *testing.T) {
 	}
 
 	unwrapped := clientErr.Unwrap()
-	if unwrapped != originalErr {
+	if !errors.Is(unwrapped, originalErr) {
 		t.Errorf("ClientError.Unwrap() = %v, want %v", unwrapped, originalErr)
 	}
 
@@ -231,7 +231,7 @@ func TestNewClientError(t *testing.T) {
 		t.Errorf("NewClientError().Op = %v, want %v", clientErr.Op, op)
 	}
 
-	if clientErr.Err != err {
+	if !errors.Is(clientErr.Err, err) {
 		t.Errorf("NewClientError().Err = %v, want %v", clientErr.Err, err)
 	}
 

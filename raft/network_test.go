@@ -54,7 +54,7 @@ func setupNetworkManagerWithOpts(
 			)
 		}
 		finalAddr = tempListener.Addr().String()
-		tempListener.Close()
+		_ = tempListener.Close()
 	} else {
 		finalAddr = selfAddr
 	}
@@ -622,7 +622,7 @@ func setupPeerServer(
 
 	cleanupFunc = func() {
 		s.GracefulStop()
-		l.Close()
+		_ = l.Close()
 		select {
 		case errServe, ok := <-serverErrCh:
 			if ok && errServe != nil {
@@ -641,7 +641,7 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 	nm1, _, _, clock1 := setupDefaultNetworkManager(t, "node1", "localhost:0", nil)
 	err := nm1.Start()
 	testutil.AssertNoError(t, err)
-	defer nm1.Stop()
+	defer func() { _ = nm1.Stop() }()
 
 	peerNodeID := types.NodeID("peer1")
 	peerRPCHandler := &mockRPCHandler{}
@@ -653,7 +653,7 @@ func TestNetworkManager_SendRequestVote(t *testing.T) {
 		t.Fatalf("Cannot get ephemeral port for peer: %v", err)
 	}
 	peerActualAddr := tempPeerListener.Addr().String()
-	tempPeerListener.Close()
+	_ = tempPeerListener.Close()
 
 	_, peerCleanupNew := setupPeerServer(t, peerActualAddr, peerRPCHandler)
 	defer peerCleanupNew()
@@ -818,7 +818,7 @@ func TestNetworkManager_SendAppendEntries(t *testing.T) {
 	nm1, _, _, _ := setupDefaultNetworkManager(t, "node1-ae", "localhost:0", nil)
 	err := nm1.Start()
 	testutil.AssertNoError(t, err)
-	defer nm1.Stop()
+	defer func() { _ = nm1.Stop() }()
 
 	peerNodeID := types.NodeID("peer1-ae")
 	peerRPCHandler := &mockRPCHandler{}
@@ -991,7 +991,7 @@ func TestNetworkManager_SendInstallSnapshot(t *testing.T) {
 	nm1, _, _, _ := setupDefaultNetworkManager(t, "node1-is", "localhost:0", nil)
 	err := nm1.Start()
 	testutil.AssertNoError(t, err)
-	defer nm1.Stop()
+	defer func() { _ = nm1.Stop() }()
 
 	peerNodeID := types.NodeID("peer1-is")
 	peerRPCHandler := &mockRPCHandler{}
@@ -1139,14 +1139,14 @@ func TestNetworkManager_PeerStatus(t *testing.T) {
 	nm1, _, _, _ := setupDefaultNetworkManager(t, "node1", "localhost:0", nil)
 	err := nm1.Start()
 	testutil.AssertNoError(t, err)
-	defer nm1.Stop()
+	defer func() { _ = nm1.Stop() }()
 
 	peerNodeID := types.NodeID("peer1_status")
 	peerRPCHandler := &mockRPCHandler{}
 
 	tempPeerListener, _ := net.Listen("tcp", "localhost:0")
 	peerActualAddr := tempPeerListener.Addr().String()
-	tempPeerListener.Close()
+	_ = tempPeerListener.Close()
 	_, peerCleanup := setupPeerServer(t, peerActualAddr, peerRPCHandler)
 	defer peerCleanup()
 
@@ -1228,7 +1228,7 @@ func TestNetworkManager_LocalAddr(t *testing.T) {
 		"LocalAddr should return listener's address after start",
 	)
 
-	nm.Stop()
+	_ = nm.Stop()
 
 	addrAfterStop := nm.LocalAddr()
 

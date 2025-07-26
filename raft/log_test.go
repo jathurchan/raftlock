@@ -905,7 +905,6 @@ func TestRaftLog_LogManager_TruncateSuffix(t *testing.T) {
 	})
 
 	t.Run("FailsWhenLastIndexIncreasesAfterTruncation", func(t *testing.T) {
-
 		lm, store, metrics := setupLogManager(t)
 		ctx := context.Background()
 
@@ -931,7 +930,6 @@ func TestRaftLog_LogManager_TruncateSuffix(t *testing.T) {
 			)
 		}
 	})
-
 }
 
 func TestRaftLog_LogManager_TruncateSuffixUnsafe(t *testing.T) {
@@ -1300,7 +1298,6 @@ func TestRaftLog_LogManager_FindFirstIndexInTermUnsafe(t *testing.T) {
 			t.Errorf("Expected term scan failure, got: %v", err)
 		}
 	})
-
 }
 
 func TestRaftLog_LogManager_GetLogStateForDebugging(t *testing.T) {

@@ -325,7 +325,7 @@ func TestRaftSnapshot_Initialize_ShutdownContext(t *testing.T) {
 	cancel()
 
 	err := sm.Initialize(ctx)
-	if err != ErrShuttingDown {
+	if !errors.Is(err, ErrShuttingDown) {
 		t.Errorf("Expected ErrShuttingDown, got %v", err)
 	}
 }

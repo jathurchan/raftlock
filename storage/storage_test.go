@@ -473,7 +473,7 @@ func TestSaveAndLoadState(t *testing.T) {
 			Build()
 
 		path := deps.fs.Join("/test", stateFilename)
-		deps.fs.WriteFile(path, []byte("serialized-state"), 0644)
+		_ = deps.fs.WriteFile(path, []byte("serialized-state"), 0644)
 
 		state, err := s.LoadState(context.Background())
 
@@ -486,7 +486,7 @@ func TestSaveAndLoadState(t *testing.T) {
 		s, deps := newTestStorageBuilder(t).Build()
 
 		path := deps.fs.Join("/test", stateFilename)
-		deps.fs.Remove(path)
+		_ = deps.fs.Remove(path)
 
 		state, err := s.LoadState(context.Background())
 
@@ -623,7 +623,6 @@ func TestGetLogEntries(t *testing.T) {
 				deps.indexSvc.ReadInRangeFunc = func(ctx context.Context, logPath string, indexMap []types.IndexOffsetPair, start, end types.Index) ([]types.LogEntry, int64, error) {
 					return nil, 0, ErrIndexOutOfRange
 				}
-
 			}).
 			Build()
 
@@ -650,7 +649,6 @@ func TestGetLogEntries(t *testing.T) {
 					testutil.AssertEqual(t, types.Index(8), end)
 					return expectedEntries, 200, nil
 				}
-
 			}).
 			Build()
 
@@ -679,7 +677,6 @@ func TestGetLogEntries(t *testing.T) {
 					testutil.AssertEqual(t, types.Index(10), end)
 					return expectedEntries, nil
 				}
-
 			}).
 			Build()
 
@@ -719,7 +716,6 @@ func TestGetLogEntry(t *testing.T) {
 					testutil.AssertEqual(t, types.Index(8), end)
 					return []types.LogEntry{expectedEntry}, 100, nil
 				}
-
 			}).
 			Build()
 
@@ -748,7 +744,6 @@ func TestGetLogEntry(t *testing.T) {
 					50,
 				)
 				deps.logReader.AddEntry(targetEntry, 50)
-
 			}).
 			Build()
 
@@ -824,7 +819,6 @@ func TestTruncateLogSuffix(t *testing.T) {
 				deps.indexSvc.GetBoundsFunc = func(indexMap []types.IndexOffsetPair, currentFirst, currentLast types.Index) boundsResult {
 					return boundsResult{NewFirst: 5, NewLast: 6}
 				}
-
 			}).
 			Build()
 
@@ -861,7 +855,6 @@ func TestTruncateLogSuffix(t *testing.T) {
 					testutil.AssertEqual(t, 0, len(entries), "Should truncate everything")
 					return []types.IndexOffsetPair{}, nil
 				}
-
 			}).
 			Build()
 
@@ -881,7 +874,6 @@ func TestTruncateLogSuffix(t *testing.T) {
 				deps.logRewriter.rewriteFunc = func(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error) {
 					return nil, errors.New("rewrite error")
 				}
-
 			}).
 			Build()
 
@@ -932,7 +924,6 @@ func TestTruncateLogPrefix(t *testing.T) {
 					testutil.AssertEqual(t, expectedEntries, entries)
 					return mockOffsets, nil
 				}
-
 			}).
 			Build()
 
@@ -954,7 +945,6 @@ func TestTruncateLogPrefix(t *testing.T) {
 					rewriteCalled = true
 					return nil, nil
 				}
-
 			}).
 			Build()
 
@@ -1034,7 +1024,6 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 				deps.logRewriter.rewriteFunc = func(ctx context.Context, entries []types.LogEntry) ([]types.IndexOffsetPair, error) {
 					return mockOffsets, nil
 				}
-
 			}).
 			Build()
 
@@ -1077,7 +1066,6 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 		s, _ := newTestStorageBuilder(t).
 			WithDeps(func(deps *mockStorageDependencies) {
 				deps.recoverySvc.createSnapshotMarkerErr = errors.New("marker creation failed")
-
 			}).
 			Build()
 
@@ -1091,7 +1079,6 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 		s, deps := newTestStorageBuilder(t).
 			WithDeps(func(deps *mockStorageDependencies) {
 				deps.snapshotWriter.writeErr = errors.New("snapshot write failed")
-
 			}).
 			Build()
 
@@ -1114,7 +1101,6 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 			WithDeps(func(deps *mockStorageDependencies) {
 				deps.snapshotReader.readResult.metadata = expectedMetadata
 				deps.snapshotReader.readResult.data = expectedData
-
 			}).
 			Build()
 
@@ -1130,7 +1116,6 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 		s, _ := newTestStorageBuilder(t).
 			WithDeps(func(deps *mockStorageDependencies) {
 				deps.snapshotReader.readErr = ErrNoSnapshot
-
 			}).
 			Build()
 
@@ -1144,7 +1129,6 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 		s, _ := newTestStorageBuilder(t).
 			WithDeps(func(deps *mockStorageDependencies) {
 				deps.snapshotReader.readErr = ErrCorruptedSnapshot
-
 			}).
 			Build()
 
@@ -1196,7 +1180,6 @@ func TestClose(t *testing.T) {
 		s, _ := newTestStorageBuilder(t).
 			WithDeps(func(deps *mockStorageDependencies) {
 				deps.recoverySvc.removeMarkerErr = errors.New("marker removal failed")
-
 			}).
 			Build()
 
@@ -1219,7 +1202,6 @@ func TestInMemoryStateConsistency(t *testing.T) {
 						Changed:  false,
 					}
 				}
-
 			}).
 			Build()
 
@@ -1497,7 +1479,6 @@ func TestMetricsEnabled(t *testing.T) {
 				// Simulate append result
 				return boundsResult{NewFirst: 1, NewLast: 2, Changed: true}
 			}
-
 		}).
 		Build()
 
@@ -1663,7 +1644,6 @@ func TestFileStorage_IndexMapOption(t *testing.T) {
 				return boundsResult{NewFirst: 0, NewLast: 0}
 			}
 			return boundsResult{NewFirst: 1, NewLast: 1} // After append
-
 		}
 		deps.metadataSvc.SaveMetadataFunc = func(path string, metadata logMetadata, useAtomic bool) error {
 			testutil.AssertEqual(t, types.Index(1), metadata.FirstIndex)
@@ -2062,7 +2042,6 @@ func TestConcurrentOperations(t *testing.T) {
 
 				return result, int64(len(result) * 10), nil
 			}
-
 		}).
 		Build()
 

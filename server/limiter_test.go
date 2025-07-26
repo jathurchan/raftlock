@@ -319,7 +319,7 @@ func TestTokenBucketRateLimiter_WaitCancellation(t *testing.T) {
 	// Wait should return with cancellation error
 	select {
 	case err := <-errCh:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Errorf("Expected context.Canceled, got %v", err)
 		}
 	case <-time.After(100 * time.Millisecond):
@@ -387,7 +387,7 @@ func TestTokenBucketRateLimiter_ConcurrentWait(t *testing.T) {
 		err := <-errCh
 		if err == nil {
 			successes++
-		} else if err == context.DeadlineExceeded {
+		} else if errors.Is(err, context.DeadlineExceeded) {
 			timeouts++
 		} else {
 			t.Errorf("Unexpected error: %v", err)

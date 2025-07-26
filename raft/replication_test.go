@@ -1557,7 +1557,6 @@ func TestReplicationManager_TriggerCommitCheck(t *testing.T) {
 			// Expected: no notification should be sent
 		}
 	})
-
 }
 
 func TestReplicationManager_Stop(t *testing.T) {

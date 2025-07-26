@@ -54,7 +54,7 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 			index:      &mockIndexService{},
 			expected:   logMetadata{},
 			expectedError: fmt.Errorf(
-				"%w: failed to read metadata file: %v",
+				"%w: failed to read metadata file: %w",
 				ErrStorageIO,
 				errors.New("read error"),
 			),
@@ -68,7 +68,7 @@ func TestDefaultMetadataService_LoadMetadata(t *testing.T) {
 			index:      &mockIndexService{},
 			expected:   logMetadata{},
 			expectedError: fmt.Errorf(
-				"%w: failed to unmarshal metadata: %v",
+				"%w: failed to unmarshal metadata: %w",
 				ErrCorruptedState,
 				errors.New("invalid character 'i' looking for beginning of value"),
 			),

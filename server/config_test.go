@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -568,7 +569,8 @@ func assertValidationError(t *testing.T, err error, expectedMsg string) {
 		t.Fatal("Expected validation error, got nil")
 	}
 
-	configErr, ok := err.(*RaftLockServerConfigError)
+	configErr := &RaftLockServerConfigError{}
+	ok := errors.As(err, &configErr)
 	if !ok {
 		t.Fatalf("Expected *RaftLockServerConfigError, got %T: %v", err, err)
 	}

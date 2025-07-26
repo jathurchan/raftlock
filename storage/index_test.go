@@ -1203,7 +1203,7 @@ func TestIndexService_ReadInRange(t *testing.T) {
 
 			// Create a context that might be cancelled
 			ctx := context.Background()
-			if tt.errorType == context.Canceled {
+			if errors.Is(tt.errorType, context.Canceled) {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(context.Background())
 				cancel() // Cancel immediately to simulate cancellation
