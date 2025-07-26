@@ -38,7 +38,7 @@ func TestFileSystemBasics(t *testing.T) {
 		// Test Open and file read
 		file, err := fs.Open(testFile)
 		testutil.AssertNoError(t, err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		buf := make([]byte, len(sampleContent))
 		n, err := file.Read(buf)
@@ -161,7 +161,7 @@ func TestFileModification(t *testing.T) {
 		testutil.AssertNoError(t, err)
 		err = appendFile.Sync()
 		testutil.AssertNoError(t, err)
-		appendFile.Close()
+		_ = appendFile.Close()
 
 		content, err := fs.ReadFile(testFile)
 		testutil.AssertNoError(t, err)
@@ -174,7 +174,7 @@ func TestFileModification(t *testing.T) {
 
 		_, err = appendFile.Write([]byte("new file content"))
 		testutil.AssertNoError(t, err)
-		appendFile.Close()
+		_ = appendFile.Close()
 
 		content, err = fs.ReadFile(newFile)
 		testutil.AssertNoError(t, err)
@@ -220,7 +220,7 @@ func TestFileInterface(t *testing.T) {
 	t.Run("Seek", func(t *testing.T) {
 		file, err := fs.Open(testFile)
 		testutil.AssertNoError(t, err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		pos, err := file.Seek(3, io.SeekStart)
 		testutil.AssertNoError(t, err)
@@ -237,7 +237,7 @@ func TestFileInterface(t *testing.T) {
 	t.Run("ReadFull", func(t *testing.T) {
 		file, err := fs.Open(testFile)
 		testutil.AssertNoError(t, err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		buf := make([]byte, 5)
 		n, err := file.ReadFull(buf)
@@ -250,7 +250,7 @@ func TestFileInterface(t *testing.T) {
 	t.Run("ReadAll", func(t *testing.T) {
 		file, err := fs.Open(testFile)
 		testutil.AssertNoError(t, err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		allContent, err := file.ReadAll()
 		testutil.AssertNoError(t, err)
@@ -440,17 +440,16 @@ func TestConcurrentAccess(t *testing.T) {
 
 		wg.Add(goroutines)
 		for i := range goroutines {
-			i := i
 			go func() {
 				defer wg.Done()
-				for j := 0; j < iterations; j++ {
+				for range iterations {
 					f, err := fs.AppendFile(appendFile)
 					testutil.AssertNoError(t, err)
 					_, err = f.Write([]byte{byte('A' + i)})
 					testutil.AssertNoError(t, err)
 					err = f.Sync()
 					testutil.AssertNoError(t, err)
-					f.Close()
+					_ = f.Close()
 					time.Sleep(time.Millisecond) // Small delay to allow interleaving
 				}
 			}()
@@ -491,7 +490,7 @@ func TestContextTimeout(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		// Try to read the file with periodic context checks
 		buf := make([]byte, 1024)
@@ -505,7 +504,7 @@ func TestContextTimeout(t *testing.T) {
 			}
 
 			_, err := file.Read(buf)
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
@@ -560,7 +559,7 @@ func TestErrorCases(t *testing.T) {
 		readOnlyDir := filepath.Join(tempDir, "readonly")
 		err := os.Mkdir(readOnlyDir, 0500) // Read-only directory
 		testutil.AssertNoError(t, err)
-		defer os.Chmod(readOnlyDir, 0700) // Ensure we can clean up
+		defer func() { _ = os.Chmod(readOnlyDir, 0700) }() // Ensure we can clean up
 
 		readOnlyFile := filepath.Join(readOnlyDir, "cantappend.txt")
 

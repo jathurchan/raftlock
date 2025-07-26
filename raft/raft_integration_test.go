@@ -1083,26 +1083,18 @@ func (mc *testClock) advanceTime(d time.Duration) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
-	// oldTime := mc.now
 	mc.now = mc.now.Add(d)
-
-	// fmt.Printf("[CLOCK DEBUG] Advancing time by %v: %v -> %v\n", d, oldTime, mc.now)
-	// fmt.Printf("[CLOCK DEBUG] Active timers: %d, Active tickers: %d\n", len(mc.timers), len(mc.tickers))
 
 	// Fire expired timers
 	firedTimers := 0
 	for timer := range mc.timers {
-		// fmt.Printf("[CLOCK DEBUG] Checking timer: expiry=%v, stopped=%v, now=%v\n", timer.expiry, timer.stopped, mc.now)
 		if !timer.stopped && !mc.now.Before(timer.expiry) {
-			// fmt.Printf("[CLOCK DEBUG] Firing timer! Expiry: %v, Now: %v\n", timer.expiry, mc.now)
 			select {
 			case timer.ch <- mc.now:
-				// fmt.Printf("[CLOCK DEBUG] Timer fired successfully!\n")
 				firedTimers++
 			default:
-				// fmt.Printf("[CLOCK DEBUG] Timer channel full, skipping\n")
 			}
-			// Remove one-shot timer
+
 			delete(mc.timers, timer)
 		}
 	}
@@ -1124,12 +1116,10 @@ func (mc *testClock) advanceTime(d time.Duration) {
 			}
 			if tickCount > 0 {
 				firedTickers++
-				// fmt.Printf("[CLOCK DEBUG] Ticker fired %d times\n", tickCount)
 			}
 		}
 	}
 
-	// fmt.Printf("[CLOCK DEBUG] Fired %d timers and %d tickers\n", firedTimers, firedTickers)
 }
 
 // testTimer implements the Timer interface for testing
@@ -1153,7 +1143,6 @@ func (mt *testTimer) Stop() bool {
 		return false
 	}
 
-	// fmt.Printf("[TIMER DEBUG] Stopping timer: expiry=%v\n", mt.expiry)
 	mt.stopped = true
 	mt.clock.mu.Lock()
 	delete(mt.clock.timers, mt)

@@ -47,11 +47,6 @@ func (b *testProposalBuilder) withTerm(term types.Term) *testProposalBuilder {
 	return b
 }
 
-func (b *testProposalBuilder) withOperation(op types.LockOperation) *testProposalBuilder {
-	b.operation = op
-	return b
-}
-
 func (b *testProposalBuilder) withContext(ctx context.Context) *testProposalBuilder {
 	b.ctx = ctx
 	return b
@@ -80,7 +75,7 @@ func (b *testProposalBuilder) build() *types.PendingProposal {
 func createApplyMsg(
 	index types.Index,
 	term types.Term,
-	data interface{},
+	data any,
 	err error,
 ) types.ApplyMsg {
 	return types.ApplyMsg{
@@ -121,13 +116,6 @@ func assertContains(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
 		t.Errorf("Expected string %q to contain %q", s, substr)
-	}
-}
-
-func assertNotContains(t *testing.T, s, substr string) {
-	t.Helper()
-	if strings.Contains(s, substr) {
-		t.Errorf("Expected string %q to not contain %q", s, substr)
 	}
 }
 
@@ -196,7 +184,7 @@ func TestProposalTracker_Creation(t *testing.T) {
 func TestProposalTracker_TrackValidation(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	pt := NewProposalTracker(logger)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	tests := []struct {
 		name          string
@@ -263,7 +251,7 @@ func TestProposalTracker_SuccessfulFlow(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	clock := newMockClock()
 	pt := NewProposalTracker(logger, WithClock(clock))
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	proposal := newTestProposal("5-10").withIndex(10).withTerm(5).build()
 	err := pt.Track(proposal)
@@ -312,7 +300,7 @@ func TestProposalTracker_SuccessfulFlow(t *testing.T) {
 func TestProposalTracker_FailedFlow(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	pt := NewProposalTracker(logger)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	proposal := newTestProposal("5-10").withIndex(10).withTerm(5).build()
 	err := pt.Track(proposal)
@@ -332,7 +320,7 @@ func TestProposalTracker_FailedFlow(t *testing.T) {
 	if result.Success {
 		t.Errorf("Expected failed result")
 	}
-	if result.Error != applyError {
+	if !errors.Is(result.Error, applyError) {
 		t.Errorf("Expected error %v, got %v", applyError, result.Error)
 	}
 
@@ -345,7 +333,7 @@ func TestProposalTracker_FailedFlow(t *testing.T) {
 func TestProposalTracker_ClientCancellation(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	pt := NewProposalTracker(logger)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	tests := []struct {
 		name           string
@@ -396,7 +384,7 @@ func TestProposalTracker_ClientCancellation(t *testing.T) {
 				if result.Success {
 					t.Errorf("Expected canceled proposal to fail")
 				}
-				if result.Error != tt.cancelReason {
+				if !errors.Is(result.Error, tt.cancelReason) {
 					t.Errorf("Expected error %v, got %v", tt.cancelReason, result.Error)
 				}
 			}
@@ -407,7 +395,7 @@ func TestProposalTracker_ClientCancellation(t *testing.T) {
 func TestProposalTracker_SnapshotInvalidation(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	pt := NewProposalTracker(logger)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	// Snapshot will be at index 12, so proposals with index <= 12 should be invalidated
 	proposals := []*types.PendingProposal{
@@ -476,7 +464,7 @@ func TestProposalTracker_ContextCancellation(t *testing.T) {
 		WithMaxPendingAge(time.Hour),
 		WithCleanupInterval(0),
 	)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	proposal := newTestProposal("1-10").withContext(ctx).withIndex(10).withTerm(1).build()
@@ -528,7 +516,7 @@ func TestProposalTracker_Cleanup(t *testing.T) {
 		WithMaxPendingAge(100*time.Millisecond),
 		WithCleanupInterval(0), // Disable automatic cleanup
 	)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	proposal1 := newTestProposal("cleanup-old").build()
 	err := pt.Track(proposal1)
@@ -578,7 +566,7 @@ func TestProposalTracker_AutomaticCleanup(t *testing.T) {
 		WithMaxPendingAge(50*time.Millisecond),
 		WithCleanupInterval(20*time.Millisecond),
 	)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	proposal := newTestProposal("auto-cleanup").withContext(ctx).build()
@@ -614,7 +602,7 @@ func TestProposalTracker_AutomaticCleanup(t *testing.T) {
 func TestProposalTracker_ConcurrentOperations(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	pt := NewProposalTracker(logger)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	const (
 		numWorkers         = 10
@@ -741,7 +729,7 @@ func TestProposalTracker_StatisticsAccuracy(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	clock := newMockClock()
 	pt := NewProposalTracker(logger, WithClock(clock))
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	successProposal := newTestProposal("1-1").withIndex(1).withTerm(1).build()
 	failProposal := newTestProposal("1-2").withIndex(2).withTerm(1).build()
@@ -819,7 +807,7 @@ func TestProposalTracker_StatisticsAccuracy(t *testing.T) {
 func TestProposalTracker_GetPendingProposal(t *testing.T) {
 	logger := logger.NewNoOpLogger()
 	pt := NewProposalTracker(logger)
-	defer pt.Close()
+	defer func() { _ = pt.Close() }()
 
 	original := newTestProposal("7-42").withIndex(42).withTerm(7).build()
 	err := pt.Track(original)
@@ -886,7 +874,7 @@ func TestProposalTracker_ErrorHandling(t *testing.T) {
 	t.Run("panic recovery in send result", func(t *testing.T) {
 		logger := logger.NewNoOpLogger()
 		pt := NewProposalTracker(logger)
-		defer pt.Close()
+		defer func() { _ = pt.Close() }()
 
 		proposal := newTestProposal("panic-test").build()
 		close(proposal.ResultCh)
@@ -909,7 +897,7 @@ func TestProposalTracker_ErrorHandling(t *testing.T) {
 	t.Run("operations after close", func(t *testing.T) {
 		logger := logger.NewNoOpLogger()
 		pt := NewProposalTracker(logger)
-		pt.Close()
+		_ = pt.Close()
 
 		proposal := newTestProposal("after-close").build()
 		err := pt.Track(proposal)
@@ -959,7 +947,7 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 
 	t.Run("buffered channel success", func(t *testing.T) {
 		pt, proposal := setupTest("buffered", 1, nil)
-		defer pt.Close()
+		defer func() { _ = pt.Close() }()
 
 		pt.HandleAppliedCommand(createApplyMsg(1, 1, "success", nil))
 
@@ -982,7 +970,7 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 		cancel() // Cancel immediately
 
 		pt, proposal := setupTest("cancelled", 0, ctx)
-		defer pt.Close()
+		defer func() { _ = pt.Close() }()
 
 		pt.HandleAppliedCommand(createApplyMsg(1, 1, "ignored", nil))
 
@@ -996,7 +984,7 @@ func TestProposalTracker_SendResultFallback(t *testing.T) {
 
 	t.Run("panic recovery on closed channel", func(t *testing.T) {
 		pt, proposal := setupTest("panic", 1, nil)
-		defer pt.Close()
+		defer func() { _ = pt.Close() }()
 
 		close(proposal.ResultCh) // This will cause panic when sending
 

@@ -7,116 +7,114 @@ import (
 )
 
 const (
-	// unknownNodeID represents the absence of a node.
+	// Represents a non-existent or unknown node.
 	unknownNodeID = types.NodeID("")
 
-	// MaxLogEntriesPerRequest limits the number of log entries sent in one AppendEntries RPC.
+	// Maximum number of log entries per AppendEntries RPC.
 	DefaultMaxLogEntriesPerRequest = 100
 
-	// SnapshotThreshold is the number of new log entries after the last snapshot before triggering a new snapshot.
+	// Number of new entries after the last snapshot before triggering a new snapshot.
 	DefaultSnapshotThreshold = 10000
 
-	// LogCompactionMinEntries is the minimum number of entries beyond the last snapshot before allowing log compaction.
+	// Minimum number of entries beyond the last snapshot required to allow log compaction.
 	DefaultLogCompactionMinEntries = 5000
 
-	// StorageSyncDelayTicks is the number of ticks a leader may wait before fsyncing persisted log entries. 0 or 1 means immediate.
+	// Number of ticks the leader can wait before fsyncing persisted entries.
+	// A value of 0 or 1 means immediate sync.
 	DefaultStorageSyncDelayTicks = 5
 
-	// ApplyTickCount is the number of ticks between checks for committed entries to apply to the state machine.
+	// Ticks between checks for applying committed entries to the state machine.
 	DefaultApplyTickCount = 1
 
-	// EnableReadIndex enables the ReadIndex optimization for linearizable reads.
+	// Enables the ReadIndex optimization for linearizable reads.
 	DefaultEnableReadIndex = true
 
-	// EnableLeaderLease enables a leader lease mechanism for faster local reads under stable leadership.
+	// Enables leader lease for low-latency local reads under stable leadership.
 	DefaultEnableLeaderLease = true
 
-	// PreVoteEnabled enables the PreVote phase to avoid unnecessary elections caused by partitioned nodes.
+	// Enables PreVote phase to reduce unnecessary elections due to network partitions.
 	DefaultPreVoteEnabled = true
 
-	// MaxApplyBatchSize limits the number of committed log entries applied per batch to the state machine.
+	// Maximum number of log entries applied to the state machine in one batch.
 	DefaultMaxApplyBatchSize = 10
 
-	// MaxSnapshotChunkSize is the maximum size in bytes of a snapshot chunk. 0 disables chunking (sends entire snapshot).
+	// Maximum snapshot chunk size in bytes. A value of 0 disables chunking (entire snapshot sent at once).
 	DefaultMaxSnapshotChunkSize = 0
 
-	// DefaultApplyEntryTimeout is the timeout for applying a single committed log entry to the state machine.
+	// Timeout for applying a single committed log entry.
 	DefaultApplyEntryTimeout = 5 * time.Second
 
-	// DefaultFetchEntriesTimeout is the timeout for fetching entries from the log manager.
-	// This can be made configurable.
+	// Timeout for fetching entries from the log manager.
 	DefaultFetchEntriesTimeout = 5 * time.Second
 )
 
 const (
-	// DefaultMaxRecvMsgSize is the default maximum gRPC message size the server will receive. (16 MB)
+	// Default maximum size (in bytes) of gRPC messages the server will receive. (16 MB)
 	DefaultMaxRecvMsgSize = 16 * 1024 * 1024
 
-	// DefaultMaxSendMsgSize is the default maximum gRPC message size the client/server will send. (16 MB)
+	// Default maximum size (in bytes) of gRPC messages sent by client/server. (16 MB)
 	DefaultMaxSendMsgSize = 16 * 1024 * 1024
 
-	// DefaultDialTimeout is the default timeout for establishing a gRPC connection to a peer. (2 seconds)
+	// Timeout for establishing a gRPC connection to a peer. (2 seconds)
 	DefaultDialTimeout = 2 * time.Second
 
-	// DefaultServerStartTimeout is the default maximum time to wait for the gRPC server goroutine to start listening. (5 seconds)
+	// Maximum time to wait for the gRPC server to start listening. (5 seconds)
 	DefaultServerStartTimeout = 5 * time.Second
 
-	// DefaultKeepaliveTime is the default interval for client/server gRPC keepalive pings when idle. (5 seconds)
+	// Interval for keepalive pings when gRPC connections are idle. (5 seconds)
 	DefaultKeepaliveTime = 5 * time.Second
 
-	// DefaultKeepaliveTimeout is the default timeout waiting for a keepalive ping acknowledgement. (1 second)
+	// Timeout waiting for a keepalive ping acknowledgment. (1 second)
 	DefaultKeepaliveTimeout = 1 * time.Second
 
-	// DefaultServerMaxConnectionIdle is the default maximum duration a server-side gRPC connection can be idle before being closed. (15 seconds)
+	// Maximum idle time for a server-side gRPC connection before it is closed. (15 seconds)
 	DefaultServerMaxConnectionIdle = 15 * time.Second
 
-	// DefaultServerMaxConnectionAge is the default maximum duration a server-side gRPC connection may exist before being gracefully closed. (30 minutes)
+	// Maximum lifetime of a server-side gRPC connection before graceful shutdown. (30 minutes)
 	DefaultServerMaxConnectionAge = 30 * time.Minute
 
-	// DefaultServerMaxConnectionAgeGrace is the default time allowed for RPCs to complete on a server-side connection after a graceful close is initiated due to MaxConnectionAge. (5 seconds)
+	// Grace period after max connection age to finish ongoing RPCs. (5 seconds)
 	DefaultServerMaxConnectionAgeGrace = 5 * time.Second
 )
 
 const (
-	// NominalTickInterval defines the base interval between Raft ticks.
-	// Used as the time unit for election and heartbeat timeouts.
+	// Base interval between Raft ticks; used for election and heartbeat timeouts.
 	NominalTickInterval = 100 * time.Millisecond
 
-	// logManagerOpTimeout is the timeout used for internal log manager operations such as reading metadata
-	// after a log mutation (e.g., fetching term after truncation). Keeps internal tasks bounded in duration.
+	// Timeout for internal log manager operations (e.g., fetching term after truncation).
 	logManagerOpTimeout = 500 * time.Millisecond
 
-	// defaultSnapshotCaptureTimeout is the timeout for capturing snapshot data from the applier.
+	// Timeout for capturing snapshot data from the state machine.
 	defaultSnapshotCaptureTimeout = 30 * time.Second
 
-	// defaultSnapshotLogTermTimeout is the timeout for resolving the term of the log entry at the snapshot index.
+	// Timeout for fetching the term of the log entry at the snapshot index.
 	defaultSnapshotLogTermTimeout = 2 * time.Second
 
-	// defaultSnapshotPersistTimeout is the timeout for persisting the snapshot data to stable storage.
+	// Timeout for persisting a snapshot to stable storage.
 	defaultSnapshotPersistTimeout = 30 * time.Second
 
-	// defaultSnapshotLogTruncateTimeout is the timeout for truncating the Raft log prefix after snapshot creation or installation.
+	// Timeout for truncating the log after snapshot creation or installation.
 	defaultSnapshotLogTruncateTimeout = 10 * time.Second
 
-	// defaultSnapshotRestoreTimeout is the timeout for restoring the state machine from snapshot data.
+	// Timeout for restoring state from a snapshot.
 	defaultSnapshotRestoreTimeout = 5 * time.Minute
 
-	// defaultSnapshotLoadTimeout is the timeout for loading snapshot data from storage in preparation for sending to a follower.
+	// Timeout for loading snapshot data before sending it to a follower.
 	defaultSnapshotLoadTimeout = 30 * time.Second
 
-	// defaultSnapshotSendRPCTimeout is the timeout for sending the InstallSnapshot RPC to a follower.
+	// Timeout for sending InstallSnapshot RPC to a follower.
 	defaultSnapshotSendRPCTimeout = 2 * time.Minute
 )
 
 // state.go
 
 const (
-	// Timeout constants to prevent deadlocks in state operations
+	// Timeouts for internal state manager operations to avoid deadlocks.
 	stateManagerOpTimeout   = 5 * time.Second
 	persistOperationTimeout = 3 * time.Second
 	stateTransitionTimeout  = 2 * time.Second
 
-	// Retry constants for persistence operations
+	// Retry configuration for persistence failures.
 	maxPersistRetries = 3
 	basePersistDelay  = 10 * time.Millisecond
 	maxPersistDelay   = 100 * time.Millisecond
@@ -125,26 +123,81 @@ const (
 // election.go
 
 const (
-	DefaultElectionTickCount           = 50
-	DefaultHeartbeatTickCount          = 5
+	// Minimum number of election ticks per node to reduce split votes
+	MinElectionTicksPerNode = 8
+
+	// Minimum valid value for the randomization factor
+	MinRandomizationFactor = 1.0
+
+	// Number of ticks before a node starts an election.
+	DefaultElectionTickCount = 50
+
+	// Interval between heartbeat ticks sent by the leader.
+	DefaultHeartbeatTickCount = 5
+
+	// Factor to randomize election timeout (avoids collisions).
 	DefaultElectionRandomizationFactor = 2.0
-	maxConcurrentElections             = 3
-	voteRequestTimeout                 = 15 * time.Second
-	electionManagerOpTimeout           = 3 * time.Second
-	minElectionIntervalBase            = 50 * time.Millisecond
-	maxElectionBackoff                 = 1 * time.Second
-	splitVoteDetectionThreshold        = 3
+
+	// Maximum number of concurrent elections allowed.
+	maxConcurrentElections = 3
+
+	// Timeout for sending a vote request.
+	voteRequestTimeout = 15 * time.Second
+
+	// Timeout for election manager operations.
+	electionManagerOpTimeout = 3 * time.Second
+
+	// Minimum base interval between elections.
+	minElectionIntervalBase = 50 * time.Millisecond
+
+	// Maximum backoff duration between elections.
+	maxElectionBackoff = 1 * time.Second
+
+	// Multiplier for upper bound of randomized timeout.
+	ElectionTimeoutMaxFactor = 2.0
+
+	// Exponent applied to random float to skew toward lower values.
+	ElectionTimeoutExponent = 2.0
+
+	// Scaling factor for cluster-size jitter contribution.
+	ClusterSizeJitterFactor = 2.0
+
+	// Multiplier for deterministic node-specific timeout component.
+	NodeComponentFactor = 2.0
+
+	// ElectionRetryBackoffStepMS is the additional backoff (in ms) per failed election attempt.
+	ElectionRetryBackoffStepMS = 25
+
+	// MaxElectionAttemptsBeforeReset is the threshold of consecutive election attempts
+	// before partially resetting the counter to prevent runaway retries.
+	MaxElectionAttemptsBeforeReset = 10
+
+	// ElectionAttemptResetValue is the value to reset electionAttempts to
+	// after exceeding the maximum threshold.
+	ElectionAttemptResetValue = 5
+
+	// ElectionManagerStopTimeout is the maximum duration to wait for ongoing operations to finish during shutdown.
+	ElectionManagerStopTimeout = 2 * time.Second
+
+	// ElectionManagerStopPollInterval is the interval between checks for active operations during shutdown.
+	ElectionManagerStopPollInterval = 10 * time.Millisecond
 )
 
 // replication.go
 
 const (
+	// Timeout for sending AppendEntries RPCs.
 	defaultAppendEntriesTimeout = 10 * time.Second
-	defaultLogFetchTimeout      = 5 * time.Second
-	defaultTermFetchTimeout     = 2 * time.Second
-	defaultHeartbeatInterval    = 150 * time.Millisecond
-	defaultSnapshotStopTimeout  = 30 * time.Second
 
-	// Channel buffer sizes to prevent blocking
+	// Timeout for fetching log entries.
+	defaultLogFetchTimeout = 5 * time.Second
+
+	// Timeout for retrieving the current term.
+	defaultTermFetchTimeout = 2 * time.Second
+
+	// Timeout to stop an ongoing snapshot transfer.
+	defaultSnapshotStopTimeout = 30 * time.Second
+
+	// Buffer size for the commit notification channel to prevent blocking.
 	commitNotifyChannelSize = 16
 )

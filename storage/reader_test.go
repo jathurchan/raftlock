@@ -183,7 +183,7 @@ func TestReadNext(t *testing.T) {
 			} else {
 				if err == nil {
 					t.Errorf("ReadNext() error = nil, want error %v", tt.wantError)
-				} else if tt.wantError == ErrCorruptedLog {
+				} else if errors.Is(tt.wantError, ErrCorruptedLog) {
 					if !errors.Is(err, ErrCorruptedLog) {
 						t.Errorf("ReadNext() error = %v, want error that satisfies errors.Is(%v)", err, ErrCorruptedLog)
 					}
@@ -608,7 +608,7 @@ func TestLogEntryReaderIntegration(t *testing.T) {
 		}
 
 		for _, r := range ranges {
-			file.Seek(0, io.SeekStart) // Reset file position
+			_, _ = file.Seek(0, io.SeekStart) // Reset file position
 			result, err := reader.ScanRange(context.Background(), file, r.start, r.end)
 			testutil.AssertNoError(t, err)
 			testutil.AssertEqual(t, r.expected, result)

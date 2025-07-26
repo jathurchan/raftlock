@@ -278,7 +278,6 @@ func (mfs *mockFileSystem) defaultOpen(name string) (file, error) {
 	if !ok {
 		mfs.files[name] = []byte{}
 		data = mfs.files[name]
-		ok = true
 	}
 
 	reader := bytes.NewReader(data)
@@ -700,7 +699,7 @@ func (m *mockLogEntryReader) ReadNext(f file) (types.LogEntry, int64, error) {
 
 	m.readCallIdx++
 
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return types.LogEntry{}, bytes, err
 	}
 

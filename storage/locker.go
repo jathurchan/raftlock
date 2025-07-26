@@ -1,5 +1,3 @@
-//go:build !production
-
 package storage
 
 import (
@@ -116,7 +114,6 @@ func (ol *defaultRWOperationLocker) withTimeout(
 	case <-acquired:
 		defer unlockFn()
 
-		// test-only hook
 		if ol.afterLock != nil {
 			ol.afterLock()
 		}

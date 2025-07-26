@@ -1,510 +1,266 @@
 # RaftLock Storage Package (`storage/`)
 
-## Table of Contents
+## 1\. Overview
 
-1. [Overview](#1-overview)
-2. [Key Features](#2-key-features)
-3. [Import](#3-import)
-4. [Quick Start](#4-quick-start)
-5. [Configuration](#5-configuration)
-6. [Public API](#6-public-api)
-7. [Internal Design Notes](#7-internal-design-notes)
-8. [Testing](#8-testing)
-9. [Related Packages](#9-related-packages)
-10. [Contributing](#10-contributing)
-11. [License](#11-license)
+The **`storage`** package provides a durable, thread-safe, and crash-resilient persistence layer for RaftLock. It is responsible for storing all critical Raft data on the local filesystem, including the persistent state (term and vote), log entries, and snapshots.
 
----
+Designed for high performance and reliability, this package uses atomic file operations, fine-grained locking, and a self-healing recovery mechanism to ensure data consistency, even in the event of sudden crashes or concurrent access. It serves as the foundation for the Raft consensus algorithm, guaranteeing that state can be reliably recovered after a node restart.
 
-## 1. Overview
+## 2\. Key Features
 
-The **`storage`** package is RaftLock's durable *persistence layer*. It provides a thread-safe, filesystem-based implementation for storing Raft's critical data:
+The `storage` package is engineered for robustness, performance, and operational insight.
 
-* **Persistent state** – current term & voted-for candidate
-* **Log entries** – the ordered sequence of commands agreed upon by the cluster
-* **Snapshots** – compact checkpoints that accelerate recovery and enable log compaction
+* **Atomic and Crash-Safe Operations**: All critical writes to disk for state, logs, and snapshots use a *temporary file + atomic rename* strategy. This prevents partial writes and data corruption, ensuring that the storage can recover to a consistent state after a crash.
+* **High Concurrency with Fine-Grained Locking**: The system uses separate read-write mutexes for state, log, and snapshot operations, allowing concurrent reads and safe, isolated writes. This minimizes lock contention and improves throughput.
+* **Performance Optimizations**:
+  * **Efficient Binary Format**: Log entries can be serialized into a compact binary format for reduced disk space and faster I/O, which is enabled by default.
+  * **Fast Log Lookups**: An optional in-memory index map provides O(log n) access to log entries by mapping an index to its byte offset in the log file, avoiding slow sequential scans.
+  * **Asynchronous Log Compaction**: To avoid blocking critical operations, log truncation after a snapshot is saved can be performed in a background goroutine.
+* **Automated Recovery**: On startup, the service automatically checks for recovery markers left by incomplete operations. It can recover from failed snapshot writes and repair inconsistencies between the log and its metadata, ensuring a clean start.
+* **Built-in Metrics and Observability**: When enabled, the package collects detailed performance metrics, including operation counts, latencies (average, max, P95, P99), data throughput, and error rates. A human-readable summary is available to aid in monitoring and diagnostics.
+* **Flexible Configuration**: Behavior can be tuned via feature flags and options, allowing operators to enable or disable features like atomic writes, the index map, metrics, and fsync behavior to match specific performance and durability requirements.
 
-All operations use ***atomic file operations*** and ***fine‑grained locking*** to guarantee consistency, even under crashes or high concurrency. The package serves as the bridge between Raft's in-memory state and durable storage, ensuring critical consensus data survives node restarts and failures.
+## 3\. Architecture and Design
+
+The `storage` package is built around the `FileStorage` struct, which implements the `Storage` interface. It coordinates a set of specialized services, each responsible for a distinct aspect of persistence.
 
 ```mermaid
 graph TB
-    subgraph "Architecture Overview"
-        subgraph "Raft Layer"
-            RL[Raft Leader]
-            RF[Raft Follower]
-            RSM[Raft State Machine]
+    subgraph "Raft Consensus Layer"
+        RaftNode[Raft Node]
+    end
+
+    subgraph "Storage Package (storage/)"
+        direction TB
+        API[Storage Interface]
+
+        subgraph "Core Implementation"
+            FileStorage[FileStorage]
         end
-        
-        subgraph "Storage Package"
-            direction TB
-            FS[FileStorage Facade]
-            
-            subgraph "Core Services"
-                LA[LogAppender]
-                LR[LogReader]
-                LRW[LogRewriter]
-                SW[SnapshotWriter]
-                SR[SnapshotReader]
-                MS[MetadataService]
-                RS[RecoveryService]
-                IS[IndexService]
-            end
-            
-            subgraph "Concurrency & Safety"
-                SM[StateMutex]
-                LM[LogMutex]
-                SNM[SnapshotMutex]
-                OL[OperationLocker]
-            end
-            
-            subgraph "Serialization"
-                BS[BinarySerializer]
-                JS[JSONSerializer]
-            end
+
+        subgraph "Internal Services"
+            LogServices[Log - Appender, Reader, Rewriter]
+            SnapshotServices[Snapshot - Writer, Reader]
+            MetadataService[MetadataService]
+            IndexService[IndexService]
+            RecoveryService[RecoveryService]
         end
-        
-        subgraph "Filesystem Layer"
-            direction LR
-            STATE_FILE[state.json]
-            LOG_FILE[log.dat]
-            META_FILE[metadata.json]
-            SNAP_META_FILE[snapshot_meta.json]
-            SNAP_DATA_FILE[snapshot.dat]
-            MARKER_FILES[Recovery Markers]
+
+        subgraph "Low-Level Components"
+            Locker[RWOperationLocker]
+            Serializer[Serializer - JSON/Binary]
+            FileSystem[FileSystem Abstraction]
         end
     end
-    
-    %% Connections from Raft to Storage
-    RL -->|SaveState, AppendEntries| FS
-    RF -->|LoadState, GetEntries| FS
-    RSM -->|SaveSnapshot, LoadSnapshot| FS
-    
-    %% Internal Storage connections: Facade to Core Services
-    FS --> LA
-    FS --> LR
-    FS --> LRW
-    FS --> SW
-    FS --> SR
-    FS --> MS
-    FS --> RS
-    FS --> IS
-    
-    %% Concurrency controls: Facade uses Mutexes; Services may use OperationLocker
-    FS -.-> SM
-    FS -.-> LM
-    FS -.-> SNM
-    LA -.-> OL
-    LR -.-> OL
-    LRW -.-> OL
-    SW -.-> OL
-    SR -.-> OL
-    MS -.-> OL
-    
-    %% Serialization: Core services use Serializers
-    LA --> BS
-    LA --> JS
-    LR --> BS
-    LR --> JS
-    SW --> BS
-    SW --> JS
-    SR --> BS
-    SR --> JS
-    MS --> JS
-    
-    %% File operations: Core services interact with Filesystem Layer
-    LA -->|Writes to| LOG_FILE
-    LR -->|Reads from| LOG_FILE
-    LRW -->|Reads/Writes| LOG_FILE
-    MS -->|Reads/Writes| META_FILE
-    FS -->|Manages access to| STATE_FILE 
-    SW -->|Writes to| SNAP_META_FILE
-    SW -->|Writes to| SNAP_DATA_FILE
-    SR -->|Reads from| SNAP_META_FILE
-    SR -->|Reads from| SNAP_DATA_FILE
-    RS -->|Manages| MARKER_FILES
-    RS -->|Interacts with| LOG_FILE
-    RS -->|Interacts with| META_FILE
-    RS -->|Interacts with| SNAP_META_FILE
-        
-    %% Styling
-    classDef raftLayer fill:#e1f5fe,stroke:#5aa,stroke-width:2px;
-    classDef storagePackage fill:#fffde7,stroke:#fbc02d,stroke-width:2px;
-    classDef storageCore fill:#f3e5f5,stroke:#8e24aa,stroke-width:1px;
-    classDef concurrency fill:#fff3e0,stroke:#f57c00,stroke-width:1px;
-    classDef serialization fill:#fce4ec,stroke:#d81b60,stroke-width:1px;
-    classDef filesystem fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
-    
-    class RL,RF,RSM raftLayer;
-    class FS storagePackage;
-    class LA,LR,LRW,SW,SR,MS,RS,IS storageCore;
-    class SM,LM,SNM,OL concurrency;
-    class STATE_FILE,LOG_FILE,META_FILE,SNAP_META_FILE,SNAP_DATA_FILE,MARKER_FILES filesystem;
-    class BS,JS serialization;
+
+    subgraph "Physical Filesystem"
+        direction LR
+        LogFile[log.dat]
+        StateFile[state.json]
+        MetadataFile[metadata.json]
+        SnapshotFiles[snapshot.dat / snapshot_meta.json]
+        MarkerFiles[*.marker / *.tmp]
+    end
+
+    RaftNode --> API
+    API --> FileStorage
+
+    FileStorage --> LogServices
+    FileStorage --> SnapshotServices
+    FileStorage --> MetadataService
+    FileStorage --> IndexService
+    FileStorage --> RecoveryService
+
+    FileStorage -- Manages access via --> Locker
+
+    LogServices -- Uses --> Serializer
+    SnapshotServices -- Uses --> Serializer
+    MetadataService -- Uses --> Serializer
+
+    LogServices -- Acts on --> FileSystem
+    SnapshotServices -- Acts on --> FileSystem
+    RecoveryService -- Acts on --> FileSystem
+
+    FileSystem -- Interacts with --> LogFile
+    FileSystem -- Interacts with --> StateFile
+    FileSystem -- Interacts with --> MetadataFile
+    FileSystem -- Interacts with --> SnapshotFiles
+    FileSystem -- Interacts with --> MarkerFiles
 ```
 
-## 2. Key Features
+### Components
 
-The `storage` package is designed for **resilient persistence**, **high concurrency**, and **operational insight**, making it ideal for consensus-based systems like Raft.
+* **`FileStorage`**: The central struct that orchestrates all operations. It manages the locks, in-memory state (like log indices), and delegates tasks to the appropriate internal services.
+* **`Storage` Interface**: The public API for the package, defining all persistence operations required by the Raft algorithm.
+* **Log Services**:
+  * `logAppender`: Handles the validation and atomic appending of new entries to the log file.
+  * `logEntryReader`: Reads and deserializes log entries, either sequentially or from a specific offset.
+  * `logRewriter`: Rebuilds the log file during compaction (truncation) by writing only the necessary entries to a new file.
+* **Snapshot Services**:
+  * `snapshotWriter`: Manages the atomic creation of snapshot data and metadata files.
+  * `snapshotReader`: Reads and validates the latest snapshot from disk.
+* **`RecoveryService`**: Implements the startup logic to detect and recover from crashes, cleaning up temporary files and restoring consistency between the log, metadata, and snapshots.
+* **`IndexService`**: Manages the in-memory index-to-offset map. It is responsible for building the map from the log file on startup and verifying its consistency.
+* **`RWOperationLocker`**: A wrapper around `sync.RWMutex` that adds optional timeouts for lock acquisition to prevent deadlocks and tracks slow operations for metrics.
+* **`Serializer`**: An interface for encoding and decoding data structures. Two implementations are provided: `jsonSerializer` and a more performant `binarySerializer` for log entries.
 
-### Durability & Atomicity
+### File Layout
 
-* **Crash-Safe Writes**: All critical data (logs, state, snapshots) are written via a *temp + rename* strategy to guarantee atomicity and prevent partial writes.
-* **Self-Healing Startup**: On launch, the system scans for incomplete operations and cleans them up, restoring a consistent and usable state.
+All data is stored within a single directory specified in `StorageConfig`. The typical file layout is as follows:
 
-### High Concurrency & Thread Safety
+* `state.json`: Stores the node's persistent Raft state (current term and voted-for candidate).
+* `log.dat`: The main log file containing all Raft log entries, typically in a binary format.
+* `metadata.json`: A small file containing the first and last log indices stored in `log.dat`.
+* `snapshot.dat`: The raw, compacted state machine data from the latest snapshot.
+* `snapshot_meta.json`: JSON file with metadata for the snapshot, including its last included index and term.
+* `*.tmp`: Temporary files used during atomic write operations to prevent corruption.
+* `recovery.marker`: A marker file created on startup and removed on successful initialization. Its presence indicates a potential crash during the previous run.
+* `snapshot.marker`: A marker file that tracks the progress of a snapshot operation, used for recovery if a crash occurs mid-snapshot.
 
-* **Isolated Locks**: Uses independent `sync.RWMutex` instances for logs, state, and snapshots, enabling safe parallel access.
-* **Deadlock Mitigation**: Optional timeouts on locks help detect and avoid deadlocks under contention.
+## 4\. Public API
 
-### Performance Optimizations
-
-* **Compact Binary Format**: Offers a fast, space-efficient binary encoding for log entries (optional; default-enabled for production).
-* **Fast Log Lookup**: Maintains an optional in-memory index (`index → offset`) for O(log n) entry access.
-* **Efficient Snapshot I/O**: Supports chunked read/write for large snapshots to minimize memory spikes.
-* **Asynchronous Log Compaction**: Log truncation after snapshots runs in a background goroutine, avoiding main-path blocking.
-
-### Observability & Metrics
-
-* **Built-in Instrumentation**: Tracks operation counts, error rates, and latencies (P50, P95, P99).
-* **Human-Readable Summaries**: Metrics can be printed or scraped, aiding in diagnostics and performance tuning.
-
-### Flexible Configuration
-
-* **Feature Flags**: Enable or disable specific features like atomic writes, binary format, index maps, metrics, etc.
-* **Tunable Parameters**: Adjust fsync behavior, lock timeouts, chunk sizes, and truncation thresholds.
-
-## 3. Import
-
-**Prerequisites:**
-
-* Go 1.21+
-* Filesystem with atomic `rename()` support (most modern filesystems)
-
-**Import Path:**
+The `Storage` interface is the primary entry point for all persistence operations.
 
 ```go
-import "github.com/jathurchan/raftlock/storage"
+type Storage interface {
+    // Save and load persistent state (term, vote).
+    SaveState(ctx context.Context, state types.PersistentState) error
+    LoadState(ctx context.Context) (types.PersistentState, error)
+
+    // Append and retrieve log entries.
+    AppendLogEntries(ctx context.Context, entries []types.LogEntry) error
+    GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error)
+    GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error)
+
+    // Truncate the log for compaction or conflict resolution.
+    TruncateLogPrefix(ctx context.Context, index types.Index) error
+    TruncateLogSuffix(ctx context.Context, index types.Index) error
+
+    // Save and load snapshots.
+    SaveSnapshot(ctx context.Context, meta types.SnapshotMetadata, data []byte) error
+    LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error)
+
+    // Get log boundaries without I/O.
+    FirstLogIndex() types.Index
+    LastLogIndex() types.Index
+
+    // Manage observability and metrics.
+    GetMetrics() map[string]uint64
+    GetMetricsSummary() string
+    ResetMetrics()
+
+    // Cleanly shut down the storage layer.
+    Close() error
+}
 ```
 
-This package is primarily consumed by the `raft` package.
+## 5\. Configuration
 
-## 4. Quick Start
+Configuration is managed through two primary structs: `StorageConfig` for essential parameters and `FileStorageOptions` for fine-tuning.
 
-### Basic Usage
+### `StorageConfig`
+
+```go
+type StorageConfig struct {
+    // The root directory where all storage files will be persisted.
+    Dir string
+}
+```
+
+### `FileStorageOptions`
+
+This struct provides detailed control over the storage engine's behavior. The `DefaultFileStorageOptions()` function provides a sensible default for production use.
+
+```go
+type FileStorageOptions struct {
+    // Feature flags for enabling/disabling specific optimizations.
+    Features StorageFeatureFlags
+
+    // Automatically truncate the log after a snapshot is successfully saved.
+    AutoTruncateOnSnapshot bool
+
+    // Force an fsync to disk after each log append operation for maximum durability.
+    SyncOnAppend bool
+
+    // The strategy to use for recovering from a potentially corrupted state.
+    RecoveryMode recoveryMode
+
+    // The minimum number of log entries to retain after a prefix truncation.
+    RetainedLogSize uint64
+
+    // The buffer size (in bytes) for chunked I/O operations.
+    ChunkSize int
+
+    // The timeout (in seconds) for acquiring a lock.
+    LockTimeout int
+    
+    // The maximum duration to wait for a log truncation to complete.
+    TruncationTimeout time.Duration
+}
+```
+
+## 6\. Quick Start
+
+Here is a basic example of how to initialize and use the `FileStorage`.
 
 ```go
 package main
 
 import (
     "context"
+    "fmt"
     "log"
     "os"
-
+    
     "github.com/jathurchan/raftlock/logger"
     "github.com/jathurchan/raftlock/storage"
     "github.com/jathurchan/raftlock/types"
 )
 
 func main() {
-    // Setup storage directory
-    dir, _ := os.MkdirTemp("", "raftlock_storage_")
+    // 1. Set up a directory for storage.
+    dir, err := os.MkdirTemp("", "raft_storage_example")
+    if err != nil {
+        log.Fatalf("Failed to create temp dir: %v", err)
+    }
     defer os.RemoveAll(dir)
 
-    // Create storage with default options
-    store, err := storage.NewFileStorage(
-        storage.StorageConfig{Dir: dir}, 
-        logger.NewNoOpLogger(),
-    )
+    // 2. Configure and create a new storage instance.
+    cfg := storage.StorageConfig{Dir: dir}
+    opts := storage.DefaultFileStorageOptions() // Use recommended defaults
+    store, err := storage.NewFileStorageWithOptions(cfg, opts, logger.NewNoOpLogger())
     if err != nil {
-        log.Fatal(err)
+        log.Fatalf("Failed to create storage: %v", err)
     }
     defer store.Close()
 
     ctx := context.Background()
 
-    // --- Persistent State Operations ---
-    state := types.PersistentState{
-        CurrentTerm: 5,
-        VotedFor:    "node-1",
-    }
+    // 3. Save and load persistent state.
+    state := types.PersistentState{CurrentTerm: 1, VotedFor: "node-A"}
     if err := store.SaveState(ctx, state); err != nil {
-        log.Fatal("save state:", err)
+        log.Fatalf("Failed to save state: %v", err)
     }
-
+    
     loadedState, err := store.LoadState(ctx)
     if err != nil {
-        log.Fatal("load state:", err)
+        log.Fatalf("Failed to load state: %v", err)
     }
-    log.Printf("Loaded state: term=%d, votedFor=%s", 
-        loadedState.CurrentTerm, loadedState.VotedFor)
+    fmt.Printf("Loaded State -> Term: %d, VotedFor: %s\n", loadedState.CurrentTerm, loadedState.VotedFor)
 
-    // --- Log Operations ---
+    // 4. Append and retrieve log entries.
     entries := []types.LogEntry{
-        {Index: 1, Term: 1, Command: []byte("SET key1 value1")},
-        {Index: 2, Term: 1, Command: []byte("SET key2 value2")},
+        {Index: 1, Term: 1, Command: []byte("set x 1")},
+        {Index: 2, Term: 1, Command: []byte("set y 2")},
     }
     if err := store.AppendLogEntries(ctx, entries); err != nil {
-        log.Fatal("append entries:", err)
+        log.Fatalf("Failed to append entries: %v", err)
     }
-
-    readEntries, err := store.GetLogEntries(ctx, 1, 3) // [start, end)
-    if err != nil {
-        log.Fatal("read entries:", err)
-    }
-    log.Printf("Read %d entries", len(readEntries))
-
-    // --- Snapshot Operations ---
-    snapshot := types.SnapshotMetadata{
-        LastIncludedIndex: 100,
-        LastIncludedTerm:  5,
-    }
-    snapshotData := []byte("compacted application state")
-    if err := store.SaveSnapshot(ctx, snapshot, snapshotData); err != nil {
-        log.Fatal("save snapshot:", err)
-    }
-
-    meta, data, err := store.LoadSnapshot(ctx)
-    if err != nil {
-        log.Fatal("load snapshot:", err)
-    }
-    log.Printf("Loaded snapshot: lastIndex=%d, size=%d bytes", 
-        meta.LastIncludedIndex, len(data))
-}
-```
-
-### Additional Configuration
-
-```go
-// High-performance production setup
-opts := storage.FileStorageOptions{
-    Features: storage.StorageFeatureFlags{
-        EnableBinaryFormat:    true,  // Faster serialization
-        EnableIndexMap:        true,  // O(log n) lookups
-        EnableMetrics:         true,  // Performance monitoring
-        EnableAtomicWrites:    true,  // Crash safety
-        EnableLockTimeout:     true,  // Deadlock prevention
-        EnableChunkedIO:       true,  // Memory efficiency
-        EnableAsyncTruncation: true,  // Non-blocking compaction
-    },
-    AutoTruncateOnSnapshot: true,           // Automatic log cleanup
-    SyncOnAppend:          true,            // Durability guarantee
-    RetainedLogSize:       1000,            // Keep 1000 entries minimum
-    ChunkSize:             2 * 1024 * 1024, // 2MB chunks
-    LockTimeout:           10,              // 10-second timeout
-    TruncationTimeout:     60 * time.Second, // 1-minute truncation limit
-}
-
-store, err := storage.NewFileStorageWithOptions(cfg, opts, logger)
-```
-
-### Monitoring and Metrics
-
-```go
-// Enable metrics and monitor performance
-if store.GetMetrics() != nil {
-    metrics := store.GetMetrics()
     
-    log.Printf("Operations: append=%d, read=%d, snapshot=%d",
-        metrics["append_ops"], 
-        metrics["read_ops"], 
-        metrics["snapshot_save_ops"])
-        
-    log.Printf("Latencies: append_p95=%dμs, read_avg=%dμs",
-        metrics["p95_append_latency_us"],
-        metrics["avg_read_latency_us"])
-        
-    log.Printf("Storage: log=%d bytes, error_rate=%d‰",
-        metrics["log_size"],
-        metrics["error_rate_ppt"])
-}
+    fmt.Printf("Log contains entries from index %d to %d\n", store.FirstLogIndex(), store.LastLogIndex())
 
-// Human-readable summary
-fmt.Println(store.GetMetricsSummary())
-
-// Reset metrics for fresh measurement period
-store.ResetMetrics()
-```
-
-## 5. Configuration
-
-### StorageConfig (Required)
-
-```go
-type StorageConfig struct {
-    Dir string // Root directory for all storage files (required)
+    // 5. View performance metrics.
+    fmt.Println("\n--- Metrics Summary ---")
+    fmt.Println(store.GetMetricsSummary())
 }
 ```
-
-### FileStorageOptions (Fine-tuning)
-
-```go
-type FileStorageOptions struct {
-    Features               StorageFeatureFlags // Feature toggles
-    AutoTruncateOnSnapshot bool                // Auto-compact after snapshots
-    SyncOnAppend           bool                // Force fsync on each append
-    RetainedLogSize        uint64              // Min entries after compaction
-    ChunkSize              int                 // Buffer size for large I/O
-    LockTimeout            int                 // Lock acquisition timeout (seconds)
-    TruncationTimeout      time.Duration       // Max time for truncation ops
-}
-```
-
-### Feature Flags (StorageFeatureFlags)
-
-```go
-type StorageFeatureFlags struct {
-    EnableBinaryFormat    bool // Use binary encoding (recommended)
-    EnableIndexMap        bool // In-memory index for fast lookups
-    EnableAsyncTruncation bool // Non-blocking log compaction
-    EnableChunkedIO       bool // Memory-efficient large file handling
-    EnableAtomicWrites    bool // Atomic file operations (recommended)
-    EnableLockTimeout     bool // Deadlock prevention
-    EnableMetrics         bool // Performance tracking
-}
-```
-
-## 6. Public API
-
-The **`Storage`** interface provides a clean abstraction for Raft persistence:
-
-### Core Operations
-
-```go
-type Storage interface {
-    // Persistent State (term, vote)
-    SaveState(ctx context.Context, state types.PersistentState) error
-    LoadState(ctx context.Context) (types.PersistentState, error)
-
-    // Log Management
-    AppendLogEntries(ctx context.Context, entries []types.LogEntry) error
-    GetLogEntries(ctx context.Context, start, end types.Index) ([]types.LogEntry, error)
-    GetLogEntry(ctx context.Context, index types.Index) (types.LogEntry, error)
-    
-    // Log Compaction
-    TruncateLogPrefix(ctx context.Context, index types.Index) error  // Remove entries < index
-    TruncateLogSuffix(ctx context.Context, index types.Index) error  // Remove entries >= index
-
-    // Snapshots
-    SaveSnapshot(ctx context.Context, meta types.SnapshotMetadata, data []byte) error
-    LoadSnapshot(ctx context.Context) (types.SnapshotMetadata, []byte, error)
-
-    // Metadata
-    FirstLogIndex() types.Index // No I/O
-    LastLogIndex() types.Index  // No I/O
-
-    // Observability
-    GetMetrics() map[string]uint64
-    GetMetricsSummary() string
-    ResetMetrics()
-
-    // Lifecycle
-    Close() error
-}
-```
-
-### Key Guarantees
-
-* **Atomicity**: All operations are atomic; no partial states
-* **Consistency**: Log indices are strictly ordered and contiguous  
-* **Durability**: Data survives crashes when `SyncOnAppend` is enabled
-* **Thread Safety**: All methods are safe for concurrent use
-
-## 7. Internal Design Notes
-
-### File Layout & Atomicity
-
-```plaintext
-storage_dir/
-├── state.json              # Raft persistent state (term, vote)
-├── log.dat                 # Binary log entries with length prefixes
-├── metadata.json           # Log bounds (first/last indices)
-├── snapshot_meta.json      # Snapshot metadata
-├── snapshot.dat            # Snapshot data
-├── *.tmp                   # Temporary files for atomic writes
-└── *.marker                # Recovery markers for crash detection
-```
-
-**Atomic Operations:** All critical writes use *write-to-temp-then-rename* to prevent corruption. Recovery procedures detect and clean up incomplete operations.
-
-### Performance Optimization
-
-**Binary Log Format:**
-
-```plaintext
-[4-byte length][index][term][command_length][command_data]
-```
-
-**Index Mapping:** Optional in-memory `[]IndexOffsetPair` enables O(log n) random access vs O(n) scanning.
-
-**Chunked I/O:** Large snapshots are streamed in configurable chunks to respect memory constraints.
-
-### Error Handling & Recovery
-
-* **Graceful degradation**: Corruption is detected and truncated to last valid entry
-* **Rollback on failure**: Partial writes are cleaned up automatically  
-* **Recovery markers**: Track incomplete operations across process restarts
-* **Consistency verification**: Startup checks ensure in-memory state matches disk
-
-## 8. Testing
-
-The package implements **comprehensive unit tests** with extensive mocking. All filesystem operations are abstracted through interfaces, enabling fast, deterministic testing without real I/O.
-
-### Running Tests
-
-```bash
-# Full test suite with race detection and coverage
-go test ./... -race -cover
-
-# Benchmarks (when available)
-go test ./... -bench=. -benchmem
-```
-
-**Coverage categories:**
-
-* ✅ **Unit tests** – Individual method isolation
-* ✅ **Concurrency tests** – Thread safety verification  
-* ✅ **State consistency tests** – In-memory ↔ disk synchronization
-* ✅ **Recovery tests** – Crash simulation and cleanup
-* ⏳ **Integration tests** – Real filesystem (planned)
-* ⏳ **Benchmarks** – Performance baselines (planned)
-
-> **Contributing tests?** See [Contributing](#10-contributing) – benchmarks and integration tests are welcome!
-
-## 9. Related Packages
-
-* **[`types`](../types/)** – Core data structures (`LogEntry`, `PersistentState`, `SnapshotMetadata`)
-* **[`logger`](../logger/)** – Pluggable structured logging interface
-* **[`raft`](../raft/)** – The Raft consensus algorithm that consumes this storage layer
-* **[`testutil`](../testutil/)** – Testing utilities and assertions used extensively in tests
-
-## 10. Contributing
-
-Contributions are welcome!
-
-### How to Contribute
-
-1. **Open an issue first** for major changes or new features
-2. **Comprehensive testing**: `go test ./... -race` must pass; add tests for new functionality
-3. **Documentation**: Update README and godocs for API changes
-4. **Focused commits**: Keep changes atomic and well-described
-
-### Development Setup
-
-```bash
-git clone https://github.com/jathurchan/raftlock.git
-cd raftlock/storage
-go mod tidy
-go test ./... -race -cover
-```
-
-### Areas for Contribution
-
-* **Benchmarks**: Performance baselines for critical operations
-* **Integration tests**: Real filesystem testing scenarios  
-* **Optimizations**: Alternative serialization formats, compression
-* **Observability**: Additional metrics, tracing integration
-* **Documentation**: More examples, best practices guide
-
-## 11. License
-
-MIT License – see [`LICENSE`](../LICENSE) in the repository root.

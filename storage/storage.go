@@ -238,7 +238,6 @@ func newFileStorageWithDeps(
 
 // initialize handles storage initialization and recovery
 func (s *FileStorage) initialize() error {
-	// Check for recovery markers
 	recoveryNeeded, err := s.recoverySvc.CheckForRecoveryMarkers()
 	if err != nil {
 		return fmt.Errorf("failed checking recovery markers: %w", err)
@@ -355,14 +354,12 @@ func (s *FileStorage) loadMetadataLocked() error {
 	metadata, err := s.metadataSvc.LoadMetadata(s.fileSystem.Path(s.dir, metadataFilename))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// File doesn't exist, initialize with empty state
 			s.setInMemoryLogBoundsLocked(0, 0)
 			return nil
 		}
 		return err // Error already wrapped and logged inside LoadMetadata
 	}
 
-	// Validate loaded metadata
 	if err := s.metadataSvc.ValidateMetadataRange(metadata.FirstIndex, metadata.LastIndex); err != nil {
 		return err
 	}
@@ -428,7 +425,7 @@ func (s *FileStorage) buildIndexOffsetMapLocked() error {
 // syncLogStateFromIndexMapLocked assumes s.logMu is already held
 func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 	if !s.options.Features.EnableIndexMap {
-		return nil // Skip if feature disabled
+		return nil
 	}
 	currentFirst := s.FirstLogIndex()
 	currentLast := s.LastLogIndex()
@@ -447,7 +444,6 @@ func (s *FileStorage) syncLogStateFromIndexMapLocked() error {
 		return fmt.Errorf("syncLogStateFromIndexMap: failed to sync metadata: %w", err)
 	}
 
-	// Update in-memory bounds to match the new persisted values
 	s.setInMemoryLogBoundsLocked(newFirst, newLast)
 
 	return s.indexSvc.VerifyConsistency(s.indexToOffsetMap)

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -808,7 +809,8 @@ func TestRaftLockServerQuickBuild(t *testing.T) {
 		server, err := RaftLockServerQuickBuild(nodeID, listenAddr, peers, dataDir)
 
 		if err != nil {
-			if _, ok := err.(*RaftLockServerConfigError); ok {
+			raftLockServerConfigError := &RaftLockServerConfigError{}
+			if errors.As(err, &raftLockServerConfigError) {
 				t.Errorf("expected no validation error in QuickBuild, got: %v", err)
 			}
 

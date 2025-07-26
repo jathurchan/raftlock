@@ -347,7 +347,6 @@ func TestAdminClient_GetStatus(t *testing.T) {
 
 					mockClient := &adminMockClient{
 						getStatusFunc: func(ctx context.Context, req *pb.GetStatusRequest, opts ...grpc.CallOption) (*pb.GetStatusResponse, error) {
-
 							if tt.request != nil &&
 								req.IncludeReplicationDetails != tt.request.IncludeReplicationDetails {
 								t.Errorf(
@@ -469,7 +468,6 @@ func TestAdminClient_Health(t *testing.T) {
 
 					mockClient := &adminMockClient{
 						healthFunc: func(ctx context.Context, req *pb.HealthRequest, opts ...grpc.CallOption) (*pb.HealthResponse, error) {
-
 							if tt.request != nil && req.ServiceName != tt.request.ServiceName {
 								t.Errorf("Expected ServiceName %v, got %v",
 									tt.request.ServiceName, req.ServiceName)
@@ -600,7 +598,6 @@ func TestAdminClient_GetBackoffAdvice(t *testing.T) {
 
 					mockClient := &adminMockClient{
 						getBackoffAdviceFunc: func(ctx context.Context, req *pb.BackoffAdviceRequest, opts ...grpc.CallOption) (*pb.BackoffAdviceResponse, error) {
-
 							if tt.request != nil && req.LockId != tt.request.LockID {
 								t.Errorf("Expected LockId %v, got %v",
 									tt.request.LockID, req.LockId)
@@ -737,7 +734,6 @@ func TestAdminClient_ContextHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockBase := &mockBaseClient{
 				executeWithRetryFunc: func(ctx context.Context, operation string, fn func(ctx context.Context, client pb.RaftLockClient) error) error {
-
 					select {
 					case <-ctx.Done():
 						return ctx.Err()

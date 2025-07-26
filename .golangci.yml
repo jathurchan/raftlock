@@ -1,36 +1,26 @@
-version: "2"
+run:
+  timeout: 5m
 
 linters:
   enable:
-    - govet
-    - ineffassign
-    # - staticcheck
-    - unused
-    - bodyclose
-    #- contextcheck
-    - copyloopvar
-    - errorlint
-    - nilerr
-    - rowserrcheck
-    - sqlclosecheck
-    # - unparam
-    # - cyclop
-    # - goconst
-    #- gocritic
-    - whitespace
-    # - gosec
-  # TODO: Add additional linters once the errors are fixed.
+    - govet         # Reports suspicious constructs
+    - ineffassign   # Detects unused assignments
+    - unused        # Finds unused variables, functions, types
+    - bodyclose     # Ensures HTTP response bodies are closed
+    - copyloopvar   # Checks loop variable captures in closures
+    - errorlint     # Detects common error-handling issues
+    - nilerr        # Finds `return err, nil` situations
+    - rowserrcheck  # Ensures `Rows.Err()` is checked
+    - sqlclosecheck # Ensures `Rows.Close()` is called
+    - whitespace    # Detects trailing/leading whitespace
+
   disable:
-    - staticcheck
-  exclusions:
-    paths:
-      - ".*_test\\.go$"
+    - staticcheck   # Temporarily disabled, can be re-enabled later
 
-formatters:
-  enable:
-    - gci
-    - gofmt
-    - gofumpt
-    - goimports
-    - golines
+issues:
+  exclude-rules:
+    - path: _test\.go
+      text: ".*"
 
+  max-issues-per-linter: 0
+  max-same-issues: 0

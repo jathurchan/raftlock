@@ -80,10 +80,6 @@ type FeatureFlags struct {
 	// Requires EnableReadIndex to be true.
 	EnableLeaderLease bool
 
-	// PreVoteEnabled enables a PreVote phase before starting an election.
-	// Not supported for now. Out of scope.
-	// PreVoteEnabled bool
-
 	// explicitlySet is an internal flag to track if defaults should be overridden.
 	explicitlySet bool
 }

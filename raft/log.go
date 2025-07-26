@@ -21,9 +21,9 @@ type LogDebugState struct {
 	LastTerm        types.Term        `json:"last_term"`
 	CachedLastIndex types.Index       `json:"cached_last_index"`
 	CachedLastTerm  types.Term        `json:"cached_last_term"`
-	LogSize         int               `json:"log_size"` // Number of entries between first and last
+	LogSize         int               `json:"log_size"`
 	IsEmpty         bool              `json:"is_empty"`
-	IsConsistent    bool              `json:"is_consistent"` // Whether cache matches storage
+	IsConsistent    bool              `json:"is_consistent"`
 	StorageMetrics  map[string]uint64 `json:"storage_metrics,omitempty"`
 	LastChecked     time.Time         `json:"last_checked"`
 }
@@ -158,8 +158,6 @@ type LogManager interface {
 	) (types.Index, error)
 
 	// Stop signals the log manager to shut down and release resources.
-	// Note: Actual shutdown logic (stopping operations) relies on checking the
-	// shared isShutdown flag.
 	Stop()
 
 	// GetLogStateForDebugging returns comprehensive log state information for debugging and monitoring.
@@ -320,7 +318,6 @@ func (lm *logManager) GetConsistentLastState() (types.Index, types.Term) {
 
 // GetFirstIndex returns the current first log index from storage.
 func (lm *logManager) GetFirstIndex() types.Index {
-	// Always fetch dynamically from storage, as this changes independently of cached state.
 	firstIdx := lm.storage.FirstLogIndex()
 	lm.logger.Debugw("GetFirstIndex called",
 		"firstIndex", firstIdx,
@@ -506,7 +503,7 @@ func (lm *logManager) checkLogBounds(index types.Index, useUnlockedCache bool) e
 		lastIndex = lm.GetLastIndexUnsafe()
 	} else {
 		firstIndex = lm.GetFirstIndex()
-		lastIndex = lm.GetLastIndexUnsafe() // This is safe to call without locks
+		lastIndex = lm.GetLastIndexUnsafe()
 	}
 
 	lm.logger.Debugw("checkLogBounds called",
@@ -691,7 +688,6 @@ func (lm *logManager) clampEndIndex(requestedEnd types.Index, useUnlockedCache b
 	if useUnlockedCache {
 		last = lm.GetLastIndexUnsafe()
 	} else {
-		// For clamping, we can safely use the unsafe version since we only read the atomic value
 		last = lm.GetLastIndexUnsafe()
 	}
 
@@ -1739,7 +1735,7 @@ func (lm *logManager) GetLogStateForDebugging() LogDebugState {
 		NodeID:          lm.id,
 		FirstIndex:      firstIndex,
 		LastIndex:       storageLastIndex,
-		LastTerm:        cachedLastTerm, // We assume cache is authoritative for term
+		LastTerm:        cachedLastTerm,
 		CachedLastIndex: cachedLastIndex,
 		CachedLastTerm:  cachedLastTerm,
 		LogSize:         logSize,
@@ -1776,7 +1772,7 @@ func (lm *logManager) RestoreFromSnapshot(ctx context.Context, meta types.Snapsh
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 
-	return lm.restoreFromSnapshotInternal(ctx, meta)
+	return lm.restoreFromSnapshotInternal(meta)
 }
 
 // RestoreFromSnapshotUnsafe updates the log manager's state after a snapshot has been installed
@@ -1791,12 +1787,11 @@ func (lm *logManager) RestoreFromSnapshotUnsafe(
 		"snapshotTerm", meta.LastIncludedTerm,
 		"nodeID", lm.id)
 
-	return lm.restoreFromSnapshotInternal(ctx, meta)
+	return lm.restoreFromSnapshotInternal(meta)
 }
 
 // restoreFromSnapshotInternal contains the core logic for snapshot restoration.
 func (lm *logManager) restoreFromSnapshotInternal(
-	ctx context.Context,
 	meta types.SnapshotMetadata,
 ) error {
 	lm.logger.Infow("restoreFromSnapshotInternal: updating log state from snapshot",
@@ -1806,7 +1801,6 @@ func (lm *logManager) restoreFromSnapshotInternal(
 		"previousCachedTerm", lm.lastTerm.Load(),
 		"nodeID", lm.id)
 
-	// Validate snapshot metadata
 	if meta.LastIncludedIndex == 0 {
 		return fmt.Errorf("invalid snapshot metadata: LastIncludedIndex cannot be 0")
 	}
@@ -1814,14 +1808,11 @@ func (lm *logManager) restoreFromSnapshotInternal(
 		return fmt.Errorf("invalid snapshot metadata: LastIncludedTerm cannot be 0")
 	}
 
-	// Update our cached state to reflect the snapshot
 	oldLastIndex := lm.lastIndex.Load()
 	oldLastTerm := lm.lastTerm.Load()
 
 	lm.updateCachedStateLocked(meta.LastIncludedIndex, meta.LastIncludedTerm)
 
-	// Note: The snapshot manager should have already truncated the log prefix,
-	// but we verify the state is consistent
 	currentFirstIndex := lm.storage.FirstLogIndex()
 	currentLastIndex := lm.storage.LastLogIndex()
 
@@ -1836,9 +1827,7 @@ func (lm *logManager) restoreFromSnapshotInternal(
 		"storageLastIndex", currentLastIndex,
 		"nodeID", lm.id)
 
-	// Verify consistency: after snapshot restoration, either:
-	// 1. Log is empty (storage last index == snapshot index), or
-	// 2. Log continues from snapshot index (first index == snapshot index + 1)
+	// Verify consistency
 	expectedFirstIndex := meta.LastIncludedIndex + 1
 	if currentLastIndex > meta.LastIncludedIndex {
 		if currentFirstIndex != expectedFirstIndex {

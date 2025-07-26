@@ -287,7 +287,6 @@ func (ms *mockStorage) SaveSnapshot(
 	metadata types.SnapshotMetadata,
 	data []byte,
 ) error {
-
 	if ms.hookSaveSnapshot != nil {
 		defer ms.hookSaveSnapshot()
 	}
@@ -417,7 +416,6 @@ func (m *mockNetworkManager) setSendAppendEntriesFunc(
 func (m *mockNetworkManager) Start() error {
 	if m.startFunc != nil {
 		return m.startFunc()
-
 	}
 	return nil
 }
@@ -977,26 +975,6 @@ func (mm *mockMetrics) ObserveTick(role types.NodeRole)                         
 func (mm *mockMetrics) ObserveComponentStopTimeout(component string)                              {}
 func (mm *mockMetrics) ObserveCommitCheckTriggered()                                              {}
 func (mm *mockMetrics) ObserveCommitCheckPending()                                                {}
-
-func (mm *mockMetrics) getLastPeerReplicationCall() (peerID types.NodeID, success bool, reason ReplicationResult, found bool) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	if len(mm.peerReplicationCalls) == 0 {
-		return "", false, "", false
-	}
-	lastCall := mm.peerReplicationCalls[len(mm.peerReplicationCalls)-1]
-	return lastCall.peerID, lastCall.success, lastCall.reason, true
-}
-
-func (mm *mockMetrics) resetPeerReplicationCalls() {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	mm.peerReplicationCalls = make([]struct {
-		peerID  types.NodeID
-		success bool
-		reason  ReplicationResult
-	}, 0)
-}
 
 type mockLeaderInitializer struct {
 	initCalls      int
@@ -1833,12 +1811,9 @@ func (m *mockLogManager) restoreFromSnapshotInternal(meta types.SnapshotMetadata
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Update cached state to reflect the snapshot
 	m.lastIndex = meta.LastIncludedIndex
 	m.lastTerm = meta.LastIncludedTerm
 
-	// The snapshot manager should have already truncated the log,
-	// so we just update our state to be consistent
 	return nil
 }
 
