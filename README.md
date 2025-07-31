@@ -25,6 +25,17 @@ The project is built on top of the **Raft consensus algorithm**, which guarantee
 
 By providing a reliable and easy-to-use distributed lock service, `raftlock` simplifies the development of robust and scalable distributed applications.
 
+## Architecture Overview
+
+RaftLock is composed of several key packages, each handling a specific aspect of the distributed lock service.
+
+* **`server/`**: Implements the gRPC server that exposes the distributed locking API to clients. It handles request validation, leader redirection, and coordination with the underlying Raft consensus. For more details, see the [Server Package README](raftlock/server/README.md).
+* **`raft/`**: Contains a custom-built implementation of the Raft consensus algorithm. This is the core engine for maintaining strong consistency and fault tolerance across the cluster. Dive deeper into its design in the [Raft Consensus Module README](raftlock/raft/README.md).
+* **`lock/`**: Provides the distributed lock manager, which acts as the application-level state machine for the Raft cluster. It manages lock states, expirations, and waiter queues. Learn more in the [Distributed Lock Manager README](raftlock/lock/README.md).
+* **`storage/`**: Offers a durable and crash-resilient persistence layer for Raft data, including persistent state, log entries, and snapshots. Details can be found in the [RaftLock Storage Package README](raftlock/storage/README.md).
+* **`client/`**: Provides the Go client library for applications to communicate with a RaftLock cluster, offering interfaces for standard lock operations, administration, and advanced features. For usage, refer to the [Client Package README](raftlock/client/README.md).
+* **`proto/`**: Defines the Protocol Buffer messages and gRPC service for the RaftLock API, ensuring type-safe and efficient communication between clients and the server. See the [RaftLock Protocol Buffers README](raftlock/proto/README.md).
+
 ## How users can get started with the project
 
 You can run the `raftlock` server using either Docker or by building from the source.

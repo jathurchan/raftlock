@@ -26,7 +26,7 @@ The `lock` package is architected around the central `lockManager`, which implem
 ```mermaid
 graph TD
     %% Client Request Flow
-    CLIENT[Client Request] --> APILAYER[Service API (e.g., gRPC)]
+    CLIENT[Client Request] --> APILAYER[Service API]
     APILAYER --> LOCK_API[LockManager API]
     
     %% LockManager Interaction with Raft
@@ -47,7 +47,7 @@ graph TD
         LM_CORE --> LS[Lock States]
         LM_CORE --> WQ[Waiter Queues]
         LM_CORE --> EH[Expiration Heap]
-        LM_CORE --> CACHE[Lock Cache (Optional)]
+        LM_CORE --> CACHE[Lock Cache - Optional]
     end
 
     %% Data Structures
