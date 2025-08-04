@@ -5,6 +5,7 @@
 [![codecov](https://codecov.io/gh/jathurchan/raftlock/graph/badge.svg?token=RW0H2MKNMV)](https://codecov.io/gh/jathurchan/raftlock)
 [![Lint](https://github.com/jathurchan/raftlock/actions/workflows/lint.yml/badge.svg)](https://github.com/jathurchan/raftlock/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jathurchan/raftlock)](https://goreportcard.com/report/github.com/jathurchan/raftlock)
 
 `raftlock` is a fault-tolerant distributed lock service for coordinating distributed applications. It is written in Go and is designed to be a reliable and highly available solution for managing distributed locks.
 
