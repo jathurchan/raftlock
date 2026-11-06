@@ -70,7 +70,11 @@ This is the recommended way to run `raftlock`. We use `docker-compose` to easily
 
 ### Building from Source
 
-If you prefer to build from the source code:
+If you prefer to build directly from the source code without Docker:
+
+**Prerequisites:**
+- **Go**: 1.23 or higher
+- **Protocol Buffers**: `protoc` compiler and Go plugins
 
 1. **Clone the repository:**
 
@@ -79,17 +83,37 @@ If you prefer to build from the source code:
     cd raftlock
     ```
 
-2. **Build the binary:**
+2. **Install Protobuf compiler and Go plugins:**
+    - Install `protoc`:
+      - **macOS**: `brew install protobuf`
+      - **Linux (Ubuntu/Debian)**: `sudo apt-get install -y protobuf-compiler`
+    - Install the Go protobuf plugins:
+      ```bash
+      go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.5
+      go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+      ```
+      Make sure `$(go env GOPATH)/bin` is in your system's `PATH`.
+
+3. **Generate Protobuf files:**
 
     ```bash
-    go build
+    protoc --proto_path=. \
+      --go_out=. --go_opt=paths=source_relative \
+      --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+      proto/raftlock.proto raft/proto/raft.proto
     ```
 
-3. **Run a server node:**
+4. **Build the binary:**
+
+    ```bash
+    go build -o ./bin/raftlock ./cmd/server
+    ```
+
+5. **Run a server node:**
     You'll need to run multiple instances on different ports to form a cluster. See the **Configuration** section for more details.
 
     ```bash
-    ./raftlock --id node1 --api-addr ":8080" --raft-addr ":12379" --raft-bootstrap
+    ./bin/raftlock --node-id node1 --listen "0.0.0.0:8081" --client-api-listen "0.0.0.0:8080" --peers "node1=localhost:8081,node2=localhost:8082,node3=localhost:8083" --data-dir "./data/node1"
     ```
 
 ## Example: Distributed Payment 💳

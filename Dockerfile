@@ -7,7 +7,17 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     make \
+    protobuf \
+    protobuf-dev \
     && update-ca-certificates
+
+# Protobuf plugin versions pinned to match go.mod dependencies
+ARG PROTOC_GEN_GO_VERSION=v1.36.5
+ARG PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
+
+# Install protobuf compiler plugins for Go
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
 
 # Configure Go environment
 ENV GO111MODULE=on \
@@ -26,6 +36,12 @@ RUN go mod download && go mod verify
 
 # Copy source code
 COPY . .
+
+# Generate protobuf Go code
+RUN protoc --proto_path=. --proto_path=/usr/include \
+    --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    proto/raftlock.proto raft/proto/raft.proto
 
 # Build the application with optimizations
 RUN go build \
